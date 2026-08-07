@@ -78,6 +78,11 @@ static GLuint sEyeFramebuffer = 0;
 static bool sViewPoseValid = false;
 static uint32_t sPoseLogFrame = 0;
 static uint32_t sSwapchainLogFrame = 0;
+static XrTime sFrameDisplayTime = 0;
+static bool sFrameBegun = false;
+static bool sFrameShouldRender = false;
+static bool sFrameViewsLocated = false;
+static bool sFrameTimingLogged = false;
 static struct VrOpenXrFunctions sXr = { 0 };
 
 static const char* vr_openxr_result_name(XrResult result) {
@@ -1472,7 +1477,20 @@ static void vr_openxr_log_swapchain_cycle(
     }
 }
 
-static bool vr_openxr_submit_frame(void) {
+bool vr_openxr_begin_frame(void) {
+    if (sSession == XR_NULL_HANDLE) {
+        return true;
+    }
+
+    if (sFrameBegun) {
+        printf("[VR] Tried to begin a new OpenXR frame before ending the previous frame.\n");
+        return false;
+    }
+
+    if (!vr_openxr_poll_events()) {
+        return false;
+    }
+
     if (!sSessionRunning) {
         return true;
     }
@@ -1498,8 +1516,7 @@ static bool vr_openxr_submit_frame(void) {
     XrFrameBeginInfo beginInfo = { 0 };
     beginInfo.type = XR_TYPE_FRAME_BEGIN_INFO;
 
-    result =
-        sXr.xrBeginFrame(sSession, &beginInfo);
+    result = sXr.xrBeginFrame(sSession, &beginInfo);
 
     if (XR_FAILED(result)) {
         printf(
@@ -1510,15 +1527,37 @@ static bool vr_openxr_submit_frame(void) {
         return false;
     }
 
-    bool viewsLocated =
-        vr_openxr_locate_views(frameState.predictedDisplayTime);
-    bool canSubmitProjection =
-        frameState.shouldRender &&
+    sFrameBegun = true;
+    sFrameDisplayTime = frameState.predictedDisplayTime;
+    sFrameShouldRender = frameState.shouldRender;
+    sFrameViewsLocated =
+        vr_openxr_locate_views(sFrameDisplayTime);
+
+    if (!sFrameTimingLogged &&
+        sFrameViewsLocated &&
+        sViewPoseValid) {
+        printf(
+            "[VR] Predicted headset pose synchronized "
+            "before game rendering.\n"
+        );
+        sFrameTimingLogged = true;
+    }
+
+    return true;
+}
+
+bool vr_openxr_end_frame(void) {
+    if (!sFrameBegun) {
+        return true;
+    }
+
+    const bool viewsLocated = sFrameViewsLocated;
+    const bool canSubmitProjection =
+        sFrameShouldRender &&
         viewsLocated &&
         sViewPoseValid;
     bool imagesRendered = true;
     uint32_t imageIndices[2] = { 0 };
-
 
     if (canSubmitProjection) {
         for (uint32_t eye = 0; eye < 2; eye++) {
@@ -1569,13 +1608,17 @@ static bool vr_openxr_submit_frame(void) {
 
     XrFrameEndInfo endInfo = { 0 };
     endInfo.type = XR_TYPE_FRAME_END_INFO;
-    endInfo.displayTime = frameState.predictedDisplayTime;
+    endInfo.displayTime = sFrameDisplayTime;
     endInfo.environmentBlendMode = sEnvironmentBlendMode;
     endInfo.layerCount = layerCount;
     endInfo.layers = layerCount > 0 ? layers : NULL;
 
-    result =
-        sXr.xrEndFrame(sSession, &endInfo);
+    XrResult result = sXr.xrEndFrame(sSession, &endInfo);
+
+    sFrameBegun = false;
+    sFrameDisplayTime = 0;
+    sFrameShouldRender = false;
+    sFrameViewsLocated = false;
 
     if (XR_FAILED(result)) {
         printf(
@@ -1587,22 +1630,6 @@ static bool vr_openxr_submit_frame(void) {
     }
 
     return viewsLocated && imagesRendered;
-}
-
-bool vr_openxr_update(void) {
-    if (sSession == XR_NULL_HANDLE) {
-        return true;
-    }
-
-    if (!vr_openxr_poll_events()) {
-        return false;
-    }
-
-    if (!vr_openxr_submit_frame()) {
-        return false;
-    }
-
-    return true;
 }
 
 void vr_openxr_shutdown(void) {
@@ -1633,6 +1660,11 @@ void vr_openxr_shutdown(void) {
     sViewPoseValid = false;
     sPoseLogFrame = 0;
     sSwapchainLogFrame = 0;
+    sFrameDisplayTime = 0;
+    sFrameBegun = false;
+    sFrameShouldRender = false;
+    sFrameViewsLocated = false;
+    sFrameTimingLogged = false;
 
     if (sSession != XR_NULL_HANDLE &&
         sXr.xrDestroySession != NULL) {
@@ -1690,7 +1722,11 @@ bool vr_openxr_create_session(void) {
     return false;
 }
 
-bool vr_openxr_update(void) {
+bool vr_openxr_begin_frame(void) {
+    return false;
+}
+
+bool vr_openxr_end_frame(void) {
     return false;
 }
 

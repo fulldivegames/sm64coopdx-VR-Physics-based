@@ -4,7 +4,8 @@
 
 bool vr_openxr_startup(void);
 bool vr_openxr_create_session(void);
-bool vr_openxr_update(void);
+bool vr_openxr_begin_frame(void);
+bool vr_openxr_end_frame(void);
 
 void vr_openxr_shutdown(void);
 

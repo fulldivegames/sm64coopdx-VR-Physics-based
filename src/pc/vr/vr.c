@@ -59,22 +59,35 @@ void vr_on_graphics_ready(void) {
     }
 }
 
-void vr_update(void) {
+static void vr_handle_openxr_failure(void) {
+    printf(
+        "[VR] OpenXR stopped unexpectedly. "
+        "Returning to flat mode.\n"
+    );
+
+    vr_openxr_shutdown();
+    sVrActive = false;
+
+    printf("[VR] VR mode state: OFF\n");
+}
+
+void vr_begin_frame(void) {
     if (!sVrActive) {
         return;
     }
 
-    if (!vr_openxr_update()) {
-        printf(
-            "[VR] OpenXR stopped unexpectedly. "
-            "Returning to flat mode.\n"
-        );
+    if (!vr_openxr_begin_frame()) {
+        vr_handle_openxr_failure();
+    }
+}
 
-        vr_openxr_shutdown();
+void vr_end_frame(void) {
+    if (!sVrActive) {
+        return;
+    }
 
-        sVrActive = false;
-
-        printf("[VR] VR mode state: OFF\n");
+    if (!vr_openxr_end_frame()) {
+        vr_handle_openxr_failure();
     }
 }
 

@@ -292,10 +292,11 @@ void produce_interpolation_frames_and_delay(void) {
         gRenderingDelta = delta;
 
         gfx_start_frame();
+        vr_begin_frame();
         if (!gSkipInterpolationTitleScreen) { patch_interpolations(delta); }
         send_display_list(gGfxSPTask);
         gfx_end_frame_render();
-        vr_update();
+        vr_end_frame();
         gfx_display_frame();
 
         // delay if our framerate is capped
