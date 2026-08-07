@@ -870,7 +870,12 @@ static void geo_process_perspective(struct GraphNodePerspective *node) {
  */
 static void geo_process_level_of_detail(struct GraphNodeLevelOfDetail *node) {
     Mtx *mtx = gMatStackFixed[gMatStackIndex];
-    f32 distanceFromCam = gBehaviorValues.ProcessLODs ? (s32) -mtx->m[3][2] : 0; // z-component of the translation column
+    // The desktop camera does not describe the direction the player is looking
+    // in VR. Select the zero-distance (highest-detail) branch while VR is active.
+    f32 distanceFromCam =
+        (!vr_is_active() && gBehaviorValues.ProcessLODs)
+            ? (s32) -mtx->m[3][2]
+            : 0; // z-component of the translation column
 
     if ((f32)node->minDistance <= distanceFromCam && distanceFromCam < (f32)node->maxDistance) {
         if (node->node.children != 0) {
@@ -1621,6 +1626,17 @@ static s32 obj_is_in_view(struct GraphNodeObject *node, Mat4 matrix) {
         return FALSE;
     } else if (node->skipInViewCheck) {
         return TRUE;
+    }
+
+    if (vr_is_active()) {
+        // Display lists are built against the desktop camera before the HMD
+        // rotation is applied. Keep objects in every look direction, while
+        // retaining a conservative bound that avoids fixed-point overflow.
+        const f32 x = matrix[3][0];
+        const f32 y = matrix[3][1];
+        const f32 z = matrix[3][2];
+        const f32 safeDistance = 60000.0f;
+        return x * x + y * y + z * z < safeDistance * safeDistance;
     }
 
     // ! @bug The aspect ratio is not accounted for. When the fov value is 45,

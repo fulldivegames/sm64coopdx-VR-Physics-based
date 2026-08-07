@@ -1191,25 +1191,23 @@ static void vr_openxr_blit_game_frame(
 ) {
     const int sourceWidth = sourceViewport[2];
     const int sourceHeight = sourceViewport[3];
-    int destinationX = 0;
-    int destinationY = 0;
-    int destinationWidth = (int)swapchain->width;
-    int destinationHeight = (int)swapchain->height;
+    int sourceX = sourceViewport[0];
+    int sourceY = sourceViewport[1];
+    int croppedSourceWidth = sourceWidth;
+    int croppedSourceHeight = sourceHeight;
     const float sourceAspect =
         (float)sourceWidth / (float)sourceHeight;
     const float destinationAspect =
-        (float)destinationWidth / (float)destinationHeight;
+        (float)swapchain->width / (float)swapchain->height;
 
     if (sourceAspect > destinationAspect) {
-        destinationHeight =
-            (int)((float)destinationWidth / sourceAspect);
-        destinationY =
-            ((int)swapchain->height - destinationHeight) / 2;
+        croppedSourceWidth =
+            (int)((float)sourceHeight * destinationAspect);
+        sourceX += (sourceWidth - croppedSourceWidth) / 2;
     } else {
-        destinationWidth =
-            (int)((float)destinationHeight * sourceAspect);
-        destinationX =
-            ((int)swapchain->width - destinationWidth) / 2;
+        croppedSourceHeight =
+            (int)((float)sourceWidth / destinationAspect);
+        sourceY += (sourceHeight - croppedSourceHeight) / 2;
     }
 
     glViewport(
@@ -1223,14 +1221,14 @@ static void vr_openxr_blit_game_frame(
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     glBlitFramebuffer(
-        sourceViewport[0],
-        sourceViewport[1],
-        sourceViewport[0] + sourceWidth,
-        sourceViewport[1] + sourceHeight,
-        destinationX,
-        destinationY,
-        destinationX + destinationWidth,
-        destinationY + destinationHeight,
+        sourceX,
+        sourceY,
+        sourceX + croppedSourceWidth,
+        sourceY + croppedSourceHeight,
+        0,
+        0,
+        (GLint)swapchain->width,
+        (GLint)swapchain->height,
         GL_COLOR_BUFFER_BIT,
         GL_LINEAR
     );
