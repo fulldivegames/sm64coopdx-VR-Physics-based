@@ -83,6 +83,8 @@ static int32_t sActiveRenderEye = -1;
 static GLint sPreviousDrawFramebuffer = 0;
 static GLint sPreviousReadFramebuffer = 0;
 static bool sDirectRenderingLogged = false;
+static bool sStereoEyeOffsetsLogged = false;
+static bool sAsymmetricProjectionLogged = false;
 
 static bool sViewPoseValid = false;
 static uint32_t sPoseLogFrame = 0;
@@ -1969,6 +1971,114 @@ bool vr_openxr_end_frame(void) {
     return viewsLocated && imagesRendered;
 }
 
+bool vr_openxr_get_eye_offset(
+    uint32_t eyeIndex,
+    float offset[3]
+) {
+    if (eyeIndex >= 2 ||
+        offset == NULL ||
+        !sFrameViewsLocated ||
+        !sViewPoseValid) {
+        return false;
+    }
+
+    const XrVector3f center = {
+        (sViews[0].pose.position.x +
+         sViews[1].pose.position.x) * 0.5f,
+        (sViews[0].pose.position.y +
+         sViews[1].pose.position.y) * 0.5f,
+        (sViews[0].pose.position.z +
+         sViews[1].pose.position.z) * 0.5f
+    };
+    const XrVector3f delta = {
+        sViews[eyeIndex].pose.position.x - center.x,
+        sViews[eyeIndex].pose.position.y - center.y,
+        sViews[eyeIndex].pose.position.z - center.z
+    };
+    const XrQuaternionf orientationInverse = {
+        -sViews[0].pose.orientation.x,
+        -sViews[0].pose.orientation.y,
+        -sViews[0].pose.orientation.z,
+        sViews[0].pose.orientation.w
+    };
+    const float twiceCrossX = 2.0f * (
+        orientationInverse.y * delta.z -
+        orientationInverse.z * delta.y
+    );
+    const float twiceCrossY = 2.0f * (
+        orientationInverse.z * delta.x -
+        orientationInverse.x * delta.z
+    );
+    const float twiceCrossZ = 2.0f * (
+        orientationInverse.x * delta.y -
+        orientationInverse.y * delta.x
+    );
+
+    offset[0] = delta.x +
+        orientationInverse.w * twiceCrossX +
+        orientationInverse.y * twiceCrossZ -
+        orientationInverse.z * twiceCrossY;
+    offset[1] = delta.y +
+        orientationInverse.w * twiceCrossY +
+        orientationInverse.z * twiceCrossX -
+        orientationInverse.x * twiceCrossZ;
+    offset[2] = delta.z +
+        orientationInverse.w * twiceCrossZ +
+        orientationInverse.x * twiceCrossY -
+        orientationInverse.y * twiceCrossX;
+
+    if (eyeIndex == 1 && !sStereoEyeOffsetsLogged) {
+        const float eyeDistanceX =
+            sViews[1].pose.position.x -
+            sViews[0].pose.position.x;
+        const float eyeDistanceY =
+            sViews[1].pose.position.y -
+            sViews[0].pose.position.y;
+        const float eyeDistanceZ =
+            sViews[1].pose.position.z -
+            sViews[0].pose.position.z;
+        const float ipdMillimeters = 1000.0f * sqrtf(
+            eyeDistanceX * eyeDistanceX +
+            eyeDistanceY * eyeDistanceY +
+            eyeDistanceZ * eyeDistanceZ
+        );
+
+        printf(
+            "[VR] Runtime stereo eye separation active "
+            "(IPD %.1f mm).\n",
+            ipdMillimeters
+        );
+        sStereoEyeOffsetsLogged = true;
+    }
+
+    return true;
+}
+
+bool vr_openxr_get_eye_fov(
+    uint32_t eyeIndex,
+    float fov[4]
+) {
+    if (eyeIndex >= 2 ||
+        fov == NULL ||
+        !sFrameViewsLocated ||
+        !sViewPoseValid) {
+        return false;
+    }
+
+    fov[0] = sViews[eyeIndex].fov.angleLeft;
+    fov[1] = sViews[eyeIndex].fov.angleRight;
+    fov[2] = sViews[eyeIndex].fov.angleDown;
+    fov[3] = sViews[eyeIndex].fov.angleUp;
+
+    if (eyeIndex == 1 && !sAsymmetricProjectionLogged) {
+        printf(
+            "[VR] Runtime asymmetric eye projections active.\n"
+        );
+        sAsymmetricProjectionLogged = true;
+    }
+
+    return true;
+}
 bool vr_openxr_get_head_rotation(float rotation[4]) {
     if (rotation == NULL ||
         !sHeadOrientationReferenceValid ||
@@ -2126,6 +2236,8 @@ void vr_openxr_shutdown(void) {
     sPreviousDrawFramebuffer = 0;
     sPreviousReadFramebuffer = 0;
     sDirectRenderingLogged = false;
+    sStereoEyeOffsetsLogged = false;
+    sAsymmetricProjectionLogged = false;
     memset(
         &sHeadOrientationReference,
         0,
@@ -2218,6 +2330,23 @@ bool vr_openxr_end_eye(uint32_t eyeIndex) {
     return false;
 }
 
+bool vr_openxr_get_eye_offset(
+    uint32_t eyeIndex,
+    float offset[3]
+) {
+    (void)eyeIndex;
+    (void)offset;
+    return false;
+}
+
+bool vr_openxr_get_eye_fov(
+    uint32_t eyeIndex,
+    float fov[4]
+) {
+    (void)eyeIndex;
+    (void)fov;
+    return false;
+}
 bool vr_openxr_get_head_rotation(float rotation[4]) {
     (void)rotation;
     return false;

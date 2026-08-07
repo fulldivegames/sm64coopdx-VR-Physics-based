@@ -143,7 +143,10 @@ extern void patch_djui_hud_before(void);
 extern void patch_scroll_targets_before(void);
 
 extern void patch_mtx_interpolated(f32 delta);
-extern void patch_mtx_vr_projection(f32 delta);
+extern void patch_mtx_vr_projection(
+    f32 delta,
+    uint32_t eyeIndex
+);
 extern void patch_screen_transition_interpolated(f32 delta);
 extern void patch_title_screen_interpolated(f32 delta);
 extern void patch_dialog_interpolated(f32 delta);
@@ -324,7 +327,7 @@ void produce_interpolation_frames_and_delay(void) {
             gfx_current_dimensions.x_adjust_4by3 = 0;
 
             if (!gSkipInterpolationTitleScreen) {
-                patch_mtx_vr_projection(delta);
+                patch_mtx_vr_projection(delta, eye);
             }
 
             send_display_list(gGfxSPTask);
@@ -336,7 +339,7 @@ void produce_interpolation_frames_and_delay(void) {
 
         if (renderedVrEye &&
             !gSkipInterpolationTitleScreen) {
-            patch_mtx_vr_projection(delta);
+            patch_mtx_vr_projection(delta, 2);
         }
 
         send_display_list(gGfxSPTask);

@@ -507,7 +507,10 @@ void patch_mtx_before(void) {
     }
 }
 
-static void patch_mtx_perspective(f32 delta) {
+static void patch_mtx_perspective(
+    f32 delta,
+    uint32_t eyeIndex
+) {
     if (sPerspectiveNode == NULL) {
         return;
     }
@@ -552,14 +555,74 @@ static void patch_mtx_perspective(f32 delta) {
         far,
         1.0f
     );
+
+    float eyeFov[4] = { 0 };
+
+    if (vr_get_eye_fov(eyeIndex, eyeFov)) {
+        const float tanLeft = tanf(eyeFov[0]);
+        const float tanRight = tanf(eyeFov[1]);
+        const float tanDown = tanf(eyeFov[2]);
+        const float tanUp = tanf(eyeFov[3]);
+        const float tanWidth = tanRight - tanLeft;
+        const float tanHeight = tanUp - tanDown;
+
+        if (tanWidth > 0.000001f &&
+            tanHeight > 0.000001f) {
+            guMtxIdentF(sPerspectiveMtx->m);
+            sPerspectiveMtx->m[0][0] =
+                2.0f / tanWidth;
+            sPerspectiveMtx->m[1][1] =
+                2.0f / tanHeight;
+            sPerspectiveMtx->m[2][0] =
+                (tanRight + tanLeft) / tanWidth;
+            sPerspectiveMtx->m[2][1] =
+                (tanUp + tanDown) / tanHeight;
+            sPerspectiveMtx->m[2][2] =
+                (near + far) / (near - far);
+            sPerspectiveMtx->m[2][3] = -1.0f;
+            sPerspectiveMtx->m[3][2] =
+                2.0f * near * far / (near - far);
+            sPerspectiveMtx->m[3][3] = 0.0f;
+        }
+    }
+
+    const float worldUnitsPerMeter = 100.0f;
+    float eyeOffset[3] = { 0 };
+
+    if (vr_get_eye_offset(eyeIndex, eyeOffset)) {
+        Mat4 centerProjection;
+        mtxf_copy(
+            centerProjection,
+            sPerspectiveMtx->m
+        );
+        const float eyeTranslation[3] = {
+            -eyeOffset[0] * worldUnitsPerMeter,
+            -eyeOffset[1] * worldUnitsPerMeter,
+            -eyeOffset[2] * worldUnitsPerMeter
+        };
+
+        for (int column = 0; column < 4; column++) {
+            sPerspectiveMtx->m[3][column] =
+                eyeTranslation[0] *
+                    centerProjection[0][column] +
+                eyeTranslation[1] *
+                    centerProjection[1][column] +
+                eyeTranslation[2] *
+                    centerProjection[2][column] +
+                centerProjection[3][column];
+        }
+    }
 }
 
-void patch_mtx_vr_projection(f32 delta) {
-    patch_mtx_perspective(delta);
+void patch_mtx_vr_projection(
+    f32 delta,
+    uint32_t eyeIndex
+) {
+    patch_mtx_perspective(delta, eyeIndex);
 }
 
 void patch_mtx_interpolated(f32 delta) {
-    patch_mtx_perspective(delta);
+    patch_mtx_perspective(delta, 2);
 
     if (sViewportClipPos != NULL) {
         delta_interpolate_vec3s(sViewportInterp.vp.vtrans, sViewportPrev.vp.vtrans, sViewport->vp.vtrans, delta);

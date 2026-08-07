@@ -129,6 +129,22 @@ bool vr_get_render_target_aspect(float* aspect) {
     return true;
 }
 
+bool vr_get_eye_offset(uint32_t eyeIndex, float offset[3]) {
+    if (!sVrActive || offset == NULL) {
+        return false;
+    }
+
+    return vr_openxr_get_eye_offset(eyeIndex, offset);
+}
+
+bool vr_get_eye_fov(uint32_t eyeIndex, float fov[4]) {
+    if (!sVrActive || fov == NULL) {
+        return false;
+    }
+
+    return vr_openxr_get_eye_fov(eyeIndex, fov);
+}
+
 bool vr_get_head_rotation(float rotation[4]) {
     if (!sVrActive || rotation == NULL) {
         return false;
