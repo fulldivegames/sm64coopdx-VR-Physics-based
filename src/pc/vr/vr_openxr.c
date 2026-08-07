@@ -14,6 +14,9 @@
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 
+#define VR_GL_RGBA8 0x8058
+#define VR_GL_SRGB8_ALPHA8 0x8C43
+
 struct VrOpenXrFunctions {
     PFN_xrGetInstanceProcAddr xrGetInstanceProcAddr;
     PFN_xrEnumerateInstanceExtensionProperties xrEnumerateInstanceExtensionProperties;
@@ -36,6 +39,18 @@ struct VrOpenXrFunctions {
     PFN_xrDestroySpace xrDestroySpace;
     PFN_xrLocateViews xrLocateViews;
     PFN_xrEnumerateViewConfigurationViews xrEnumerateViewConfigurationViews;
+    PFN_xrEnumerateSwapchainFormats xrEnumerateSwapchainFormats;
+    PFN_xrCreateSwapchain xrCreateSwapchain;
+    PFN_xrDestroySwapchain xrDestroySwapchain;
+    PFN_xrEnumerateSwapchainImages xrEnumerateSwapchainImages;
+};
+
+struct VrOpenXrSwapchain {
+    XrSwapchain handle;
+    XrSwapchainImageOpenGLKHR* images;
+    uint32_t imageCount;
+    uint32_t width;
+    uint32_t height;
 };
 
 static HMODULE sLoader = NULL;
@@ -48,6 +63,8 @@ static bool sSessionRunning = false;
 static XrEnvironmentBlendMode sEnvironmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
 static XrView sViews[2] = { 0 };
 static XrViewConfigurationView sViewConfigurationViews[2] = { 0 };
+static struct VrOpenXrSwapchain sColorSwapchains[2] = { 0 };
+static int64_t sColorSwapchainFormat = 0;
 static bool sViewPoseValid = false;
 static uint32_t sPoseLogFrame = 0;
 static struct VrOpenXrFunctions sXr = { 0 };
@@ -65,6 +82,9 @@ static const char* vr_openxr_result_name(XrResult result) {
         case XR_ERROR_FUNCTION_UNSUPPORTED: return "XR_ERROR_FUNCTION_UNSUPPORTED";
         case XR_ERROR_GRAPHICS_DEVICE_INVALID: return "XR_ERROR_GRAPHICS_DEVICE_INVALID";
         case XR_ERROR_GRAPHICS_REQUIREMENTS_CALL_MISSING: return "XR_ERROR_GRAPHICS_REQUIREMENTS_CALL_MISSING";
+        case XR_ERROR_SIZE_INSUFFICIENT: return "XR_ERROR_SIZE_INSUFFICIENT";
+        case XR_ERROR_LIMIT_REACHED: return "XR_ERROR_LIMIT_REACHED";
+        case XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED: return "XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED";
         default: return "UNKNOWN_OPENXR_ERROR";
     }
 }
@@ -170,6 +190,10 @@ static bool vr_openxr_load_instance_functions(void) {
     LOAD_XR_FUNCTION(xrDestroySpace, "xrDestroySpace", PFN_xrDestroySpace);
     LOAD_XR_FUNCTION(xrLocateViews, "xrLocateViews", PFN_xrLocateViews);
     LOAD_XR_FUNCTION(xrEnumerateViewConfigurationViews, "xrEnumerateViewConfigurationViews", PFN_xrEnumerateViewConfigurationViews);
+    LOAD_XR_FUNCTION(xrEnumerateSwapchainFormats, "xrEnumerateSwapchainFormats", PFN_xrEnumerateSwapchainFormats);
+    LOAD_XR_FUNCTION(xrCreateSwapchain, "xrCreateSwapchain", PFN_xrCreateSwapchain);
+    LOAD_XR_FUNCTION(xrDestroySwapchain, "xrDestroySwapchain", PFN_xrDestroySwapchain);
+    LOAD_XR_FUNCTION(xrEnumerateSwapchainImages, "xrEnumerateSwapchainImages", PFN_xrEnumerateSwapchainImages);
 
 #undef LOAD_XR_FUNCTION
 
@@ -414,6 +438,273 @@ static bool vr_openxr_query_view_configuration(void) {
     return true;
 }
 
+static const char* vr_openxr_color_format_name(int64_t format) {
+    if (format == VR_GL_SRGB8_ALPHA8) {
+        return "GL_SRGB8_ALPHA8";
+    }
+
+    if (format == VR_GL_RGBA8) {
+        return "GL_RGBA8";
+    }
+
+    return "UNKNOWN_OPENGL_FORMAT";
+}
+
+static void vr_openxr_destroy_color_swapchains(void) {
+    bool hadSwapchain = false;
+
+    for (uint32_t i = 0; i < 2; i++) {
+        struct VrOpenXrSwapchain* swapchain =
+            &sColorSwapchains[i];
+
+        if (swapchain->handle != XR_NULL_HANDLE) {
+            hadSwapchain = true;
+
+            if (sXr.xrDestroySwapchain != NULL) {
+                sXr.xrDestroySwapchain(swapchain->handle);
+            }
+        }
+
+        free(swapchain->images);
+        memset(swapchain, 0, sizeof(*swapchain));
+    }
+
+    sColorSwapchainFormat = 0;
+
+    if (hadSwapchain) {
+        printf("[VR] OpenXR color swapchains destroyed.\n");
+    }
+}
+
+static bool vr_openxr_choose_color_swapchain_format(void) {
+    uint32_t formatCount = 0;
+
+    XrResult result =
+        sXr.xrEnumerateSwapchainFormats(
+            sSession,
+            0,
+            &formatCount,
+            NULL
+        );
+
+    if (XR_FAILED(result) || formatCount == 0) {
+        printf(
+            "[VR] Could not enumerate swapchain formats: %s (%d)\n",
+            vr_openxr_result_name(result),
+            (int)result
+        );
+        return false;
+    }
+
+    int64_t* formats = calloc(formatCount, sizeof(int64_t));
+
+    if (formats == NULL) {
+        printf("[VR] Could not allocate swapchain format list.\n");
+        return false;
+    }
+
+    result =
+        sXr.xrEnumerateSwapchainFormats(
+            sSession,
+            formatCount,
+            &formatCount,
+            formats
+        );
+
+    if (XR_FAILED(result)) {
+        printf(
+            "[VR] Could not read swapchain formats: %s (%d)\n",
+            vr_openxr_result_name(result),
+            (int)result
+        );
+        free(formats);
+        return false;
+    }
+
+    const int64_t preferredFormats[] = {
+        VR_GL_SRGB8_ALPHA8,
+        VR_GL_RGBA8
+    };
+
+    bool foundFormat = false;
+
+    for (uint32_t preferred = 0;
+         preferred < sizeof(preferredFormats) / sizeof(preferredFormats[0]);
+         preferred++) {
+        for (uint32_t available = 0;
+             available < formatCount;
+             available++) {
+            if (preferredFormats[preferred] == formats[available]) {
+                sColorSwapchainFormat = preferredFormats[preferred];
+                foundFormat = true;
+                break;
+            }
+        }
+
+        if (foundFormat) {
+            break;
+        }
+    }
+
+    free(formats);
+
+    if (!foundFormat) {
+        printf(
+            "[VR] Runtime supports neither GL_SRGB8_ALPHA8 "
+            "nor GL_RGBA8 swapchains.\n"
+        );
+        return false;
+    }
+
+    printf(
+        "[VR] OpenXR color format selected: %s (0x%llX).\n",
+        vr_openxr_color_format_name(sColorSwapchainFormat),
+        (unsigned long long)sColorSwapchainFormat
+    );
+
+    return true;
+}
+
+static bool vr_openxr_create_eye_color_swapchain(uint32_t eyeIndex) {
+    struct VrOpenXrSwapchain* swapchain =
+        &sColorSwapchains[eyeIndex];
+    const XrViewConfigurationView* view =
+        &sViewConfigurationViews[eyeIndex];
+    const char* eyeName = eyeIndex == 0 ? "left" : "right";
+
+    if (view->recommendedImageRectWidth == 0 ||
+        view->recommendedImageRectHeight == 0 ||
+        view->recommendedSwapchainSampleCount == 0) {
+        printf("[VR] %s eye reported an invalid target size.\n", eyeName);
+        return false;
+    }
+
+    XrSwapchainCreateInfo createInfo = { 0 };
+    createInfo.type = XR_TYPE_SWAPCHAIN_CREATE_INFO;
+    createInfo.createFlags = 0;
+    createInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
+    createInfo.format = sColorSwapchainFormat;
+    createInfo.sampleCount =
+        view->recommendedSwapchainSampleCount;
+    createInfo.width = view->recommendedImageRectWidth;
+    createInfo.height = view->recommendedImageRectHeight;
+    createInfo.faceCount = 1;
+    createInfo.arraySize = 1;
+    createInfo.mipCount = 1;
+
+    XrResult result =
+        sXr.xrCreateSwapchain(
+            sSession,
+            &createInfo,
+            &swapchain->handle
+        );
+
+    if (XR_FAILED(result)) {
+        printf(
+            "[VR] Could not create %s eye color swapchain: %s (%d)\n",
+            eyeName,
+            vr_openxr_result_name(result),
+            (int)result
+        );
+        swapchain->handle = XR_NULL_HANDLE;
+        return false;
+    }
+
+    swapchain->width = createInfo.width;
+    swapchain->height = createInfo.height;
+
+    uint32_t imageCount = 0;
+    result =
+        sXr.xrEnumerateSwapchainImages(
+            swapchain->handle,
+            0,
+            &imageCount,
+            NULL
+        );
+
+    if (XR_FAILED(result) || imageCount == 0) {
+        printf(
+            "[VR] Could not enumerate %s eye swapchain images: "
+            "%s (%d)\n",
+            eyeName,
+            vr_openxr_result_name(result),
+            (int)result
+        );
+        return false;
+    }
+
+    swapchain->images =
+        calloc(imageCount, sizeof(XrSwapchainImageOpenGLKHR));
+
+    if (swapchain->images == NULL) {
+        printf(
+            "[VR] Could not allocate %s eye swapchain image list.\n",
+            eyeName
+        );
+        return false;
+    }
+
+    for (uint32_t i = 0; i < imageCount; i++) {
+        swapchain->images[i].type =
+            XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR;
+        swapchain->images[i].next = NULL;
+    }
+
+    result =
+        sXr.xrEnumerateSwapchainImages(
+            swapchain->handle,
+            imageCount,
+            &swapchain->imageCount,
+            (XrSwapchainImageBaseHeader*)swapchain->images
+        );
+
+    if (XR_FAILED(result)) {
+        printf(
+            "[VR] Could not read %s eye swapchain images: %s (%d)\n",
+            eyeName,
+            vr_openxr_result_name(result),
+            (int)result
+        );
+        return false;
+    }
+
+    if (swapchain->imageCount == 0) {
+        printf(
+            "[VR] %s eye swapchain returned no OpenGL images.\n",
+            eyeName
+        );
+        return false;
+    }
+
+    printf(
+        "[VR] %s eye color swapchain: %ux%u at %u sample(s), "
+        "%u OpenGL image(s).\n",
+        eyeName,
+        swapchain->width,
+        swapchain->height,
+        view->recommendedSwapchainSampleCount,
+        swapchain->imageCount
+    );
+
+    return true;
+}
+
+static bool vr_openxr_create_color_swapchains(void) {
+    if (!vr_openxr_choose_color_swapchain_format()) {
+        return false;
+    }
+
+    for (uint32_t eye = 0; eye < 2; eye++) {
+        if (!vr_openxr_create_eye_color_swapchain(eye)) {
+            vr_openxr_destroy_color_swapchains();
+            return false;
+        }
+    }
+
+    printf("[VR] OpenXR stereo color swapchains are ready.\n");
+    return true;
+}
+
 bool vr_openxr_startup(void) {
     if (sInstance != XR_NULL_HANDLE) {
         return true;
@@ -625,6 +916,14 @@ bool vr_openxr_create_session(void) {
     sSessionRunning = false;
 
     if (!vr_openxr_create_view_space()) {
+        sXr.xrDestroySession(sSession);
+        sSession = XR_NULL_HANDLE;
+        return false;
+    }
+
+    if (!vr_openxr_create_color_swapchains()) {
+        sXr.xrDestroySpace(sViewSpace);
+        sViewSpace = XR_NULL_HANDLE;
         sXr.xrDestroySession(sSession);
         sSession = XR_NULL_HANDLE;
         return false;
@@ -932,10 +1231,14 @@ bool vr_openxr_update(void) {
 
 void vr_openxr_shutdown(void) {
     bool hadOpenXR =
+        sColorSwapchains[0].handle != XR_NULL_HANDLE ||
+        sColorSwapchains[1].handle != XR_NULL_HANDLE ||
         sViewSpace != XR_NULL_HANDLE ||
         sSession != XR_NULL_HANDLE ||
         sInstance != XR_NULL_HANDLE ||
         sLoader != NULL;
+
+    vr_openxr_destroy_color_swapchains();
 
     if (sViewSpace != XR_NULL_HANDLE &&
         sXr.xrDestroySpace != NULL) {
