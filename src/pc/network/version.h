@@ -28,7 +28,7 @@
 #define WINDOW_NAME "Super Mario 64 Coop Deluxe (INTL)"
 #else
 #define GAME_NAME "sm64coopdx"
-#define WINDOW_NAME "Super Mario 64 Coop Deluxe"
+#define WINDOW_NAME "Super Mario 64 Coop Deluxe - VR DEV"
 #endif
 
 #define MAX_VERSION_LENGTH 128

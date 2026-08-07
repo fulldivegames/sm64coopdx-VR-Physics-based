@@ -49,6 +49,7 @@
 #include "pc/debuglog.h"
 #include "pc/utils/misc.h"
 #include "pc/mods/mods.h"
+#include "pc/vr/vr.h"
 
 #include "debug_context.h"
 #include "menu/intro_geo.h"
@@ -457,6 +458,7 @@ void game_deinit(void) {
     smlua_shutdown();
     mods_shutdown();
     djui_shutdown();
+    vr_shutdown();
     gfx_shutdown();
     gGameInited = false;
 }
@@ -527,6 +529,8 @@ int main(int argc, char *argv[]) {
 #endif
 
     configfile_load();
+
+    vr_init();
 
     legacy_folder_handler();
 

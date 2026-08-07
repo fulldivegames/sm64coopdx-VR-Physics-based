@@ -59,6 +59,7 @@ extern ConfigStick configStick;
 extern enum GraphicsBackend configGraphicsBackend;
 extern unsigned int configFiltering;
 extern bool         configShowFPS;
+extern bool         configVrAutoStart;
 extern bool         configShowPing;
 extern enum RefreshRateMode configFramerateMode;
 extern unsigned int configFrameLimit;
