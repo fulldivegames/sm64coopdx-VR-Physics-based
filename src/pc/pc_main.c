@@ -295,6 +295,7 @@ void produce_interpolation_frames_and_delay(void) {
         if (!gSkipInterpolationTitleScreen) { patch_interpolations(delta); }
         send_display_list(gGfxSPTask);
         gfx_end_frame_render();
+        vr_update();
         gfx_display_frame();
 
         // delay if our framerate is capped
@@ -388,8 +389,6 @@ void produce_one_frame(void) {
     CTX_EXTENT(CTX_GAME_LOOP, game_loop_one_iteration);
 
     CTX_EXTENT(CTX_SMLUA, smlua_update);
-
-vr_update();
 
     // If we aren't threaded
     if (gAudioThread.state == INVALID) {

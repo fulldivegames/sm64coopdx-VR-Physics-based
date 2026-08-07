@@ -1,4 +1,3 @@
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -74,9 +73,8 @@ static XrView sViews[2] = { 0 };
 static XrViewConfigurationView sViewConfigurationViews[2] = { 0 };
 static struct VrOpenXrSwapchain sColorSwapchains[2] = { 0 };
 static int64_t sColorSwapchainFormat = 0;
-static GLuint sDiagnosticFramebuffer = 0;
-static XrPosef sDiagnosticOrigin = { 0 };
-static bool sDiagnosticOriginValid = false;
+static GLuint sEyeFramebuffer = 0;
+
 static bool sViewPoseValid = false;
 static uint32_t sPoseLogFrame = 0;
 static uint32_t sSwapchainLogFrame = 0;
@@ -468,15 +466,15 @@ static const char* vr_openxr_color_format_name(int64_t format) {
     return "UNKNOWN_OPENGL_FORMAT";
 }
 
-static void vr_openxr_destroy_diagnostic_framebuffer(void) {
-    if (sDiagnosticFramebuffer == 0) {
+static void vr_openxr_destroy_eye_framebuffer(void) {
+    if (sEyeFramebuffer == 0) {
         return;
     }
 
-    glDeleteFramebuffers(1, &sDiagnosticFramebuffer);
-    sDiagnosticFramebuffer = 0;
+    glDeleteFramebuffers(1, &sEyeFramebuffer);
+    sEyeFramebuffer = 0;
 
-    printf("[VR] Diagnostic OpenGL framebuffer destroyed.\n");
+    printf("[VR] OpenXR eye framebuffer destroyed.\n");
 }
 
 static void vr_openxr_destroy_color_swapchains(void) {
@@ -1179,208 +1177,33 @@ static bool vr_openxr_locate_views(XrTime displayTime) {
     return true;
 }
 
-static XrVector3f vr_openxr_rotate_vector(
-    XrQuaternionf rotation,
-    XrVector3f vector
-) {
-    XrVector3f quaternionVector = {
-        rotation.x,
-        rotation.y,
-        rotation.z
-    };
-    XrVector3f cross = {
-        quaternionVector.y * vector.z -
-            quaternionVector.z * vector.y,
-        quaternionVector.z * vector.x -
-            quaternionVector.x * vector.z,
-        quaternionVector.x * vector.y -
-            quaternionVector.y * vector.x
-    };
-    XrVector3f twiceCross = {
-        2.0f * cross.x,
-        2.0f * cross.y,
-        2.0f * cross.z
-    };
-    XrVector3f secondCross = {
-        quaternionVector.y * twiceCross.z -
-            quaternionVector.z * twiceCross.y,
-        quaternionVector.z * twiceCross.x -
-            quaternionVector.x * twiceCross.z,
-        quaternionVector.x * twiceCross.y -
-            quaternionVector.y * twiceCross.x
-    };
-    XrVector3f result = {
-        vector.x + rotation.w * twiceCross.x + secondCross.x,
-        vector.y + rotation.w * twiceCross.y + secondCross.y,
-        vector.z + rotation.w * twiceCross.z + secondCross.z
-    };
-
-    return result;
-}
-
-static void vr_openxr_capture_diagnostic_origin(void) {
-    sDiagnosticOrigin.position.x =
-        (sViews[0].pose.position.x + sViews[1].pose.position.x) *
-        0.5f;
-    sDiagnosticOrigin.position.y =
-        (sViews[0].pose.position.y + sViews[1].pose.position.y) *
-        0.5f;
-    sDiagnosticOrigin.position.z =
-        (sViews[0].pose.position.z + sViews[1].pose.position.z) *
-        0.5f;
-    sDiagnosticOrigin.orientation = sViews[0].pose.orientation;
-    sDiagnosticOriginValid = true;
-
-    printf(
-        "[VR] World-locked calibration origin captured at "
-        "(%.3f, %.3f, %.3f).\n",
-        sDiagnosticOrigin.position.x,
-        sDiagnosticOrigin.position.y,
-        sDiagnosticOrigin.position.z
-    );
-}
-
-static bool vr_openxr_project_diagnostic_point(
-    uint32_t eyeIndex,
-    XrVector3f originLocalPoint,
-    float* horizontal,
-    float* vertical
-) {
-    if (!sDiagnosticOriginValid) {
-        return false;
-    }
-
-    XrVector3f originOffset =
-        vr_openxr_rotate_vector(
-            sDiagnosticOrigin.orientation,
-            originLocalPoint
-        );
-    XrVector3f eyeRelativePoint = {
-        sDiagnosticOrigin.position.x + originOffset.x -
-            sViews[eyeIndex].pose.position.x,
-        sDiagnosticOrigin.position.y + originOffset.y -
-            sViews[eyeIndex].pose.position.y,
-        sDiagnosticOrigin.position.z + originOffset.z -
-            sViews[eyeIndex].pose.position.z
-    };
-    XrQuaternionf inverseEyeOrientation = {
-        -sViews[eyeIndex].pose.orientation.x,
-        -sViews[eyeIndex].pose.orientation.y,
-        -sViews[eyeIndex].pose.orientation.z,
-        sViews[eyeIndex].pose.orientation.w
-    };
-    XrVector3f viewPoint =
-        vr_openxr_rotate_vector(
-            inverseEyeOrientation,
-            eyeRelativePoint
-        );
-
-    if (viewPoint.z >= -0.05f) {
-        return false;
-    }
-
-    const float tanLeft = tanf(sViews[eyeIndex].fov.angleLeft);
-    const float tanRight = tanf(sViews[eyeIndex].fov.angleRight);
-    const float tanDown = tanf(sViews[eyeIndex].fov.angleDown);
-    const float tanUp = tanf(sViews[eyeIndex].fov.angleUp);
-    const float horizontalRange = tanRight - tanLeft;
-    const float verticalRange = tanUp - tanDown;
-
-    if (horizontalRange <= 0.0f || verticalRange <= 0.0f) {
-        return false;
-    }
-
-    const float depth = -viewPoint.z;
-    const float horizontalSlope = viewPoint.x / depth;
-    const float verticalSlope = viewPoint.y / depth;
-
-    *horizontal =
-        (horizontalSlope - tanLeft) / horizontalRange;
-    *vertical =
-        (verticalSlope - tanDown) / verticalRange;
-
-    return *horizontal >= 0.0f &&
-           *horizontal <= 1.0f &&
-           *vertical >= 0.0f &&
-           *vertical <= 1.0f;
-}
-
-static void vr_openxr_draw_diagnostic_marker(
+static void vr_openxr_blit_game_frame(
     const struct VrOpenXrSwapchain* swapchain,
-    float horizontal,
-    float vertical,
-    int markerSize,
-    GLfloat red,
-    GLfloat green,
-    GLfloat blue
+    const GLint sourceViewport[4]
 ) {
-    int centerX = (int)(horizontal * (float)swapchain->width);
-    int centerY = (int)(vertical * (float)swapchain->height);
-    int x = centerX - markerSize / 2;
-    int y = centerY - markerSize / 2;
-    int width = markerSize;
-    int height = markerSize;
+    const int sourceWidth = sourceViewport[2];
+    const int sourceHeight = sourceViewport[3];
+    int destinationX = 0;
+    int destinationY = 0;
+    int destinationWidth = (int)swapchain->width;
+    int destinationHeight = (int)swapchain->height;
+    const float sourceAspect =
+        (float)sourceWidth / (float)sourceHeight;
+    const float destinationAspect =
+        (float)destinationWidth / (float)destinationHeight;
 
-    if (x < 0) {
-        width += x;
-        x = 0;
-    }
-    if (y < 0) {
-        height += y;
-        y = 0;
-    }
-    if (x + width > (int)swapchain->width) {
-        width = (int)swapchain->width - x;
-    }
-    if (y + height > (int)swapchain->height) {
-        height = (int)swapchain->height - y;
-    }
-
-    if (width <= 0 || height <= 0) {
-        return;
+    if (sourceAspect > destinationAspect) {
+        destinationHeight =
+            (int)((float)destinationWidth / sourceAspect);
+        destinationY =
+            ((int)swapchain->height - destinationHeight) / 2;
+    } else {
+        destinationWidth =
+            (int)((float)destinationHeight * sourceAspect);
+        destinationX =
+            ((int)swapchain->width - destinationWidth) / 2;
     }
 
-    glScissor(x, y, width, height);
-    glClearColor(red, green, blue, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-}
-
-static void vr_openxr_draw_diagnostic_point(
-    uint32_t eyeIndex,
-    const struct VrOpenXrSwapchain* swapchain,
-    XrVector3f point,
-    int markerSize,
-    GLfloat red,
-    GLfloat green,
-    GLfloat blue
-) {
-    float horizontal = 0.0f;
-    float vertical = 0.0f;
-
-    if (!vr_openxr_project_diagnostic_point(
-            eyeIndex,
-            point,
-            &horizontal,
-            &vertical
-        )) {
-        return;
-    }
-
-    vr_openxr_draw_diagnostic_marker(
-        swapchain,
-        horizontal,
-        vertical,
-        markerSize,
-        red,
-        green,
-        blue
-    );
-}
-
-static void vr_openxr_draw_calibration_field(
-    uint32_t eyeIndex,
-    const struct VrOpenXrSwapchain* swapchain
-) {
     glViewport(
         0,
         0,
@@ -1389,108 +1212,24 @@ static void vr_openxr_draw_calibration_field(
     );
     glDisable(GL_SCISSOR_TEST);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    glClearColor(0.008f, 0.012f, 0.020f, 1.0f);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
-    glEnable(GL_SCISSOR_TEST);
-
-    int markerSize = (int)(swapchain->width / 150);
-    if (markerSize < 12) {
-        markerSize = 12;
-    }
-    if (markerSize > 32) {
-        markerSize = 32;
-    }
-
-    for (int row = -4; row <= 4; row++) {
-        for (int column = -6; column <= 6; column++) {
-            XrVector3f point = {
-                (float)column * 0.28f,
-                (float)row * 0.24f,
-                -2.5f
-            };
-            GLfloat red = 0.06f;
-            GLfloat green = 0.22f;
-            GLfloat blue = 0.18f;
-            int size = markerSize;
-
-            if (row == 0) {
-                red = 0.32f;
-                green = 0.07f;
-                blue = 0.04f;
-                size += 4;
-            }
-            if (column == 0) {
-                red = 0.05f;
-                green = 0.34f;
-                blue = 0.08f;
-                size += 4;
-            }
-            if (row == 0 && column == 0) {
-                red = 0.55f;
-                green = 0.42f;
-                blue = 0.04f;
-                size += 8;
-            }
-
-            vr_openxr_draw_diagnostic_point(
-                eyeIndex,
-                swapchain,
-                point,
-                size,
-                red,
-                green,
-                blue
-            );
-        }
-    }
-
-    for (int depthStep = 0; depthStep < 7; depthStep++) {
-        for (int column = -5; column <= 5; column++) {
-            XrVector3f point = {
-                (float)column * 0.35f,
-                -1.0f,
-                -0.8f - (float)depthStep * 0.5f
-            };
-
-            vr_openxr_draw_diagnostic_point(
-                eyeIndex,
-                swapchain,
-                point,
-                markerSize,
-                0.04f,
-                0.15f,
-                0.32f
-            );
-        }
-    }
-
-    static const XrVector3f nearPoints[3] = {
-        { -0.45f, 0.0f, -1.25f },
-        {  0.00f, 0.0f, -1.10f },
-        {  0.45f, 0.0f, -1.25f }
-    };
-    static const GLfloat nearColors[3][3] = {
-        { 0.55f, 0.06f, 0.04f },
-        { 0.58f, 0.48f, 0.05f },
-        { 0.04f, 0.16f, 0.55f }
-    };
-
-    for (uint32_t i = 0; i < 3; i++) {
-        vr_openxr_draw_diagnostic_point(
-            eyeIndex,
-            swapchain,
-            nearPoints[i],
-            markerSize * 3,
-            nearColors[i][0],
-            nearColors[i][1],
-            nearColors[i][2]
-        );
-    }
-
+    glBlitFramebuffer(
+        sourceViewport[0],
+        sourceViewport[1],
+        sourceViewport[0] + sourceWidth,
+        sourceViewport[1] + sourceHeight,
+        destinationX,
+        destinationY,
+        destinationX + destinationWidth,
+        destinationY + destinationHeight,
+        GL_COLOR_BUFFER_BIT,
+        GL_LINEAR
+    );
     glFlush();
 }
 
-static bool vr_openxr_render_diagnostic_eye(
+static bool vr_openxr_copy_game_frame_to_eye(
     uint32_t eyeIndex,
     uint32_t imageIndex
 ) {
@@ -1500,19 +1239,20 @@ static bool vr_openxr_render_diagnostic_eye(
     const XrViewConfigurationView* view =
         &sViewConfigurationViews[eyeIndex];
 
-    if (sDiagnosticFramebuffer == 0) {
-        glGenFramebuffers(1, &sDiagnosticFramebuffer);
+    if (sEyeFramebuffer == 0) {
+        glGenFramebuffers(1, &sEyeFramebuffer);
 
-        if (sDiagnosticFramebuffer == 0) {
-            printf("[VR] Could not create diagnostic framebuffer.\n");
+        if (sEyeFramebuffer == 0) {
+            printf("[VR] Could not create OpenXR eye framebuffer.\n");
             return false;
         }
 
-        printf("[VR] Diagnostic OpenGL framebuffer created.\n");
+        printf("[VR] OpenXR eye framebuffer created.\n");
     }
 
     GLint previousDrawFramebuffer = 0;
     GLint previousReadFramebuffer = 0;
+    GLint previousReadBuffer = 0;
     GLint previousViewport[4] = { 0 };
     GLint previousScissorBox[4] = { 0 };
     GLfloat previousClearColor[4] = { 0 };
@@ -1527,10 +1267,18 @@ static bool vr_openxr_render_diagnostic_eye(
         GL_READ_FRAMEBUFFER_BINDING,
         &previousReadFramebuffer
     );
+    glGetIntegerv(GL_READ_BUFFER, &previousReadBuffer);
     glGetIntegerv(GL_VIEWPORT, previousViewport);
     glGetIntegerv(GL_SCISSOR_BOX, previousScissorBox);
     glGetFloatv(GL_COLOR_CLEAR_VALUE, previousClearColor);
     glGetBooleanv(GL_COLOR_WRITEMASK, previousColorMask);
+
+    if (previousViewport[2] <= 0 || previousViewport[3] <= 0) {
+        printf(
+            "[VR] Cannot copy the game frame: invalid OpenGL viewport.\n"
+        );
+        return false;
+    }
 
     const GLenum textureTarget =
         view->recommendedSwapchainSampleCount > 1
@@ -1538,9 +1286,9 @@ static bool vr_openxr_render_diagnostic_eye(
             : GL_TEXTURE_2D;
     const GLuint texture = swapchain->images[imageIndex].image;
 
-    glBindFramebuffer(GL_FRAMEBUFFER, sDiagnosticFramebuffer);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, sEyeFramebuffer);
     glFramebufferTexture2D(
-        GL_FRAMEBUFFER,
+        GL_DRAW_FRAMEBUFFER,
         GL_COLOR_ATTACHMENT0,
         textureTarget,
         texture,
@@ -1549,22 +1297,25 @@ static bool vr_openxr_render_diagnostic_eye(
     glDrawBuffer(GL_COLOR_ATTACHMENT0);
 
     GLenum framebufferStatus =
-        glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
     bool rendered = framebufferStatus == GL_FRAMEBUFFER_COMPLETE;
 
     if (rendered) {
-        vr_openxr_draw_calibration_field(eyeIndex, swapchain);
+        if (previousReadFramebuffer == 0) {
+            glReadBuffer(GL_BACK);
+        }
+
+        vr_openxr_blit_game_frame(swapchain, previousViewport);
     } else {
         printf(
-            "[VR] %s eye diagnostic framebuffer is incomplete: "
-            "0x%X.\n",
+            "[VR] %s eye framebuffer is incomplete: 0x%X.\n",
             eyeName,
             (unsigned int)framebufferStatus
         );
     }
 
     glFramebufferTexture2D(
-        GL_FRAMEBUFFER,
+        GL_DRAW_FRAMEBUFFER,
         GL_COLOR_ATTACHMENT0,
         textureTarget,
         0,
@@ -1579,6 +1330,7 @@ static bool vr_openxr_render_diagnostic_eye(
         GL_READ_FRAMEBUFFER,
         (GLuint)previousReadFramebuffer
     );
+    glReadBuffer((GLenum)previousReadBuffer);
     glViewport(
         previousViewport[0],
         previousViewport[1],
@@ -1613,7 +1365,6 @@ static bool vr_openxr_render_diagnostic_eye(
 
     return rendered;
 }
-
 static bool vr_openxr_cycle_swapchain_image(
     uint32_t eyeIndex,
     uint32_t* imageIndex
@@ -1677,7 +1428,7 @@ static bool vr_openxr_cycle_swapchain_image(
 
     bool imageRendered =
         imageIndexValid &&
-        vr_openxr_render_diagnostic_eye(eyeIndex, *imageIndex);
+        vr_openxr_copy_game_frame_to_eye(eyeIndex, *imageIndex);
 
     XrSwapchainImageReleaseInfo releaseInfo = { 0 };
     releaseInfo.type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO;
@@ -1707,7 +1458,7 @@ static void vr_openxr_log_swapchain_cycle(
 ) {
     if (sSwapchainLogFrame == 0) {
         printf(
-            "[VR] Diagnostic stereo frame: left image %u, "
+            "[VR] Live game stereo frame: left image %u, "
             "right image %u.\n",
             imageIndices[0],
             imageIndices[1]
@@ -1768,9 +1519,6 @@ static bool vr_openxr_submit_frame(void) {
     bool imagesRendered = true;
     uint32_t imageIndices[2] = { 0 };
 
-    if (canSubmitProjection && !sDiagnosticOriginValid) {
-        vr_openxr_capture_diagnostic_origin();
-    }
 
     if (canSubmitProjection) {
         for (uint32_t eye = 0; eye < 2; eye++) {
@@ -1866,7 +1614,7 @@ void vr_openxr_shutdown(void) {
         sInstance != XR_NULL_HANDLE ||
         sLoader != NULL;
 
-    vr_openxr_destroy_diagnostic_framebuffer();
+    vr_openxr_destroy_eye_framebuffer();
     vr_openxr_destroy_color_swapchains();
 
     if (sViewSpace != XR_NULL_HANDLE &&
@@ -1881,8 +1629,7 @@ void vr_openxr_shutdown(void) {
         0,
         sizeof(sViewConfigurationViews)
     );
-    memset(&sDiagnosticOrigin, 0, sizeof(sDiagnosticOrigin));
-    sDiagnosticOriginValid = false;
+
     sViewPoseValid = false;
     sPoseLogFrame = 0;
     sSwapchainLogFrame = 0;
