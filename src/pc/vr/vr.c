@@ -91,6 +91,14 @@ void vr_end_frame(void) {
     }
 }
 
+bool vr_get_head_rotation(float rotation[4]) {
+    if (!sVrActive || rotation == NULL) {
+        return false;
+    }
+
+    return vr_openxr_get_head_rotation(rotation);
+}
+
 void vr_shutdown(void) {
     vr_openxr_shutdown();
 

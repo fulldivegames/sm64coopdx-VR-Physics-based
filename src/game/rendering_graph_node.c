@@ -1,3 +1,5 @@
+#include <math.h>
+
 #include <PR/ultratypes.h>
 
 #include "area.h"
@@ -14,6 +16,7 @@
 #include "sm64.h"
 #include "game/level_update.h"
 #include "pc/lua/smlua_hooks.h"
+#include "pc/vr/vr.h"
 #include "pc/utils/misc.h"
 #include "pc/debuglog.h"
 #include "skybox.h"
@@ -244,6 +247,171 @@ struct MtxInterp {
 
 static struct GrowingArray* sMtxTbl = NULL;
 
+static void vr_rotate_head_vector(
+    const float rotation[4],
+    Vec3f vector,
+    Vec3f result
+) {
+    const float twiceCrossX = 2.0f *
+        (rotation[1] * vector[2] - rotation[2] * vector[1]);
+    const float twiceCrossY = 2.0f *
+        (rotation[2] * vector[0] - rotation[0] * vector[2]);
+    const float twiceCrossZ = 2.0f *
+        (rotation[0] * vector[1] - rotation[1] * vector[0]);
+
+    result[0] = vector[0] +
+        rotation[3] * twiceCrossX +
+        rotation[1] * twiceCrossZ -
+        rotation[2] * twiceCrossY;
+    result[1] = vector[1] +
+        rotation[3] * twiceCrossY +
+        rotation[2] * twiceCrossX -
+        rotation[0] * twiceCrossZ;
+    result[2] = vector[2] +
+        rotation[3] * twiceCrossZ +
+        rotation[0] * twiceCrossY -
+        rotation[1] * twiceCrossX;
+}
+
+static bool vr_get_rotated_camera_basis(
+    Vec3f position,
+    Vec3f focus,
+    s16 roll,
+    Vec3f right,
+    Vec3f up,
+    Vec3f backward
+) {
+    float headRotation[4] = { 0 };
+
+    if (!vr_get_head_rotation(headRotation)) {
+        return false;
+    }
+
+    Mat4 baseCamera;
+    mtxf_lookat(baseCamera, position, focus, roll);
+
+    Vec3f baseRight = {
+        baseCamera[0][0],
+        baseCamera[1][0],
+        baseCamera[2][0]
+    };
+    Vec3f baseUp = {
+        baseCamera[0][1],
+        baseCamera[1][1],
+        baseCamera[2][1]
+    };
+    Vec3f baseBackward = {
+        baseCamera[0][2],
+        baseCamera[1][2],
+        baseCamera[2][2]
+    };
+    Vec3f headsetForward = { 0.0f, 0.0f, -1.0f };
+    Vec3f headsetUp = { 0.0f, 1.0f, 0.0f };
+
+    vr_rotate_head_vector(
+        headRotation,
+        headsetForward,
+        headsetForward
+    );
+    vr_rotate_head_vector(
+        headRotation,
+        headsetUp,
+        headsetUp
+    );
+
+    Vec3f worldForward;
+    Vec3f worldUp;
+
+    for (int axis = 0; axis < 3; axis++) {
+        worldForward[axis] =
+            baseRight[axis] * headsetForward[0] +
+            baseUp[axis] * headsetForward[1] +
+            baseBackward[axis] * headsetForward[2];
+        worldUp[axis] =
+            baseRight[axis] * headsetUp[0] +
+            baseUp[axis] * headsetUp[1] +
+            baseBackward[axis] * headsetUp[2];
+        backward[axis] = -worldForward[axis];
+    }
+
+    vec3f_normalize(backward);
+    vec3f_cross(right, worldUp, backward);
+
+    if (vec3f_length(right) <= 0.000001f) {
+        return false;
+    }
+
+    vec3f_normalize(right);
+    vec3f_cross(up, backward, right);
+    vec3f_normalize(up);
+    return true;
+}
+
+static bool vr_rotate_camera_focus(
+    Vec3f position,
+    Vec3f focus,
+    s16 roll
+) {
+    Vec3f right;
+    Vec3f up;
+    Vec3f backward;
+
+    if (!vr_get_rotated_camera_basis(
+            position,
+            focus,
+            roll,
+            right,
+            up,
+            backward
+        )) {
+        return false;
+    }
+
+    const float focusDistance = vec3f_dist(position, focus);
+
+    for (int axis = 0; axis < 3; axis++) {
+        focus[axis] =
+            position[axis] - backward[axis] * focusDistance;
+    }
+
+    return true;
+}
+
+static bool vr_build_head_tracked_camera_matrix(
+    Mat4 matrix,
+    Vec3f position,
+    Vec3f focus,
+    s16 roll
+) {
+    Vec3f right;
+    Vec3f up;
+    Vec3f backward;
+
+    if (!vr_get_rotated_camera_basis(
+            position,
+            focus,
+            roll,
+            right,
+            up,
+            backward
+        )) {
+        return false;
+    }
+
+    for (int axis = 0; axis < 3; axis++) {
+        matrix[axis][0] = right[axis];
+        matrix[axis][1] = up[axis];
+        matrix[axis][2] = backward[axis];
+        matrix[axis][3] = 0.0f;
+    }
+
+    matrix[3][0] = -vec3f_dot(position, right);
+    matrix[3][1] = -vec3f_dot(position, up);
+    matrix[3][2] = -vec3f_dot(position, backward);
+    matrix[3][3] = 1.0f;
+    return true;
+}
+
 struct Object* gCurGraphNodeProcessingObject = NULL;
 struct MarioState* gCurGraphNodeMarioState = NULL;
 
@@ -345,6 +513,13 @@ void patch_mtx_interpolated(f32 delta) {
             delta_interpolate_vec3f(gLakituState.pos, sBackgroundNode->prevCameraPos, posCopy, delta);
             delta_interpolate_vec3f(gLakituState.focus, sBackgroundNode->prevCameraFocus, focusCopy, delta);
         }
+        if (sCameraNode != NULL) {
+            vr_rotate_camera_focus(
+                gLakituState.pos,
+                gLakituState.focus,
+                sCameraNode->roll
+            );
+        }
         sBackgroundNode->fnNode.func(GEO_CONTEXT_RENDER, &sBackgroundNode->fnNode.node, NULL);
 
         vec3f_copy(gLakituState.pos, posCopy);
@@ -382,7 +557,19 @@ void patch_mtx_interpolated(f32 delta) {
         Vec3f posInterp, focusInterp;
         delta_interpolate_vec3f(posInterp, sCameraNode->prevPos, sCameraNode->pos, delta);
         delta_interpolate_vec3f(focusInterp, sCameraNode->prevFocus, sCameraNode->focus, delta);
-        mtxf_lookat(camInterp.m, posInterp, focusInterp, sCameraNode->roll);
+        if (!vr_build_head_tracked_camera_matrix(
+                camInterp.m,
+                posInterp,
+                focusInterp,
+                sCameraNode->roll
+            )) {
+            mtxf_lookat(
+                camInterp.m,
+                posInterp,
+                focusInterp,
+                sCameraNode->roll
+            );
+        }
         mtxf_to_mtx(&camInterp, camInterp.m);
     }
 

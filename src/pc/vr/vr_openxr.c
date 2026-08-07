@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -83,6 +84,8 @@ static bool sFrameBegun = false;
 static bool sFrameShouldRender = false;
 static bool sFrameViewsLocated = false;
 static bool sFrameTimingLogged = false;
+static XrQuaternionf sHeadOrientationReference = { 0 };
+static bool sHeadOrientationReferenceValid = false;
 static struct VrOpenXrFunctions sXr = { 0 };
 
 static const char* vr_openxr_result_name(XrResult result) {
@@ -1533,6 +1536,19 @@ bool vr_openxr_begin_frame(void) {
     sFrameViewsLocated =
         vr_openxr_locate_views(sFrameDisplayTime);
 
+    if (sFrameViewsLocated &&
+        sViewPoseValid &&
+        !sHeadOrientationReferenceValid) {
+        sHeadOrientationReference =
+            sViews[0].pose.orientation;
+        sHeadOrientationReferenceValid = true;
+
+        printf(
+            "[VR] Headset forward direction centered "
+            "for camera rotation.\n"
+        );
+    }
+
     if (!sFrameTimingLogged &&
         sFrameViewsLocated &&
         sViewPoseValid) {
@@ -1632,6 +1648,56 @@ bool vr_openxr_end_frame(void) {
     return viewsLocated && imagesRendered;
 }
 
+bool vr_openxr_get_head_rotation(float rotation[4]) {
+    if (rotation == NULL ||
+        !sHeadOrientationReferenceValid ||
+        !sViewPoseValid) {
+        return false;
+    }
+
+    const XrQuaternionf referenceInverse = {
+        -sHeadOrientationReference.x,
+        -sHeadOrientationReference.y,
+        -sHeadOrientationReference.z,
+        sHeadOrientationReference.w
+    };
+    const XrQuaternionf current =
+        sViews[0].pose.orientation;
+    XrQuaternionf relative = {
+        referenceInverse.w * current.x +
+            referenceInverse.x * current.w +
+            referenceInverse.y * current.z -
+            referenceInverse.z * current.y,
+        referenceInverse.w * current.y -
+            referenceInverse.x * current.z +
+            referenceInverse.y * current.w +
+            referenceInverse.z * current.x,
+        referenceInverse.w * current.z +
+            referenceInverse.x * current.y -
+            referenceInverse.y * current.x +
+            referenceInverse.z * current.w,
+        referenceInverse.w * current.w -
+            referenceInverse.x * current.x -
+            referenceInverse.y * current.y -
+            referenceInverse.z * current.z
+    };
+    const float length = sqrtf(
+        relative.x * relative.x +
+        relative.y * relative.y +
+        relative.z * relative.z +
+        relative.w * relative.w
+    );
+
+    if (length <= 0.000001f) {
+        return false;
+    }
+
+    rotation[0] = relative.x / length;
+    rotation[1] = relative.y / length;
+    rotation[2] = relative.z / length;
+    rotation[3] = relative.w / length;
+    return true;
+}
 void vr_openxr_shutdown(void) {
     bool hadOpenXR =
         sColorSwapchains[0].handle != XR_NULL_HANDLE ||
@@ -1665,6 +1731,12 @@ void vr_openxr_shutdown(void) {
     sFrameShouldRender = false;
     sFrameViewsLocated = false;
     sFrameTimingLogged = false;
+    memset(
+        &sHeadOrientationReference,
+        0,
+        sizeof(sHeadOrientationReference)
+    );
+    sHeadOrientationReferenceValid = false;
 
     if (sSession != XR_NULL_HANDLE &&
         sXr.xrDestroySession != NULL) {
@@ -1727,6 +1799,11 @@ bool vr_openxr_begin_frame(void) {
 }
 
 bool vr_openxr_end_frame(void) {
+    return false;
+}
+
+bool vr_openxr_get_head_rotation(float rotation[4]) {
+    (void)rotation;
     return false;
 }
 

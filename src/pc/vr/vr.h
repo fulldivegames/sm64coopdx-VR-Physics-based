@@ -6,6 +6,8 @@
 void vr_init(void);
 void vr_begin_frame(void);
 void vr_end_frame(void);
+
+bool vr_get_head_rotation(float rotation[4]);
 void vr_shutdown(void);
 
 void vr_on_graphics_ready(void);
