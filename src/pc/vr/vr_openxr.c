@@ -75,6 +75,14 @@ static XrViewConfigurationView sViewConfigurationViews[2] = { 0 };
 static struct VrOpenXrSwapchain sColorSwapchains[2] = { 0 };
 static int64_t sColorSwapchainFormat = 0;
 static GLuint sEyeFramebuffer = 0;
+static GLuint sEyeDepthRenderbuffers[2] = { 0 };
+static bool sEyeDirectRendered[2] = { false };
+static bool sEyeImageAcquired[2] = { false };
+static uint32_t sEyeDirectImageIndices[2] = { 0 };
+static int32_t sActiveRenderEye = -1;
+static GLint sPreviousDrawFramebuffer = 0;
+static GLint sPreviousReadFramebuffer = 0;
+static bool sDirectRenderingLogged = false;
 
 static bool sViewPoseValid = false;
 static uint32_t sPoseLogFrame = 0;
@@ -476,14 +484,26 @@ static const char* vr_openxr_color_format_name(int64_t format) {
 }
 
 static void vr_openxr_destroy_eye_framebuffer(void) {
-    if (sEyeFramebuffer == 0) {
-        return;
+    bool hadFramebuffer = sEyeFramebuffer != 0;
+
+    if (sEyeFramebuffer != 0) {
+        glDeleteFramebuffers(1, &sEyeFramebuffer);
+        sEyeFramebuffer = 0;
     }
 
-    glDeleteFramebuffers(1, &sEyeFramebuffer);
-    sEyeFramebuffer = 0;
+    if (sEyeDepthRenderbuffers[0] != 0 ||
+        sEyeDepthRenderbuffers[1] != 0) {
+        glDeleteRenderbuffers(2, sEyeDepthRenderbuffers);
+    }
+    memset(
+        sEyeDepthRenderbuffers,
+        0,
+        sizeof(sEyeDepthRenderbuffers)
+    );
 
-    printf("[VR] OpenXR eye framebuffer destroyed.\n");
+    if (hadFramebuffer) {
+        printf("[VR] OpenXR eye framebuffer destroyed.\n");
+    }
 }
 
 static void vr_openxr_destroy_color_swapchains(void) {
@@ -1372,7 +1392,7 @@ static bool vr_openxr_copy_game_frame_to_eye(
 
     return rendered;
 }
-static bool vr_openxr_cycle_swapchain_image(
+static bool vr_openxr_acquire_eye_image(
     uint32_t eyeIndex,
     uint32_t* imageIndex
 ) {
@@ -1401,15 +1421,16 @@ static bool vr_openxr_cycle_swapchain_image(
         return false;
     }
 
-    bool imageIndexValid = *imageIndex < swapchain->imageCount;
+    sEyeImageAcquired[eyeIndex] = true;
 
-    if (!imageIndexValid) {
+    if (*imageIndex >= swapchain->imageCount) {
         printf(
             "[VR] %s eye acquired image %u, but only %u exist.\n",
             eyeName,
             *imageIndex,
             swapchain->imageCount
         );
+        return false;
     }
 
     XrSwapchainImageWaitInfo waitInfo = { 0 };
@@ -1433,18 +1454,25 @@ static bool vr_openxr_cycle_swapchain_image(
         return false;
     }
 
-    bool imageRendered =
-        imageIndexValid &&
-        vr_openxr_copy_game_frame_to_eye(eyeIndex, *imageIndex);
+    return true;
+}
 
+static bool vr_openxr_release_eye_image(uint32_t eyeIndex) {
+    if (!sEyeImageAcquired[eyeIndex]) {
+        return true;
+    }
+
+    const char* eyeName = eyeIndex == 0 ? "left" : "right";
     XrSwapchainImageReleaseInfo releaseInfo = { 0 };
     releaseInfo.type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO;
 
-    result =
+    XrResult result =
         sXr.xrReleaseSwapchainImage(
-            swapchain->handle,
+            sColorSwapchains[eyeIndex].handle,
             &releaseInfo
         );
+
+    sEyeImageAcquired[eyeIndex] = false;
 
     if (result != XR_SUCCESS) {
         printf(
@@ -1457,7 +1485,275 @@ static bool vr_openxr_cycle_swapchain_image(
         return false;
     }
 
-    return imageIndexValid && imageRendered;
+    return true;
+}
+
+static bool vr_openxr_ensure_direct_eye_target(
+    uint32_t eyeIndex
+) {
+    const struct VrOpenXrSwapchain* swapchain =
+        &sColorSwapchains[eyeIndex];
+    const XrViewConfigurationView* view =
+        &sViewConfigurationViews[eyeIndex];
+
+    if (sEyeFramebuffer == 0) {
+        glGenFramebuffers(1, &sEyeFramebuffer);
+
+        if (sEyeFramebuffer == 0) {
+            printf(
+                "[VR] Could not create OpenXR eye framebuffer.\n"
+            );
+            return false;
+        }
+
+        printf("[VR] OpenXR eye framebuffer created.\n");
+    }
+
+    if (sEyeDepthRenderbuffers[eyeIndex] != 0) {
+        return true;
+    }
+
+    GLint previousRenderbuffer = 0;
+    glGetIntegerv(
+        GL_RENDERBUFFER_BINDING,
+        &previousRenderbuffer
+    );
+    glGenRenderbuffers(
+        1,
+        &sEyeDepthRenderbuffers[eyeIndex]
+    );
+
+    if (sEyeDepthRenderbuffers[eyeIndex] == 0) {
+        printf(
+            "[VR] Could not create %s eye depth buffer.\n",
+            eyeIndex == 0 ? "left" : "right"
+        );
+        return false;
+    }
+
+    glBindRenderbuffer(
+        GL_RENDERBUFFER,
+        sEyeDepthRenderbuffers[eyeIndex]
+    );
+
+    if (view->recommendedSwapchainSampleCount > 1) {
+        glRenderbufferStorageMultisample(
+            GL_RENDERBUFFER,
+            (GLsizei)view->recommendedSwapchainSampleCount,
+            GL_DEPTH_COMPONENT24,
+            (GLsizei)swapchain->width,
+            (GLsizei)swapchain->height
+        );
+    } else {
+        glRenderbufferStorage(
+            GL_RENDERBUFFER,
+            GL_DEPTH_COMPONENT24,
+            (GLsizei)swapchain->width,
+            (GLsizei)swapchain->height
+        );
+    }
+
+    glBindRenderbuffer(
+        GL_RENDERBUFFER,
+        (GLuint)previousRenderbuffer
+    );
+    return true;
+}
+
+bool vr_openxr_begin_eye(
+    uint32_t eyeIndex,
+    uint32_t* width,
+    uint32_t* height
+) {
+    if (eyeIndex >= 2 ||
+        width == NULL ||
+        height == NULL ||
+        !sFrameBegun ||
+        !sFrameShouldRender ||
+        !sFrameViewsLocated ||
+        !sViewPoseValid ||
+        sActiveRenderEye >= 0) {
+        return false;
+    }
+
+    uint32_t imageIndex = 0;
+
+    if (!vr_openxr_acquire_eye_image(
+            eyeIndex,
+            &imageIndex
+        )) {
+        vr_openxr_release_eye_image(eyeIndex);
+        return false;
+    }
+
+    if (!vr_openxr_ensure_direct_eye_target(eyeIndex)) {
+        vr_openxr_release_eye_image(eyeIndex);
+        return false;
+    }
+
+    const struct VrOpenXrSwapchain* swapchain =
+        &sColorSwapchains[eyeIndex];
+    const XrViewConfigurationView* view =
+        &sViewConfigurationViews[eyeIndex];
+    const GLenum textureTarget =
+        view->recommendedSwapchainSampleCount > 1
+            ? GL_TEXTURE_2D_MULTISAMPLE
+            : GL_TEXTURE_2D;
+    const GLuint texture =
+        swapchain->images[imageIndex].image;
+
+    glGetIntegerv(
+        GL_DRAW_FRAMEBUFFER_BINDING,
+        &sPreviousDrawFramebuffer
+    );
+    glGetIntegerv(
+        GL_READ_FRAMEBUFFER_BINDING,
+        &sPreviousReadFramebuffer
+    );
+
+    glBindFramebuffer(
+        GL_FRAMEBUFFER,
+        sEyeFramebuffer
+    );
+    glFramebufferTexture2D(
+        GL_FRAMEBUFFER,
+        GL_COLOR_ATTACHMENT0,
+        textureTarget,
+        texture,
+        0
+    );
+    glFramebufferRenderbuffer(
+        GL_FRAMEBUFFER,
+        GL_DEPTH_ATTACHMENT,
+        GL_RENDERBUFFER,
+        sEyeDepthRenderbuffers[eyeIndex]
+    );
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+
+    const GLenum framebufferStatus =
+        glCheckFramebufferStatus(GL_FRAMEBUFFER);
+
+    if (framebufferStatus != GL_FRAMEBUFFER_COMPLETE) {
+        printf(
+            "[VR] %s direct eye framebuffer is "
+            "incomplete: 0x%X.\n",
+            eyeIndex == 0 ? "left" : "right",
+            (unsigned int)framebufferStatus
+        );
+        glFramebufferTexture2D(
+            GL_FRAMEBUFFER,
+            GL_COLOR_ATTACHMENT0,
+            textureTarget,
+            0,
+            0
+        );
+        glFramebufferRenderbuffer(
+            GL_FRAMEBUFFER,
+            GL_DEPTH_ATTACHMENT,
+            GL_RENDERBUFFER,
+            0
+        );
+        glBindFramebuffer(
+            GL_DRAW_FRAMEBUFFER,
+            (GLuint)sPreviousDrawFramebuffer
+        );
+        glBindFramebuffer(
+            GL_READ_FRAMEBUFFER,
+            (GLuint)sPreviousReadFramebuffer
+        );
+        vr_openxr_release_eye_image(eyeIndex);
+        return false;
+    }
+
+    sEyeDirectImageIndices[eyeIndex] = imageIndex;
+    sActiveRenderEye = (int32_t)eyeIndex;
+    *width = swapchain->width;
+    *height = swapchain->height;
+    return true;
+}
+
+bool vr_openxr_end_eye(uint32_t eyeIndex) {
+    if (eyeIndex >= 2 ||
+        sActiveRenderEye != (int32_t)eyeIndex) {
+        return false;
+    }
+
+    const XrViewConfigurationView* view =
+        &sViewConfigurationViews[eyeIndex];
+    const GLenum textureTarget =
+        view->recommendedSwapchainSampleCount > 1
+            ? GL_TEXTURE_2D_MULTISAMPLE
+            : GL_TEXTURE_2D;
+
+    glFlush();
+    glBindFramebuffer(
+        GL_DRAW_FRAMEBUFFER,
+        sEyeFramebuffer
+    );
+    glFramebufferTexture2D(
+        GL_DRAW_FRAMEBUFFER,
+        GL_COLOR_ATTACHMENT0,
+        textureTarget,
+        0,
+        0
+    );
+    glFramebufferRenderbuffer(
+        GL_DRAW_FRAMEBUFFER,
+        GL_DEPTH_ATTACHMENT,
+        GL_RENDERBUFFER,
+        0
+    );
+    glBindFramebuffer(
+        GL_DRAW_FRAMEBUFFER,
+        (GLuint)sPreviousDrawFramebuffer
+    );
+    glBindFramebuffer(
+        GL_READ_FRAMEBUFFER,
+        (GLuint)sPreviousReadFramebuffer
+    );
+
+    sActiveRenderEye = -1;
+
+    if (!vr_openxr_release_eye_image(eyeIndex)) {
+        return false;
+    }
+
+    sEyeDirectRendered[eyeIndex] = true;
+
+    if (!sDirectRenderingLogged &&
+        sEyeDirectRendered[0] &&
+        sEyeDirectRendered[1]) {
+        printf(
+            "[VR] Game rendered directly into both "
+            "OpenXR eye targets.\n"
+        );
+        sDirectRenderingLogged = true;
+    }
+
+    return true;
+}
+
+static bool vr_openxr_cycle_swapchain_image(
+    uint32_t eyeIndex,
+    uint32_t* imageIndex
+) {
+    if (!vr_openxr_acquire_eye_image(
+            eyeIndex,
+            imageIndex
+        )) {
+        vr_openxr_release_eye_image(eyeIndex);
+        return false;
+    }
+
+    const bool imageRendered =
+        vr_openxr_copy_game_frame_to_eye(
+            eyeIndex,
+            *imageIndex
+        );
+    const bool imageReleased =
+        vr_openxr_release_eye_image(eyeIndex);
+
+    return imageRendered && imageReleased;
 }
 
 static void vr_openxr_log_swapchain_cycle(
@@ -1530,6 +1826,17 @@ bool vr_openxr_begin_frame(void) {
     }
 
     sFrameBegun = true;
+    memset(
+        sEyeDirectRendered,
+        0,
+        sizeof(sEyeDirectRendered)
+    );
+    memset(
+        sEyeImageAcquired,
+        0,
+        sizeof(sEyeImageAcquired)
+    );
+    sActiveRenderEye = -1;
     sFrameDisplayTime = frameState.predictedDisplayTime;
     sFrameShouldRender = frameState.shouldRender;
     sFrameViewsLocated =
@@ -1585,6 +1892,12 @@ bool vr_openxr_end_frame(void) {
 
     if (canSubmitProjection) {
         for (uint32_t eye = 0; eye < 2; eye++) {
+            if (sEyeDirectRendered[eye]) {
+                imageIndices[eye] =
+                    sEyeDirectImageIndices[eye];
+                continue;
+            }
+
             if (!vr_openxr_cycle_swapchain_image(
                     eye,
                     &imageIndices[eye]
@@ -1795,6 +2108,25 @@ void vr_openxr_shutdown(void) {
     sFrameViewsLocated = false;
     sFrameTimingLogged = false;
     memset(
+        sEyeDirectRendered,
+        0,
+        sizeof(sEyeDirectRendered)
+    );
+    memset(
+        sEyeImageAcquired,
+        0,
+        sizeof(sEyeImageAcquired)
+    );
+    memset(
+        sEyeDirectImageIndices,
+        0,
+        sizeof(sEyeDirectImageIndices)
+    );
+    sActiveRenderEye = -1;
+    sPreviousDrawFramebuffer = 0;
+    sPreviousReadFramebuffer = 0;
+    sDirectRenderingLogged = false;
+    memset(
         &sHeadOrientationReference,
         0,
         sizeof(sHeadOrientationReference)
@@ -1867,6 +2199,22 @@ bool vr_openxr_begin_frame(void) {
 }
 
 bool vr_openxr_end_frame(void) {
+    return false;
+}
+
+bool vr_openxr_begin_eye(
+    uint32_t eyeIndex,
+    uint32_t* width,
+    uint32_t* height
+) {
+    (void)eyeIndex;
+    (void)width;
+    (void)height;
+    return false;
+}
+
+bool vr_openxr_end_eye(uint32_t eyeIndex) {
+    (void)eyeIndex;
     return false;
 }
 

@@ -217,7 +217,7 @@ LookAt lookAt;
 #endif
 
 static struct GraphNodePerspective *sPerspectiveNode = NULL;
-static Gfx* sPerspectivePos   = NULL;
+
 static Mtx* sPerspectiveMtx   = NULL;
 static f32 sPerspectiveAspect = 0;
 
@@ -507,22 +507,59 @@ void patch_mtx_before(void) {
     }
 }
 
-void patch_mtx_interpolated(f32 delta) {
-    if (sPerspectiveNode != NULL) {
-        if (gCamSkipInterp) {
-            sPerspectiveNode->prevFov = sPerspectiveNode->fov;
-        }
-        u16 perspNorm;
-        f32 fovInterpolated = delta_interpolate_f32(sPerspectiveNode->prevFov, sPerspectiveNode->fov, delta);
-        f32 near = get_first_person_enabled() ? 1.f : replace_value_if_not_zero(MIN(sPerspectiveNode->near, gProjectionMaxNearValue), gOverrideNear);
-        f32 far = replace_value_if_not_zero(sPerspectiveNode->far, gOverrideFar);
-
-        // "infinite" draw distance
-        if (gOverrideFar == 0 && configDrawDistance == 6) { far = max(far, MAX_FAR_PLANE_DIST); }
-
-        guPerspective(sPerspectiveMtx, &perspNorm, fovInterpolated, sPerspectiveAspect, near, far, 1.0f);
-        gSPMatrix(sPerspectivePos, VIRTUAL_TO_PHYSICAL(sPerspectiveNode), G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
+static void patch_mtx_perspective(f32 delta) {
+    if (sPerspectiveNode == NULL) {
+        return;
     }
+
+    if (gCamSkipInterp) {
+        sPerspectiveNode->prevFov = sPerspectiveNode->fov;
+    }
+
+    u16 perspNorm;
+    f32 fovInterpolated = delta_interpolate_f32(
+        sPerspectiveNode->prevFov,
+        sPerspectiveNode->fov,
+        delta
+    );
+    f32 near = get_first_person_enabled()
+        ? 1.f
+        : replace_value_if_not_zero(
+            MIN(
+                sPerspectiveNode->near,
+                gProjectionMaxNearValue
+            ),
+            gOverrideNear
+        );
+    f32 far = replace_value_if_not_zero(
+        sPerspectiveNode->far,
+        gOverrideFar
+    );
+
+    // "infinite" draw distance
+    if (gOverrideFar == 0 && configDrawDistance == 6) {
+        far = max(far, MAX_FAR_PLANE_DIST);
+    }
+
+    f32 aspect = sPerspectiveAspect;
+    vr_get_render_target_aspect(&aspect);
+    guPerspective(
+        sPerspectiveMtx,
+        &perspNorm,
+        fovInterpolated,
+        aspect,
+        near,
+        far,
+        1.0f
+    );
+}
+
+void patch_mtx_vr_projection(f32 delta) {
+    patch_mtx_perspective(delta);
+}
+
+void patch_mtx_interpolated(f32 delta) {
+    patch_mtx_perspective(delta);
 
     if (sViewportClipPos != NULL) {
         delta_interpolate_vec3s(sViewportInterp.vp.vtrans, sViewportPrev.vp.vtrans, sViewport->vp.vtrans, delta);
@@ -940,7 +977,6 @@ static void geo_process_perspective(struct GraphNodePerspective *node) {
 
     sPerspectiveNode = node;
     sPerspectiveMtx = mtx;
-    sPerspectivePos = gDisplayListHead;
     sPerspectiveAspect = aspect;
 
     gSPPerspNormalize(gDisplayListHead++, perspNorm);
@@ -2326,7 +2362,6 @@ void geo_process_node_and_siblings(struct GraphNode *firstNode) {
 
 static void geo_clear_interp_variables(void) {
     sPerspectiveNode = NULL;
-    sPerspectivePos   = NULL;
     sPerspectiveMtx   = NULL;
     sPerspectiveAspect = 0;
 

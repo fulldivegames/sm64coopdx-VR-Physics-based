@@ -6,6 +6,7 @@
 
 static bool sVrActive = false;
 static bool sGraphicsReady = false;
+static float sRenderTargetAspect = 0.0f;
 
 void vr_init(void) {
     printf("[VR] VR subsystem initialized.\n");
@@ -66,6 +67,7 @@ static void vr_handle_openxr_failure(void) {
     );
 
     vr_openxr_shutdown();
+    sRenderTargetAspect = 0.0f;
     sVrActive = false;
 
     printf("[VR] VR mode state: OFF\n");
@@ -91,6 +93,42 @@ void vr_end_frame(void) {
     }
 }
 
+bool vr_begin_eye(
+    uint32_t eyeIndex,
+    uint32_t* width,
+    uint32_t* height
+) {
+    if (!sVrActive ||
+        !vr_openxr_begin_eye(eyeIndex, width, height)) {
+        return false;
+    }
+
+    sRenderTargetAspect =
+        (float)*width / (float)*height;
+    return true;
+}
+
+bool vr_end_eye(uint32_t eyeIndex) {
+    if (!sVrActive) {
+        return false;
+    }
+
+    const bool ended = vr_openxr_end_eye(eyeIndex);
+    sRenderTargetAspect = 0.0f;
+    return ended;
+}
+
+bool vr_get_render_target_aspect(float* aspect) {
+    if (!sVrActive ||
+        aspect == NULL ||
+        sRenderTargetAspect <= 0.0f) {
+        return false;
+    }
+
+    *aspect = sRenderTargetAspect;
+    return true;
+}
+
 bool vr_get_head_rotation(float rotation[4]) {
     if (!sVrActive || rotation == NULL) {
         return false;
@@ -111,6 +149,7 @@ void vr_shutdown(void) {
     vr_openxr_shutdown();
 
     sGraphicsReady = false;
+    sRenderTargetAspect = 0.0f;
     sVrActive = false;
 
     printf("[VR] VR subsystem shut down.\n");
@@ -124,6 +163,7 @@ bool vr_set_active(bool active) {
     if (!active) {
         vr_openxr_shutdown();
 
+        sRenderTargetAspect = 0.0f;
         sVrActive = false;
 
         printf("[VR] VR mode state: OFF\n");

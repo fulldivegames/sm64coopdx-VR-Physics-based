@@ -143,6 +143,7 @@ extern void patch_djui_hud_before(void);
 extern void patch_scroll_targets_before(void);
 
 extern void patch_mtx_interpolated(f32 delta);
+extern void patch_mtx_vr_projection(f32 delta);
 extern void patch_screen_transition_interpolated(f32 delta);
 extern void patch_title_screen_interpolated(f32 delta);
 extern void patch_dialog_interpolated(f32 delta);
@@ -294,6 +295,50 @@ void produce_interpolation_frames_and_delay(void) {
         gfx_start_frame();
         vr_begin_frame();
         if (!gSkipInterpolationTitleScreen) { patch_interpolations(delta); }
+
+        const struct GfxDimensions desktopDimensions =
+            gfx_current_dimensions;
+        bool renderedVrEye = false;
+
+        for (uint32_t eye = 0; eye < 2; eye++) {
+            uint32_t eyeWidth = 0;
+            uint32_t eyeHeight = 0;
+
+            if (!vr_begin_eye(
+                    eye,
+                    &eyeWidth,
+                    &eyeHeight
+                )) {
+                continue;
+            }
+
+            renderedVrEye = true;
+
+            gfx_current_dimensions.width = eyeWidth;
+            gfx_current_dimensions.height = eyeHeight;
+            gfx_current_dimensions.aspect_ratio =
+                (float)eyeWidth / (float)eyeHeight;
+            gfx_current_dimensions.x_adjust_ratio =
+                (4.0f / 3.0f) /
+                gfx_current_dimensions.aspect_ratio;
+            gfx_current_dimensions.x_adjust_4by3 = 0;
+
+            if (!gSkipInterpolationTitleScreen) {
+                patch_mtx_vr_projection(delta);
+            }
+
+            send_display_list(gGfxSPTask);
+            gfx_end_frame_render();
+            vr_end_eye(eye);
+        }
+
+        gfx_current_dimensions = desktopDimensions;
+
+        if (renderedVrEye &&
+            !gSkipInterpolationTitleScreen) {
+            patch_mtx_vr_projection(delta);
+        }
+
         send_display_list(gGfxSPTask);
         gfx_end_frame_render();
         vr_end_frame();
