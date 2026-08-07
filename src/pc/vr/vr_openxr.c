@@ -8,6 +8,11 @@
 
 #include <windows.h>
 
+#ifndef GLEW_STATIC
+#define GLEW_STATIC
+#endif
+#include <GL/glew.h>
+
 #define XR_USE_PLATFORM_WIN32
 #define XR_USE_GRAPHICS_API_OPENGL
 
@@ -68,6 +73,7 @@ static XrView sViews[2] = { 0 };
 static XrViewConfigurationView sViewConfigurationViews[2] = { 0 };
 static struct VrOpenXrSwapchain sColorSwapchains[2] = { 0 };
 static int64_t sColorSwapchainFormat = 0;
+static GLuint sDiagnosticFramebuffer = 0;
 static bool sViewPoseValid = false;
 static uint32_t sPoseLogFrame = 0;
 static uint32_t sSwapchainLogFrame = 0;
@@ -457,6 +463,17 @@ static const char* vr_openxr_color_format_name(int64_t format) {
     }
 
     return "UNKNOWN_OPENGL_FORMAT";
+}
+
+static void vr_openxr_destroy_diagnostic_framebuffer(void) {
+    if (sDiagnosticFramebuffer == 0) {
+        return;
+    }
+
+    glDeleteFramebuffers(1, &sDiagnosticFramebuffer);
+    sDiagnosticFramebuffer = 0;
+
+    printf("[VR] Diagnostic OpenGL framebuffer destroyed.\n");
 }
 
 static void vr_openxr_destroy_color_swapchains(void) {
@@ -1159,6 +1176,150 @@ static bool vr_openxr_locate_views(XrTime displayTime) {
     return true;
 }
 
+static bool vr_openxr_render_diagnostic_eye(
+    uint32_t eyeIndex,
+    uint32_t imageIndex
+) {
+    const char* eyeName = eyeIndex == 0 ? "left" : "right";
+    const struct VrOpenXrSwapchain* swapchain =
+        &sColorSwapchains[eyeIndex];
+    const XrViewConfigurationView* view =
+        &sViewConfigurationViews[eyeIndex];
+
+    if (sDiagnosticFramebuffer == 0) {
+        glGenFramebuffers(1, &sDiagnosticFramebuffer);
+
+        if (sDiagnosticFramebuffer == 0) {
+            printf("[VR] Could not create diagnostic framebuffer.\n");
+            return false;
+        }
+
+        printf("[VR] Diagnostic OpenGL framebuffer created.\n");
+    }
+
+    GLint previousDrawFramebuffer = 0;
+    GLint previousReadFramebuffer = 0;
+    GLint previousViewport[4] = { 0 };
+    GLint previousScissorBox[4] = { 0 };
+    GLfloat previousClearColor[4] = { 0 };
+    GLboolean previousColorMask[4] = { 0 };
+    GLboolean scissorWasEnabled = glIsEnabled(GL_SCISSOR_TEST);
+
+    glGetIntegerv(
+        GL_DRAW_FRAMEBUFFER_BINDING,
+        &previousDrawFramebuffer
+    );
+    glGetIntegerv(
+        GL_READ_FRAMEBUFFER_BINDING,
+        &previousReadFramebuffer
+    );
+    glGetIntegerv(GL_VIEWPORT, previousViewport);
+    glGetIntegerv(GL_SCISSOR_BOX, previousScissorBox);
+    glGetFloatv(GL_COLOR_CLEAR_VALUE, previousClearColor);
+    glGetBooleanv(GL_COLOR_WRITEMASK, previousColorMask);
+
+    const GLenum textureTarget =
+        view->recommendedSwapchainSampleCount > 1
+            ? GL_TEXTURE_2D_MULTISAMPLE
+            : GL_TEXTURE_2D;
+    const GLuint texture = swapchain->images[imageIndex].image;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, sDiagnosticFramebuffer);
+    glFramebufferTexture2D(
+        GL_FRAMEBUFFER,
+        GL_COLOR_ATTACHMENT0,
+        textureTarget,
+        texture,
+        0
+    );
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+
+    GLenum framebufferStatus =
+        glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    bool rendered = framebufferStatus == GL_FRAMEBUFFER_COMPLETE;
+
+    if (rendered) {
+        static const GLfloat eyeColors[2][4] = {
+            { 0.35f, 0.04f, 0.02f, 1.0f },
+            { 0.02f, 0.08f, 0.35f, 1.0f }
+        };
+
+        glViewport(
+            0,
+            0,
+            (GLsizei)swapchain->width,
+            (GLsizei)swapchain->height
+        );
+        glDisable(GL_SCISSOR_TEST);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glClearColor(
+            eyeColors[eyeIndex][0],
+            eyeColors[eyeIndex][1],
+            eyeColors[eyeIndex][2],
+            eyeColors[eyeIndex][3]
+        );
+        glClear(GL_COLOR_BUFFER_BIT);
+        glFlush();
+    } else {
+        printf(
+            "[VR] %s eye diagnostic framebuffer is incomplete: "
+            "0x%X.\n",
+            eyeName,
+            (unsigned int)framebufferStatus
+        );
+    }
+
+    glFramebufferTexture2D(
+        GL_FRAMEBUFFER,
+        GL_COLOR_ATTACHMENT0,
+        textureTarget,
+        0,
+        0
+    );
+
+    glBindFramebuffer(
+        GL_DRAW_FRAMEBUFFER,
+        (GLuint)previousDrawFramebuffer
+    );
+    glBindFramebuffer(
+        GL_READ_FRAMEBUFFER,
+        (GLuint)previousReadFramebuffer
+    );
+    glViewport(
+        previousViewport[0],
+        previousViewport[1],
+        previousViewport[2],
+        previousViewport[3]
+    );
+    glScissor(
+        previousScissorBox[0],
+        previousScissorBox[1],
+        previousScissorBox[2],
+        previousScissorBox[3]
+    );
+
+    if (scissorWasEnabled) {
+        glEnable(GL_SCISSOR_TEST);
+    } else {
+        glDisable(GL_SCISSOR_TEST);
+    }
+
+    glColorMask(
+        previousColorMask[0],
+        previousColorMask[1],
+        previousColorMask[2],
+        previousColorMask[3]
+    );
+    glClearColor(
+        previousClearColor[0],
+        previousClearColor[1],
+        previousClearColor[2],
+        previousClearColor[3]
+    );
+
+    return rendered;
+}
+
 static bool vr_openxr_cycle_swapchain_image(
     uint32_t eyeIndex,
     uint32_t* imageIndex
@@ -1220,6 +1381,10 @@ static bool vr_openxr_cycle_swapchain_image(
         return false;
     }
 
+    bool imageRendered =
+        imageIndexValid &&
+        vr_openxr_render_diagnostic_eye(eyeIndex, *imageIndex);
+
     XrSwapchainImageReleaseInfo releaseInfo = { 0 };
     releaseInfo.type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO;
 
@@ -1240,7 +1405,7 @@ static bool vr_openxr_cycle_swapchain_image(
         return false;
     }
 
-    return imageIndexValid;
+    return imageIndexValid && imageRendered;
 }
 
 static void vr_openxr_log_swapchain_cycle(
@@ -1248,7 +1413,8 @@ static void vr_openxr_log_swapchain_cycle(
 ) {
     if (sSwapchainLogFrame == 0) {
         printf(
-            "[VR] Swapchain image cycle: left %u, right %u.\n",
+            "[VR] Diagnostic stereo frame: left image %u, "
+            "right image %u.\n",
             imageIndices[0],
             imageIndices[1]
         );
@@ -1261,7 +1427,7 @@ static void vr_openxr_log_swapchain_cycle(
     }
 }
 
-static bool vr_openxr_submit_empty_frame(void) {
+static bool vr_openxr_submit_frame(void) {
     if (!sSessionRunning) {
         return true;
     }
@@ -1301,31 +1467,66 @@ static bool vr_openxr_submit_empty_frame(void) {
 
     bool viewsLocated =
         vr_openxr_locate_views(frameState.predictedDisplayTime);
-    bool imagesCycled = true;
+    bool canSubmitProjection =
+        frameState.shouldRender &&
+        viewsLocated &&
+        sViewPoseValid;
+    bool imagesRendered = true;
     uint32_t imageIndices[2] = { 0 };
 
-    if (frameState.shouldRender && viewsLocated) {
+    if (canSubmitProjection) {
         for (uint32_t eye = 0; eye < 2; eye++) {
             if (!vr_openxr_cycle_swapchain_image(
                     eye,
                     &imageIndices[eye]
                 )) {
-                imagesCycled = false;
+                imagesRendered = false;
                 break;
             }
         }
+    }
 
-        if (imagesCycled) {
-            vr_openxr_log_swapchain_cycle(imageIndices);
+    XrCompositionLayerProjectionView projectionViews[2] = { 0 };
+    XrCompositionLayerProjection projectionLayer = { 0 };
+    const XrCompositionLayerBaseHeader* layers[1] = { NULL };
+    uint32_t layerCount = 0;
+
+    if (canSubmitProjection && imagesRendered) {
+        for (uint32_t eye = 0; eye < 2; eye++) {
+            projectionViews[eye].type =
+                XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
+            projectionViews[eye].pose = sViews[eye].pose;
+            projectionViews[eye].fov = sViews[eye].fov;
+            projectionViews[eye].subImage.swapchain =
+                sColorSwapchains[eye].handle;
+            projectionViews[eye].subImage.imageRect.offset.x = 0;
+            projectionViews[eye].subImage.imageRect.offset.y = 0;
+            projectionViews[eye].subImage.imageRect.extent.width =
+                (int32_t)sColorSwapchains[eye].width;
+            projectionViews[eye].subImage.imageRect.extent.height =
+                (int32_t)sColorSwapchains[eye].height;
+            projectionViews[eye].subImage.imageArrayIndex = 0;
         }
+
+        projectionLayer.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION;
+        projectionLayer.layerFlags = 0;
+        projectionLayer.space = sViewSpace;
+        projectionLayer.viewCount = 2;
+        projectionLayer.views = projectionViews;
+
+        layers[0] =
+            (const XrCompositionLayerBaseHeader*)&projectionLayer;
+        layerCount = 1;
+
+        vr_openxr_log_swapchain_cycle(imageIndices);
     }
 
     XrFrameEndInfo endInfo = { 0 };
     endInfo.type = XR_TYPE_FRAME_END_INFO;
     endInfo.displayTime = frameState.predictedDisplayTime;
     endInfo.environmentBlendMode = sEnvironmentBlendMode;
-    endInfo.layerCount = 0;
-    endInfo.layers = NULL;
+    endInfo.layerCount = layerCount;
+    endInfo.layers = layerCount > 0 ? layers : NULL;
 
     result =
         sXr.xrEndFrame(sSession, &endInfo);
@@ -1339,7 +1540,7 @@ static bool vr_openxr_submit_empty_frame(void) {
         return false;
     }
 
-    return viewsLocated && imagesCycled;
+    return viewsLocated && imagesRendered;
 }
 
 bool vr_openxr_update(void) {
@@ -1351,7 +1552,7 @@ bool vr_openxr_update(void) {
         return false;
     }
 
-    if (!vr_openxr_submit_empty_frame()) {
+    if (!vr_openxr_submit_frame()) {
         return false;
     }
 
@@ -1367,6 +1568,7 @@ void vr_openxr_shutdown(void) {
         sInstance != XR_NULL_HANDLE ||
         sLoader != NULL;
 
+    vr_openxr_destroy_diagnostic_framebuffer();
     vr_openxr_destroy_color_swapchains();
 
     if (sViewSpace != XR_NULL_HANDLE &&
