@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 void vr_init(void);
+void vr_update(void);
 void vr_shutdown(void);
 
 void vr_on_graphics_ready(void);

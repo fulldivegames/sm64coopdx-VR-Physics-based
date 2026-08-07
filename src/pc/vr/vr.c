@@ -15,15 +15,6 @@ void vr_init(void) {
     vr_set_active(configVrAutoStart);
 }
 
-void vr_shutdown(void) {
-    vr_openxr_shutdown();
-
-    sGraphicsReady = false;
-    sVrActive = false;
-
-    printf("[VR] VR subsystem shut down.\n");
-}
-
 static bool vr_start_graphics_session(void) {
     if (!sGraphicsReady) {
         return true;
@@ -68,6 +59,38 @@ void vr_on_graphics_ready(void) {
     }
 }
 
+void vr_update(void) {
+    if (!sVrActive) {
+        return;
+    }
+
+    if (!vr_openxr_update()) {
+        printf(
+            "[VR] OpenXR stopped unexpectedly. "
+            "Returning to flat mode.\n"
+        );
+
+        vr_openxr_shutdown();
+
+        sVrActive = false;
+
+        printf("[VR] VR mode state: OFF\n");
+    }
+}
+
+void vr_shutdown(void) {
+    vr_openxr_shutdown();
+
+    sGraphicsReady = false;
+    sVrActive = false;
+
+    printf("[VR] VR subsystem shut down.\n");
+}
+
+bool vr_is_active(void) {
+    return sVrActive;
+}
+
 bool vr_set_active(bool active) {
     if (!active) {
         vr_openxr_shutdown();
@@ -79,18 +102,15 @@ bool vr_set_active(bool active) {
         return true;
     }
 
-
     if (sVrActive) {
         printf("[VR] VR mode state: ON\n");
         return true;
     }
 
-
     printf(
         "[VR] Starting persistent "
         "OpenXR context...\n"
     );
-
 
     if (!vr_openxr_startup()) {
         sVrActive = false;
@@ -105,18 +125,8 @@ bool vr_set_active(bool active) {
         return false;
     }
 
-
     sVrActive = true;
 
-
-    /*
-     * If the game graphics system already exists,
-     * such as when the user enables VR from Options,
-     * create the graphics session immediately.
-     *
-     * During startup, graphics may not exist yet.
-     * vr_on_graphics_ready() will finish the job later.
-     */
     if (!vr_start_graphics_session()) {
         vr_openxr_shutdown();
 
@@ -132,12 +142,7 @@ bool vr_set_active(bool active) {
         return false;
     }
 
-
     printf("[VR] VR mode state: ON\n");
 
     return true;
-}
-
-bool vr_is_active(void) {
-    return sVrActive;
 }

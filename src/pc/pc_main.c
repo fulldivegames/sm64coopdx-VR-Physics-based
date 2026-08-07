@@ -389,6 +389,8 @@ void produce_one_frame(void) {
 
     CTX_EXTENT(CTX_SMLUA, smlua_update);
 
+vr_update();
+
     // If we aren't threaded
     if (gAudioThread.state == INVALID) {
         CTX_EXTENT(CTX_AUDIO, buffer_audio);
