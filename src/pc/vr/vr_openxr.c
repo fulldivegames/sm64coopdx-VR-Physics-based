@@ -43,6 +43,9 @@ struct VrOpenXrFunctions {
     PFN_xrCreateSwapchain xrCreateSwapchain;
     PFN_xrDestroySwapchain xrDestroySwapchain;
     PFN_xrEnumerateSwapchainImages xrEnumerateSwapchainImages;
+    PFN_xrAcquireSwapchainImage xrAcquireSwapchainImage;
+    PFN_xrWaitSwapchainImage xrWaitSwapchainImage;
+    PFN_xrReleaseSwapchainImage xrReleaseSwapchainImage;
 };
 
 struct VrOpenXrSwapchain {
@@ -67,6 +70,7 @@ static struct VrOpenXrSwapchain sColorSwapchains[2] = { 0 };
 static int64_t sColorSwapchainFormat = 0;
 static bool sViewPoseValid = false;
 static uint32_t sPoseLogFrame = 0;
+static uint32_t sSwapchainLogFrame = 0;
 static struct VrOpenXrFunctions sXr = { 0 };
 
 static const char* vr_openxr_result_name(XrResult result) {
@@ -85,6 +89,8 @@ static const char* vr_openxr_result_name(XrResult result) {
         case XR_ERROR_SIZE_INSUFFICIENT: return "XR_ERROR_SIZE_INSUFFICIENT";
         case XR_ERROR_LIMIT_REACHED: return "XR_ERROR_LIMIT_REACHED";
         case XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED: return "XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED";
+        case XR_TIMEOUT_EXPIRED: return "XR_TIMEOUT_EXPIRED";
+        case XR_SESSION_LOSS_PENDING: return "XR_SESSION_LOSS_PENDING";
         default: return "UNKNOWN_OPENXR_ERROR";
     }
 }
@@ -194,6 +200,9 @@ static bool vr_openxr_load_instance_functions(void) {
     LOAD_XR_FUNCTION(xrCreateSwapchain, "xrCreateSwapchain", PFN_xrCreateSwapchain);
     LOAD_XR_FUNCTION(xrDestroySwapchain, "xrDestroySwapchain", PFN_xrDestroySwapchain);
     LOAD_XR_FUNCTION(xrEnumerateSwapchainImages, "xrEnumerateSwapchainImages", PFN_xrEnumerateSwapchainImages);
+    LOAD_XR_FUNCTION(xrAcquireSwapchainImage, "xrAcquireSwapchainImage", PFN_xrAcquireSwapchainImage);
+    LOAD_XR_FUNCTION(xrWaitSwapchainImage, "xrWaitSwapchainImage", PFN_xrWaitSwapchainImage);
+    LOAD_XR_FUNCTION(xrReleaseSwapchainImage, "xrReleaseSwapchainImage", PFN_xrReleaseSwapchainImage);
 
 #undef LOAD_XR_FUNCTION
 
@@ -1150,6 +1159,108 @@ static bool vr_openxr_locate_views(XrTime displayTime) {
     return true;
 }
 
+static bool vr_openxr_cycle_swapchain_image(
+    uint32_t eyeIndex,
+    uint32_t* imageIndex
+) {
+    const char* eyeName = eyeIndex == 0 ? "left" : "right";
+    struct VrOpenXrSwapchain* swapchain =
+        &sColorSwapchains[eyeIndex];
+
+    XrSwapchainImageAcquireInfo acquireInfo = { 0 };
+    acquireInfo.type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO;
+
+    XrResult result =
+        sXr.xrAcquireSwapchainImage(
+            swapchain->handle,
+            &acquireInfo,
+            imageIndex
+        );
+
+    if (result != XR_SUCCESS) {
+        printf(
+            "[VR] Could not acquire %s eye swapchain image: "
+            "%s (%d)\n",
+            eyeName,
+            vr_openxr_result_name(result),
+            (int)result
+        );
+        return false;
+    }
+
+    bool imageIndexValid = *imageIndex < swapchain->imageCount;
+
+    if (!imageIndexValid) {
+        printf(
+            "[VR] %s eye acquired image %u, but only %u exist.\n",
+            eyeName,
+            *imageIndex,
+            swapchain->imageCount
+        );
+    }
+
+    XrSwapchainImageWaitInfo waitInfo = { 0 };
+    waitInfo.type = XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO;
+    waitInfo.timeout = XR_INFINITE_DURATION;
+
+    result =
+        sXr.xrWaitSwapchainImage(
+            swapchain->handle,
+            &waitInfo
+        );
+
+    if (result != XR_SUCCESS) {
+        printf(
+            "[VR] Could not wait for %s eye swapchain image: "
+            "%s (%d)\n",
+            eyeName,
+            vr_openxr_result_name(result),
+            (int)result
+        );
+        return false;
+    }
+
+    XrSwapchainImageReleaseInfo releaseInfo = { 0 };
+    releaseInfo.type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO;
+
+    result =
+        sXr.xrReleaseSwapchainImage(
+            swapchain->handle,
+            &releaseInfo
+        );
+
+    if (result != XR_SUCCESS) {
+        printf(
+            "[VR] Could not release %s eye swapchain image: "
+            "%s (%d)\n",
+            eyeName,
+            vr_openxr_result_name(result),
+            (int)result
+        );
+        return false;
+    }
+
+    return imageIndexValid;
+}
+
+static void vr_openxr_log_swapchain_cycle(
+    const uint32_t imageIndices[2]
+) {
+    if (sSwapchainLogFrame == 0) {
+        printf(
+            "[VR] Swapchain image cycle: left %u, right %u.\n",
+            imageIndices[0],
+            imageIndices[1]
+        );
+    }
+
+    sSwapchainLogFrame++;
+
+    if (sSwapchainLogFrame >= 90) {
+        sSwapchainLogFrame = 0;
+    }
+}
+
 static bool vr_openxr_submit_empty_frame(void) {
     if (!sSessionRunning) {
         return true;
@@ -1173,9 +1284,6 @@ static bool vr_openxr_submit_empty_frame(void) {
         return false;
     }
 
-    bool viewsLocated =
-        vr_openxr_locate_views(frameState.predictedDisplayTime);
-
     XrFrameBeginInfo beginInfo = { 0 };
     beginInfo.type = XR_TYPE_FRAME_BEGIN_INFO;
 
@@ -1189,6 +1297,27 @@ static bool vr_openxr_submit_empty_frame(void) {
             (int)result
         );
         return false;
+    }
+
+    bool viewsLocated =
+        vr_openxr_locate_views(frameState.predictedDisplayTime);
+    bool imagesCycled = true;
+    uint32_t imageIndices[2] = { 0 };
+
+    if (frameState.shouldRender && viewsLocated) {
+        for (uint32_t eye = 0; eye < 2; eye++) {
+            if (!vr_openxr_cycle_swapchain_image(
+                    eye,
+                    &imageIndices[eye]
+                )) {
+                imagesCycled = false;
+                break;
+            }
+        }
+
+        if (imagesCycled) {
+            vr_openxr_log_swapchain_cycle(imageIndices);
+        }
     }
 
     XrFrameEndInfo endInfo = { 0 };
@@ -1210,7 +1339,7 @@ static bool vr_openxr_submit_empty_frame(void) {
         return false;
     }
 
-    return viewsLocated;
+    return viewsLocated && imagesCycled;
 }
 
 bool vr_openxr_update(void) {
@@ -1254,6 +1383,7 @@ void vr_openxr_shutdown(void) {
     );
     sViewPoseValid = false;
     sPoseLogFrame = 0;
+    sSwapchainLogFrame = 0;
 
     if (sSession != XR_NULL_HANDLE &&
         sXr.xrDestroySession != NULL) {
