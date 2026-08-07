@@ -85,6 +85,7 @@ static bool sFrameShouldRender = false;
 static bool sFrameViewsLocated = false;
 static bool sFrameTimingLogged = false;
 static XrQuaternionf sHeadOrientationReference = { 0 };
+static XrVector3f sHeadPositionReference = { 0 };
 static bool sHeadOrientationReferenceValid = false;
 static struct VrOpenXrFunctions sXr = { 0 };
 
@@ -1539,11 +1540,20 @@ bool vr_openxr_begin_frame(void) {
         !sHeadOrientationReferenceValid) {
         sHeadOrientationReference =
             sViews[0].pose.orientation;
+        sHeadPositionReference.x =
+            (sViews[0].pose.position.x +
+             sViews[1].pose.position.x) * 0.5f;
+        sHeadPositionReference.y =
+            (sViews[0].pose.position.y +
+             sViews[1].pose.position.y) * 0.5f;
+        sHeadPositionReference.z =
+            (sViews[0].pose.position.z +
+             sViews[1].pose.position.z) * 0.5f;
         sHeadOrientationReferenceValid = true;
 
         printf(
-            "[VR] Headset forward direction centered "
-            "for camera rotation.\n"
+            "[VR] Headset origin centered for camera "
+            "rotation and translation.\n"
         );
     }
 
@@ -1696,6 +1706,61 @@ bool vr_openxr_get_head_rotation(float rotation[4]) {
     rotation[3] = relative.w / length;
     return true;
 }
+
+bool vr_openxr_get_head_translation(float translation[3]) {
+    if (translation == NULL ||
+        !sHeadOrientationReferenceValid ||
+        !sViewPoseValid) {
+        return false;
+    }
+
+    const XrVector3f currentCenter = {
+        (sViews[0].pose.position.x +
+         sViews[1].pose.position.x) * 0.5f,
+        (sViews[0].pose.position.y +
+         sViews[1].pose.position.y) * 0.5f,
+        (sViews[0].pose.position.z +
+         sViews[1].pose.position.z) * 0.5f
+    };
+    const XrVector3f delta = {
+        currentCenter.x - sHeadPositionReference.x,
+        currentCenter.y - sHeadPositionReference.y,
+        currentCenter.z - sHeadPositionReference.z
+    };
+    const XrQuaternionf referenceInverse = {
+        -sHeadOrientationReference.x,
+        -sHeadOrientationReference.y,
+        -sHeadOrientationReference.z,
+        sHeadOrientationReference.w
+    };
+    const float twiceCrossX = 2.0f * (
+        referenceInverse.y * delta.z -
+        referenceInverse.z * delta.y
+    );
+    const float twiceCrossY = 2.0f * (
+        referenceInverse.z * delta.x -
+        referenceInverse.x * delta.z
+    );
+    const float twiceCrossZ = 2.0f * (
+        referenceInverse.x * delta.y -
+        referenceInverse.y * delta.x
+    );
+
+    translation[0] = delta.x +
+        referenceInverse.w * twiceCrossX +
+        referenceInverse.y * twiceCrossZ -
+        referenceInverse.z * twiceCrossY;
+    translation[1] = delta.y +
+        referenceInverse.w * twiceCrossY +
+        referenceInverse.z * twiceCrossX -
+        referenceInverse.x * twiceCrossZ;
+    translation[2] = delta.z +
+        referenceInverse.w * twiceCrossZ +
+        referenceInverse.x * twiceCrossY -
+        referenceInverse.y * twiceCrossX;
+    return true;
+}
+
 void vr_openxr_shutdown(void) {
     bool hadOpenXR =
         sColorSwapchains[0].handle != XR_NULL_HANDLE ||
@@ -1733,6 +1798,11 @@ void vr_openxr_shutdown(void) {
         &sHeadOrientationReference,
         0,
         sizeof(sHeadOrientationReference)
+    );
+    memset(
+        &sHeadPositionReference,
+        0,
+        sizeof(sHeadPositionReference)
     );
     sHeadOrientationReferenceValid = false;
 
@@ -1802,6 +1872,11 @@ bool vr_openxr_end_frame(void) {
 
 bool vr_openxr_get_head_rotation(float rotation[4]) {
     (void)rotation;
+    return false;
+}
+
+bool vr_openxr_get_head_translation(float translation[3]) {
+    (void)translation;
     return false;
 }
 

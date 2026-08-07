@@ -69,6 +69,7 @@ s32 gCamSkipInterp = 0;
 Vec3f gCamSkipInterpDisplacement = { 0 };
 
 u8 sUsingCamSpace = FALSE;
+static u8 sUsingBillboard = FALSE;
 Mtx sPrevCamTranf, sCurrCamTranf = {
     .m = {
         {1.0f, 0.0f, 0.0f, 0.0f},
@@ -243,6 +244,7 @@ struct MtxInterp {
     void *displayList;
     Mtx interp;
     u8 usingCamSpace;
+    u8 billboard;
 };
 
 static struct GrowingArray* sMtxTbl = NULL;
@@ -347,6 +349,32 @@ static bool vr_get_rotated_camera_basis(
     return true;
 }
 
+static void vr_offset_camera_position(
+    Vec3f position,
+    Vec3f focus,
+    s16 roll,
+    Vec3f trackedPosition
+) {
+    const float worldUnitsPerMeter = 100.0f;
+    float headTranslation[3] = { 0 };
+    vec3f_copy(trackedPosition, position);
+
+    if (!vr_get_head_translation(headTranslation)) {
+        return;
+    }
+
+    Mat4 baseCamera;
+    mtxf_lookat(baseCamera, position, focus, roll);
+
+    for (int axis = 0; axis < 3; axis++) {
+        trackedPosition[axis] += worldUnitsPerMeter * (
+            baseCamera[axis][0] * headTranslation[0] +
+            baseCamera[axis][1] * headTranslation[1] +
+            baseCamera[axis][2] * headTranslation[2]
+        );
+    }
+}
+
 static bool vr_rotate_camera_focus(
     Vec3f position,
     Vec3f focus,
@@ -398,6 +426,14 @@ static bool vr_build_head_tracked_camera_matrix(
         return false;
     }
 
+    Vec3f trackedPosition;
+    vr_offset_camera_position(
+        position,
+        focus,
+        roll,
+        trackedPosition
+    );
+
     for (int axis = 0; axis < 3; axis++) {
         matrix[axis][0] = right[axis];
         matrix[axis][1] = up[axis];
@@ -405,9 +441,9 @@ static bool vr_build_head_tracked_camera_matrix(
         matrix[axis][3] = 0.0f;
     }
 
-    matrix[3][0] = -vec3f_dot(position, right);
-    matrix[3][1] = -vec3f_dot(position, up);
-    matrix[3][2] = -vec3f_dot(position, backward);
+    matrix[3][0] = -vec3f_dot(trackedPosition, right);
+    matrix[3][1] = -vec3f_dot(trackedPosition, up);
+    matrix[3][2] = -vec3f_dot(trackedPosition, backward);
     matrix[3][3] = 1.0f;
     return true;
 }
@@ -579,20 +615,66 @@ void patch_mtx_interpolated(f32 delta) {
         Mtx *srcMtx = interp->mtx;
         Mtx *srcMtxPrev = interp->mtxPrev;
 
-        if (interp->usingCamSpace && translateCamSpace) {
-            // transform out of camera space so the matrix can interp in world space
-            Mtx bufMtx, bufMtxPrev;
-            mtxf_copy(bufMtx.m, srcMtx->m);
-            mtxf_copy(bufMtxPrev.m, srcMtxPrev->m);
-            mtxf_mul(bufMtx.m, bufMtx.m, camTranfInv.m);
-            mtxf_mul(bufMtxPrev.m, bufMtxPrev.m, prevCamTranfInv.m);
-            srcMtx = &bufMtx;
-            srcMtxPrev = &bufMtxPrev;
-        }
-        delta_interpolate_mtx(&interp->interp, srcMtxPrev, srcMtx, delta);
-        if (interp->usingCamSpace) {
-            // transform back to camera space, respecting camera interpolation
-            mtxf_mul(interp->interp.m, interp->interp.m, camInterp.m);
+        if (interp->billboard &&
+            interp->usingCamSpace &&
+            translateCamSpace &&
+            vr_is_active()) {
+            // A billboard's orientation is already camera-relative. Preserve
+            // that orientation, but recalculate its camera-space position from
+            // the world so it follows the HMD view instead of the flat camera.
+            Mtx worldMtx;
+            Mtx worldMtxPrev;
+            Mtx worldInterp;
+            Mtx cameraSpaceInterp;
+
+            mtxf_copy(worldMtx.m, srcMtx->m);
+            mtxf_copy(worldMtxPrev.m, srcMtxPrev->m);
+            mtxf_mul(worldMtx.m, worldMtx.m, camTranfInv.m);
+            mtxf_mul(
+                worldMtxPrev.m,
+                worldMtxPrev.m,
+                prevCamTranfInv.m
+            );
+            delta_interpolate_mtx(
+                &worldInterp,
+                &worldMtxPrev,
+                &worldMtx,
+                delta
+            );
+            mtxf_mul(
+                cameraSpaceInterp.m,
+                worldInterp.m,
+                camInterp.m
+            );
+
+            delta_interpolate_mtx(
+                &interp->interp,
+                srcMtxPrev,
+                srcMtx,
+                delta
+            );
+            interp->interp.m[3][0] =
+                cameraSpaceInterp.m[3][0];
+            interp->interp.m[3][1] =
+                cameraSpaceInterp.m[3][1];
+            interp->interp.m[3][2] =
+                cameraSpaceInterp.m[3][2];
+        } else {
+            if (interp->usingCamSpace && translateCamSpace) {
+                // transform out of camera space so the matrix can interp in world space
+                Mtx bufMtx, bufMtxPrev;
+                mtxf_copy(bufMtx.m, srcMtx->m);
+                mtxf_copy(bufMtxPrev.m, srcMtxPrev->m);
+                mtxf_mul(bufMtx.m, bufMtx.m, camTranfInv.m);
+                mtxf_mul(bufMtxPrev.m, bufMtxPrev.m, prevCamTranfInv.m);
+                srcMtx = &bufMtx;
+                srcMtxPrev = &bufMtxPrev;
+            }
+            delta_interpolate_mtx(&interp->interp, srcMtxPrev, srcMtx, delta);
+            if (interp->usingCamSpace) {
+                // transform back to camera space, respecting camera interpolation
+                mtxf_mul(interp->interp.m, interp->interp.m, camInterp.m);
+            }
         }
         gSPMatrix(pos++, VIRTUAL_TO_PHYSICAL(&interp->interp),
                   G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_NOPUSH);
@@ -730,6 +812,7 @@ static void geo_process_master_list_sub(struct GraphNodeMasterList *node) {
                 interp->mtxPrev = currList->transformPrev;
                 interp->displayList = currList->displayList;
                 interp->usingCamSpace = currList->usingCamSpace;
+                interp->billboard = currList->billboard;
 
                 gSPMatrix(gDisplayListHead++, VIRTUAL_TO_PHYSICAL(currList->transformPrev),
                           G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_NOPUSH);
@@ -764,6 +847,12 @@ static void geo_append_display_list(void *displayList, s16 layer) {
         listNode->displayList = displayList;
         listNode->next = 0;
         listNode->usingCamSpace = sUsingCamSpace;
+        listNode->billboard =
+            sUsingBillboard ||
+            (gCurGraphNodeObject != NULL &&
+             (gCurGraphNodeObject->node.flags &
+              (GRAPH_RENDER_BILLBOARD |
+               GRAPH_RENDER_CYLBOARD)));
         if (gCurGraphNodeMasterList->listHeads[layer] == 0) {
             gCurGraphNodeMasterList->listHeads[layer] = listNode;
         } else {
@@ -1205,12 +1294,17 @@ static void geo_process_billboard(struct GraphNodeBillboard *node) {
     // Increment the matrix stack, If we fail to do so. Just return.
     if (!increment_mat_stack()) { return; }
 
+    const u8 previousBillboardState = sUsingBillboard;
+    sUsingBillboard = TRUE;
+
     if (node->displayList != NULL) {
         geo_append_display_list(node->displayList, node->node.flags >> 8);
     }
     if (node->node.children != NULL) {
         geo_process_node_and_siblings(node->node.children);
     }
+
+    sUsingBillboard = previousBillboardState;
     gMatStackIndex--;
 }
 
@@ -2249,6 +2343,7 @@ static void geo_clear_interp_variables(void) {
     gShadowInterpCurrent = NULL;
 
     sMtxTbl->count = 0;
+    sUsingBillboard = FALSE;
     sCameraNode = NULL;
     gCurGraphNodeProcessingObject = NULL;
     gCurGraphNodeMarioState = NULL;

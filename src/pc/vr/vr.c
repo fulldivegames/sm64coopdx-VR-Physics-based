@@ -99,6 +99,14 @@ bool vr_get_head_rotation(float rotation[4]) {
     return vr_openxr_get_head_rotation(rotation);
 }
 
+bool vr_get_head_translation(float translation[3]) {
+    if (!sVrActive || translation == NULL) {
+        return false;
+    }
+
+    return vr_openxr_get_head_translation(translation);
+}
+
 void vr_shutdown(void) {
     vr_openxr_shutdown();
 
