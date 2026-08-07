@@ -17,12 +17,22 @@
 
 struct VrOpenXrFunctions {
     PFN_xrGetInstanceProcAddr xrGetInstanceProcAddr;
-    PFN_xrEnumerateInstanceExtensionProperties xrEnumerateInstanceExtensionProperties;
+
+    PFN_xrEnumerateInstanceExtensionProperties
+        xrEnumerateInstanceExtensionProperties;
+
     PFN_xrCreateInstance xrCreateInstance;
+
     PFN_xrDestroyInstance xrDestroyInstance;
     PFN_xrGetInstanceProperties xrGetInstanceProperties;
     PFN_xrGetSystem xrGetSystem;
     PFN_xrGetSystemProperties xrGetSystemProperties;
+
+    PFN_xrGetOpenGLGraphicsRequirementsKHR
+        xrGetOpenGLGraphicsRequirementsKHR;
+
+    PFN_xrCreateSession xrCreateSession;
+    PFN_xrDestroySession xrDestroySession;
 };
 
 
@@ -30,11 +40,9 @@ static HMODULE sLoader = NULL;
 
 static XrInstance sInstance = XR_NULL_HANDLE;
 static XrSystemId sSystemId = XR_NULL_SYSTEM_ID;
+static XrSession sSession = XR_NULL_HANDLE;
 
 static struct VrOpenXrFunctions sXr = { 0 };
-
-static PFN_xrGetOpenGLGraphicsRequirementsKHR
-    sXrGetOpenGLGraphicsRequirementsKHR = NULL;
 
 
 static const char* vr_openxr_result_name(XrResult result) {
@@ -66,6 +74,12 @@ static const char* vr_openxr_result_name(XrResult result) {
         case XR_ERROR_FUNCTION_UNSUPPORTED:
             return "XR_ERROR_FUNCTION_UNSUPPORTED";
 
+        case XR_ERROR_GRAPHICS_DEVICE_INVALID:
+            return "XR_ERROR_GRAPHICS_DEVICE_INVALID";
+
+        case XR_ERROR_GRAPHICS_REQUIREMENTS_CALL_MISSING:
+            return "XR_ERROR_GRAPHICS_REQUIREMENTS_CALL_MISSING";
+
         default:
             return "UNKNOWN_OPENXR_ERROR";
     }
@@ -73,64 +87,214 @@ static const char* vr_openxr_result_name(XrResult result) {
 
 
 static HMODULE vr_openxr_load_loader(void) {
-    HMODULE loader = LoadLibraryA("libopenxr_loader.dll");
+    HMODULE loader =
+        LoadLibraryA("libopenxr_loader.dll");
 
     if (loader == NULL) {
-        loader = LoadLibraryA("openxr_loader.dll");
+        loader =
+            LoadLibraryA("openxr_loader.dll");
     }
 
     return loader;
 }
 
 
-static bool vr_openxr_load_global_functions(void) {
-    sXr.xrGetInstanceProcAddr =
-        (PFN_xrGetInstanceProcAddr)
-        GetProcAddress(sLoader, "xrGetInstanceProcAddr");
+/*
+ * Windows GetProcAddress returns the generic FARPROC type.
+ * OpenXR returns the generic PFN_xrVoidFunction type.
+ *
+ * Converting these to their real OpenXR function-pointer
+ * types is expected here, so suppress GCC's warning only
+ * around these conversion helpers.
+ */
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
+#endif
 
-    sXr.xrEnumerateInstanceExtensionProperties =
-        (PFN_xrEnumerateInstanceExtensionProperties)
+
+static bool vr_openxr_load_bootstrap_function(void) {
+    FARPROC function =
         GetProcAddress(
             sLoader,
-            "xrEnumerateInstanceExtensionProperties"
+            "xrGetInstanceProcAddr"
         );
 
-    sXr.xrCreateInstance =
-        (PFN_xrCreateInstance)
-        GetProcAddress(sLoader, "xrCreateInstance");
+    if (function == NULL) {
+        printf(
+            "[VR] Could not find "
+            "xrGetInstanceProcAddr.\n"
+        );
 
-    sXr.xrDestroyInstance =
-        (PFN_xrDestroyInstance)
-        GetProcAddress(sLoader, "xrDestroyInstance");
+        return false;
+    }
 
-    sXr.xrGetInstanceProperties =
-        (PFN_xrGetInstanceProperties)
-        GetProcAddress(sLoader, "xrGetInstanceProperties");
+    sXr.xrGetInstanceProcAddr =
+        (PFN_xrGetInstanceProcAddr)function;
 
-    sXr.xrGetSystem =
-        (PFN_xrGetSystem)
-        GetProcAddress(sLoader, "xrGetSystem");
-
-    sXr.xrGetSystemProperties =
-        (PFN_xrGetSystemProperties)
-        GetProcAddress(sLoader, "xrGetSystemProperties");
+    return true;
+}
 
 
-    if (sXr.xrGetInstanceProcAddr == NULL ||
-        sXr.xrEnumerateInstanceExtensionProperties == NULL ||
-        sXr.xrCreateInstance == NULL ||
-        sXr.xrDestroyInstance == NULL ||
-        sXr.xrGetInstanceProperties == NULL ||
-        sXr.xrGetSystem == NULL ||
-        sXr.xrGetSystemProperties == NULL) {
+static bool vr_openxr_get_function(
+    XrInstance instance,
+    const char* name,
+    PFN_xrVoidFunction* function
+) {
+    *function = NULL;
 
-        printf("[VR] OpenXR loader is missing required functions.\n");
+    XrResult result =
+        sXr.xrGetInstanceProcAddr(
+            instance,
+            name,
+            function
+        );
+
+    if (XR_FAILED(result) || *function == NULL) {
+        printf(
+            "[VR] Could not load OpenXR function %s: "
+            "%s (%d)\n",
+            name,
+            vr_openxr_result_name(result),
+            (int)result
+        );
 
         return false;
     }
 
     return true;
 }
+
+
+static bool vr_openxr_load_global_functions(void) {
+    PFN_xrVoidFunction function = NULL;
+
+
+    if (!vr_openxr_get_function(
+            XR_NULL_HANDLE,
+            "xrEnumerateInstanceExtensionProperties",
+            &function
+        )) {
+        return false;
+    }
+
+    sXr.xrEnumerateInstanceExtensionProperties =
+        (PFN_xrEnumerateInstanceExtensionProperties)
+        function;
+
+
+    if (!vr_openxr_get_function(
+            XR_NULL_HANDLE,
+            "xrCreateInstance",
+            &function
+        )) {
+        return false;
+    }
+
+    sXr.xrCreateInstance =
+        (PFN_xrCreateInstance)function;
+
+
+    return true;
+}
+
+
+static bool vr_openxr_load_instance_functions(void) {
+    PFN_xrVoidFunction function = NULL;
+
+
+    if (!vr_openxr_get_function(
+            sInstance,
+            "xrDestroyInstance",
+            &function
+        )) {
+        return false;
+    }
+
+    sXr.xrDestroyInstance =
+        (PFN_xrDestroyInstance)function;
+
+
+    if (!vr_openxr_get_function(
+            sInstance,
+            "xrGetInstanceProperties",
+            &function
+        )) {
+        return false;
+    }
+
+    sXr.xrGetInstanceProperties =
+        (PFN_xrGetInstanceProperties)function;
+
+
+    if (!vr_openxr_get_function(
+            sInstance,
+            "xrGetSystem",
+            &function
+        )) {
+        return false;
+    }
+
+    sXr.xrGetSystem =
+        (PFN_xrGetSystem)function;
+
+
+    if (!vr_openxr_get_function(
+            sInstance,
+            "xrGetSystemProperties",
+            &function
+        )) {
+        return false;
+    }
+
+    sXr.xrGetSystemProperties =
+        (PFN_xrGetSystemProperties)function;
+
+
+    if (!vr_openxr_get_function(
+            sInstance,
+            "xrGetOpenGLGraphicsRequirementsKHR",
+            &function
+        )) {
+        return false;
+    }
+
+    sXr.xrGetOpenGLGraphicsRequirementsKHR =
+        (PFN_xrGetOpenGLGraphicsRequirementsKHR)
+        function;
+
+
+    if (!vr_openxr_get_function(
+            sInstance,
+            "xrCreateSession",
+            &function
+        )) {
+        return false;
+    }
+
+    sXr.xrCreateSession =
+        (PFN_xrCreateSession)function;
+
+
+    if (!vr_openxr_get_function(
+            sInstance,
+            "xrDestroySession",
+            &function
+        )) {
+        return false;
+    }
+
+    sXr.xrDestroySession =
+        (PFN_xrDestroySession)function;
+
+
+    return true;
+}
+
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 
 static bool vr_openxr_has_opengl_extension(void) {
@@ -146,7 +310,8 @@ static bool vr_openxr_has_opengl_extension(void) {
 
     if (XR_FAILED(result)) {
         printf(
-            "[VR] Could not enumerate OpenXR extensions: %s (%d)\n",
+            "[VR] Could not enumerate OpenXR extensions: "
+            "%s (%d)\n",
             vr_openxr_result_name(result),
             (int)result
         );
@@ -156,16 +321,24 @@ static bool vr_openxr_has_opengl_extension(void) {
 
 
     XrExtensionProperties* extensions =
-        calloc(extensionCount, sizeof(XrExtensionProperties));
+        calloc(
+            extensionCount,
+            sizeof(XrExtensionProperties)
+        );
 
     if (extensions == NULL) {
-        printf("[VR] Could not allocate OpenXR extension list.\n");
+        printf(
+            "[VR] Could not allocate OpenXR "
+            "extension list.\n"
+        );
+
         return false;
     }
 
 
     for (uint32_t i = 0; i < extensionCount; i++) {
-        extensions[i].type = XR_TYPE_EXTENSION_PROPERTIES;
+        extensions[i].type =
+            XR_TYPE_EXTENSION_PROPERTIES;
     }
 
 
@@ -179,7 +352,8 @@ static bool vr_openxr_has_opengl_extension(void) {
 
     if (XR_FAILED(result)) {
         printf(
-            "[VR] Could not read OpenXR extensions: %s (%d)\n",
+            "[VR] Could not read OpenXR extensions: "
+            "%s (%d)\n",
             vr_openxr_result_name(result),
             (int)result
         );
@@ -219,11 +393,21 @@ bool vr_openxr_startup(void) {
     sLoader = vr_openxr_load_loader();
 
     if (sLoader == NULL) {
-        printf("[VR] Could not load the OpenXR loader DLL.\n");
+        printf(
+            "[VR] Could not load the OpenXR "
+            "loader DLL.\n"
+        );
+
         return false;
     }
 
     printf("[VR] OpenXR loader DLL found.\n");
+
+
+    if (!vr_openxr_load_bootstrap_function()) {
+        vr_openxr_shutdown();
+        return false;
+    }
 
 
     if (!vr_openxr_load_global_functions()) {
@@ -232,7 +416,11 @@ bool vr_openxr_startup(void) {
     }
 
 
-    printf("[VR] Checking for OpenGL OpenXR support...\n");
+    printf(
+        "[VR] Checking for OpenGL "
+        "OpenXR support...\n"
+    );
+
 
     if (!vr_openxr_has_opengl_extension()) {
         printf(
@@ -245,7 +433,10 @@ bool vr_openxr_startup(void) {
         return false;
     }
 
-    printf("[VR] XR_KHR_opengl_enable is supported.\n");
+
+    printf(
+        "[VR] XR_KHR_opengl_enable is supported.\n"
+    );
 
 
     const char* enabledExtensions[] = {
@@ -254,7 +445,10 @@ bool vr_openxr_startup(void) {
 
 
     XrInstanceCreateInfo createInfo = { 0 };
-    createInfo.type = XR_TYPE_INSTANCE_CREATE_INFO;
+
+    createInfo.type =
+        XR_TYPE_INSTANCE_CREATE_INFO;
+
 
     snprintf(
         createInfo.applicationInfo.applicationName,
@@ -264,6 +458,7 @@ bool vr_openxr_startup(void) {
     );
 
     createInfo.applicationInfo.applicationVersion = 1;
+
 
     snprintf(
         createInfo.applicationInfo.engineName,
@@ -279,7 +474,8 @@ bool vr_openxr_startup(void) {
 
 
     createInfo.enabledExtensionCount = 1;
-    createInfo.enabledExtensionNames = enabledExtensions;
+    createInfo.enabledExtensionNames =
+        enabledExtensions;
 
 
     XrResult result =
@@ -291,7 +487,8 @@ bool vr_openxr_startup(void) {
 
     if (XR_FAILED(result)) {
         printf(
-            "[VR] xrCreateInstance failed: %s (%d)\n",
+            "[VR] xrCreateInstance failed: "
+            "%s (%d)\n",
             vr_openxr_result_name(result),
             (int)result
         );
@@ -304,11 +501,22 @@ bool vr_openxr_startup(void) {
     }
 
 
-    printf("[VR] OpenXR instance created successfully.\n");
+    printf(
+        "[VR] OpenXR instance created successfully.\n"
+    );
+
+
+    if (!vr_openxr_load_instance_functions()) {
+        vr_openxr_shutdown();
+        return false;
+    }
 
 
     XrInstanceProperties instanceProperties = { 0 };
-    instanceProperties.type = XR_TYPE_INSTANCE_PROPERTIES;
+
+    instanceProperties.type =
+        XR_TYPE_INSTANCE_PROPERTIES;
+
 
     result =
         sXr.xrGetInstanceProperties(
@@ -326,7 +534,10 @@ bool vr_openxr_startup(void) {
 
 
     XrSystemGetInfo systemInfo = { 0 };
-    systemInfo.type = XR_TYPE_SYSTEM_GET_INFO;
+
+    systemInfo.type =
+        XR_TYPE_SYSTEM_GET_INFO;
+
     systemInfo.formFactor =
         XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
 
@@ -341,7 +552,8 @@ bool vr_openxr_startup(void) {
 
     if (XR_FAILED(result)) {
         printf(
-            "[VR] Could not find an HMD: %s (%d)\n",
+            "[VR] Could not find an HMD: "
+            "%s (%d)\n",
             vr_openxr_result_name(result),
             (int)result
         );
@@ -355,7 +567,10 @@ bool vr_openxr_startup(void) {
 
 
     XrSystemProperties systemProperties = { 0 };
-    systemProperties.type = XR_TYPE_SYSTEM_PROPERTIES;
+
+    systemProperties.type =
+        XR_TYPE_SYSTEM_PROPERTIES;
+
 
     result =
         sXr.xrGetSystemProperties(
@@ -373,42 +588,15 @@ bool vr_openxr_startup(void) {
     }
 
 
-    PFN_xrVoidFunction function = NULL;
-
-    result =
-        sXr.xrGetInstanceProcAddr(
-            sInstance,
-            "xrGetOpenGLGraphicsRequirementsKHR",
-            &function
-        );
-
-
-    if (XR_FAILED(result) || function == NULL) {
-        printf(
-            "[VR] Could not load "
-            "xrGetOpenGLGraphicsRequirementsKHR: %s (%d)\n",
-            vr_openxr_result_name(result),
-            (int)result
-        );
-
-        vr_openxr_shutdown();
-
-        return false;
-    }
-
-
-    sXrGetOpenGLGraphicsRequirementsKHR =
-        (PFN_xrGetOpenGLGraphicsRequirementsKHR)function;
-
-
-    XrGraphicsRequirementsOpenGLKHR graphicsRequirements = { 0 };
+    XrGraphicsRequirementsOpenGLKHR
+        graphicsRequirements = { 0 };
 
     graphicsRequirements.type =
         XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_KHR;
 
 
     result =
-        sXrGetOpenGLGraphicsRequirementsKHR(
+        sXr.xrGetOpenGLGraphicsRequirementsKHR(
             sInstance,
             sSystemId,
             &graphicsRequirements
@@ -417,7 +605,8 @@ bool vr_openxr_startup(void) {
 
     if (XR_FAILED(result)) {
         printf(
-            "[VR] Could not query OpenGL requirements: %s (%d)\n",
+            "[VR] Could not query OpenGL requirements: "
+            "%s (%d)\n",
             vr_openxr_result_name(result),
             (int)result
         );
@@ -429,23 +618,129 @@ bool vr_openxr_startup(void) {
 
 
     printf(
-        "[VR] Runtime OpenGL range: %u.%u through %u.%u\n",
+        "[VR] Runtime OpenGL range: "
+        "%u.%u through %u.%u\n",
+
         XR_VERSION_MAJOR(
             graphicsRequirements.minApiVersionSupported
         ),
+
         XR_VERSION_MINOR(
             graphicsRequirements.minApiVersionSupported
         ),
+
         XR_VERSION_MAJOR(
             graphicsRequirements.maxApiVersionSupported
         ),
+
         XR_VERSION_MINOR(
             graphicsRequirements.maxApiVersionSupported
         )
     );
 
 
-    printf("[VR] Persistent OpenXR context is ready.\n");
+    printf(
+        "[VR] Persistent OpenXR context is ready.\n"
+    );
+
+    return true;
+}
+
+
+bool vr_openxr_create_session(void) {
+    if (sSession != XR_NULL_HANDLE) {
+        return true;
+    }
+
+
+    if (sInstance == XR_NULL_HANDLE ||
+        sSystemId == XR_NULL_SYSTEM_ID) {
+
+        printf(
+            "[VR] Cannot create session: "
+            "OpenXR is not initialized.\n"
+        );
+
+        return false;
+    }
+
+
+    /*
+     * sm64coopdx's SDL OpenGL context should already
+     * be current on this thread by the time we get here.
+     */
+    HDC hdc = wglGetCurrentDC();
+    HGLRC hglrc = wglGetCurrentContext();
+
+
+    if (hdc == NULL || hglrc == NULL) {
+        printf(
+            "[VR] Could not find the current "
+            "Windows OpenGL context.\n"
+        );
+
+        return false;
+    }
+
+
+    printf(
+        "[VR] Current Windows OpenGL context found.\n"
+    );
+
+
+    XrGraphicsBindingOpenGLWin32KHR
+        graphicsBinding = { 0 };
+
+    graphicsBinding.type =
+        XR_TYPE_GRAPHICS_BINDING_OPENGL_WIN32_KHR;
+
+    graphicsBinding.hDC = hdc;
+    graphicsBinding.hGLRC = hglrc;
+
+
+    XrSessionCreateInfo sessionInfo = { 0 };
+
+    sessionInfo.type =
+        XR_TYPE_SESSION_CREATE_INFO;
+
+    sessionInfo.next =
+        &graphicsBinding;
+
+    sessionInfo.systemId =
+        sSystemId;
+
+
+    printf(
+        "[VR] Creating OpenXR OpenGL session...\n"
+    );
+
+
+    XrResult result =
+        sXr.xrCreateSession(
+            sInstance,
+            &sessionInfo,
+            &sSession
+        );
+
+
+    if (XR_FAILED(result)) {
+        printf(
+            "[VR] xrCreateSession failed: "
+            "%s (%d)\n",
+            vr_openxr_result_name(result),
+            (int)result
+        );
+
+        sSession = XR_NULL_HANDLE;
+
+        return false;
+    }
+
+
+    printf(
+        "[VR] OpenXR OpenGL session "
+        "created successfully.\n"
+    );
 
     return true;
 }
@@ -453,7 +748,24 @@ bool vr_openxr_startup(void) {
 
 void vr_openxr_shutdown(void) {
     bool hadOpenXR =
-        (sInstance != XR_NULL_HANDLE || sLoader != NULL);
+        sSession != XR_NULL_HANDLE ||
+        sInstance != XR_NULL_HANDLE ||
+        sLoader != NULL;
+
+
+    /*
+     * Destroy child objects before their parents.
+     *
+     * XrSession belongs to XrInstance, so the session
+     * must disappear first.
+     */
+    if (sSession != XR_NULL_HANDLE &&
+        sXr.xrDestroySession != NULL) {
+
+        sXr.xrDestroySession(sSession);
+    }
+
+    sSession = XR_NULL_HANDLE;
 
 
     if (sInstance != XR_NULL_HANDLE &&
@@ -462,11 +774,8 @@ void vr_openxr_shutdown(void) {
         sXr.xrDestroyInstance(sInstance);
     }
 
-
     sInstance = XR_NULL_HANDLE;
     sSystemId = XR_NULL_SYSTEM_ID;
-
-    sXrGetOpenGLGraphicsRequirementsKHR = NULL;
 
 
     if (sLoader != NULL) {
@@ -475,17 +784,29 @@ void vr_openxr_shutdown(void) {
 
     sLoader = NULL;
 
-    memset(&sXr, 0, sizeof(sXr));
+
+    memset(
+        &sXr,
+        0,
+        sizeof(sXr)
+    );
 
 
     if (hadOpenXR) {
-        printf("[VR] OpenXR context shut down.\n");
+        printf(
+            "[VR] OpenXR context shut down.\n"
+        );
     }
 }
 
 
 bool vr_openxr_is_initialized(void) {
     return sInstance != XR_NULL_HANDLE;
+}
+
+
+bool vr_openxr_has_session(void) {
+    return sSession != XR_NULL_HANDLE;
 }
 
 
@@ -502,11 +823,21 @@ bool vr_openxr_startup(void) {
 }
 
 
+bool vr_openxr_create_session(void) {
+    return false;
+}
+
+
 void vr_openxr_shutdown(void) {
 }
 
 
 bool vr_openxr_is_initialized(void) {
+    return false;
+}
+
+
+bool vr_openxr_has_session(void) {
     return false;
 }
 

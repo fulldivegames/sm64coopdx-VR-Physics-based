@@ -544,6 +544,8 @@ int main(int argc, char *argv[]) {
         gWindowApi->set_scroll_callback(mouse_on_scroll);
     }
 
+    vr_on_graphics_ready();
+
     // render the rom setup screen
     if (!main_rom_handler()) {
         if (!gCLIOpts.hideLoadingScreen) {
