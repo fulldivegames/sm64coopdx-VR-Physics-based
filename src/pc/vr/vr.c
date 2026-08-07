@@ -15,38 +15,52 @@ void vr_init(void) {
 }
 
 void vr_shutdown(void) {
+    vr_openxr_shutdown();
+
     sVrActive = false;
+
     printf("[VR] VR subsystem shut down.\n");
 }
-
 bool vr_is_active(void) {
     return sVrActive;
 }
 
 bool vr_set_active(bool active) {
     if (!active) {
+        vr_openxr_shutdown();
+
         sVrActive = false;
 
         printf("[VR] VR mode state: OFF\n");
 
         return true;
     }
+
 
     if (sVrActive) {
         printf("[VR] VR mode state: ON\n");
         return true;
     }
 
-    printf("[VR] Checking OpenXR runtime and headset...\n");
 
-    if (!vr_openxr_probe()) {
+    printf(
+        "[VR] Starting persistent OpenXR context...\n"
+    );
+
+
+    if (!vr_openxr_startup()) {
         sVrActive = false;
 
-        printf("[VR] VR activation failed. Staying in flat mode.\n");
+        printf(
+            "[VR] VR activation failed. "
+            "Staying in flat mode.\n"
+        );
+
         printf("[VR] VR mode state: OFF\n");
 
         return false;
     }
+
 
     sVrActive = true;
 
