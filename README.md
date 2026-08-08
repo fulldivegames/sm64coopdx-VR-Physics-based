@@ -1,11 +1,13 @@
 # SM64 Co-Op DX VR
 
-An experimental OpenXR VR fork of [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx).
+An experimental vibe coded OpenXR VR fork of [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx).
 
-The current playable milestone provides a polished **third-person VR mode designed for a standard gamepad**. It keeps Mario's original movement and gameplay while rendering the game in stereoscopic 6DoF VR. Both the default camera and SM64 Co-Op DX's free camera are supported.
+The current playable milestone provides a **third-person VR mode designed for a standard gamepad**. It keeps Mario's original movement and gameplay while rendering the game in stereoscopic 6DoF VR. Both the default camera and SM64 Co-Op DX's free camera are supported.
 
 > [!IMPORTANT]
-> This is an early development fork, not a finished release. The current VR mode targets Windows and OpenGL. Motion-controller gameplay, first-person mode, and floating hands are planned work and are not included yet.
+> This is an early development fork, not a finished release. The current VR mode targets Windows and OpenGL. Motion-controller gameplay, first-person mode is planned.
+> Coop is currently untested, solo hosting is tested and works.
+> I recommend adjusting camera distance to your liking in the VR menu, as well as testing if you prefer default or free camera.
 
 ## Current features
 
@@ -34,12 +36,12 @@ The current playable milestone provides a polished **third-person VR mode design
 - A standard gamepad
 - SM64 Co-Op DX's normal game files and legally obtained Super Mario 64 assets
 
-The current development build has been tested with a Meta Quest 3 using Virtual Desktop's OpenXR runtime. Other conformant OpenXR headsets and runtimes may work, but have not all been tested yet.
+The current development build has been tested with a Meta Quest 3 using Virtual Desktop's OpenXR runtime. Other conformant OpenXR headsets and runtimes may work, but have not all been tested yet. Coop play and rom hacks have also not been tested.
 
 ### To build from source
 
 - The normal [SM64 Co-Op DX build prerequisites](https://github.com/coop-deluxe/sm64coopdx)
-- A legally obtained Super Mario 64 US ROM named `baserom.us.z64` in the repository root
+- A legally obtained Super Mario 64 US ROM
 - A Windows/MSYS2 MinGW64 build environment
 - Git and GNU Make
 
@@ -102,16 +104,16 @@ The long-term goal is to expand this foundation without sacrificing SM64 Co-Op D
 - First-person VR mode
 - Head-facing movement direction for first-person play
 - Permanently floating tracked hands instead of VR arms
-- Hiding Mario's head and arms in first person, with an option to hide the remaining torso and legs
+- option to hide torso and legs
 - Motion-based punching and physical interactions
 - Hand anchoring for wall slides and wall jumps
-- Hand-mounted HUD placement on either hand
-- HUD opacity, size, angle, position, and distance adjustments
+- Hand-mounted HUD placement options on either hand
+- HUD size, angle, position, and distance adjustments
 - Controller haptics and calibration options
-- Smooth switching between VR and flat-screen play
+- Smooth switching between VR and flat-screen play (Might work currently)
 - Continued multiplayer, Lua mod, model/texture mod, and ROM-hack compatibility work
 
-This roadmap describes goals, not promised release dates.
+These are just goals and I'm not sure when I'll have time to work on this
 
 ## Project status
 
