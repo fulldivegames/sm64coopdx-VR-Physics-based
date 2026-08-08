@@ -14,6 +14,11 @@ bool vr_begin_eye(
     uint32_t* height
 );
 bool vr_end_eye(uint32_t eyeIndex);
+bool vr_mirror_eye(
+    uint32_t eyeIndex,
+    uint32_t width,
+    uint32_t height
+);
 bool vr_get_render_target_aspect(float* aspect);
 bool vr_get_eye_offset(uint32_t eyeIndex, float offset[3]);
 bool vr_get_eye_fov(uint32_t eyeIndex, float fov[4]);

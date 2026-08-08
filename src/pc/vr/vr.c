@@ -118,6 +118,22 @@ bool vr_end_eye(uint32_t eyeIndex) {
     return ended;
 }
 
+bool vr_mirror_eye(
+    uint32_t eyeIndex,
+    uint32_t width,
+    uint32_t height
+) {
+    if (!sVrActive) {
+        return false;
+    }
+
+    return vr_openxr_mirror_eye(
+        eyeIndex,
+        width,
+        height
+    );
+}
+
 bool vr_get_render_target_aspect(float* aspect) {
     if (!sVrActive ||
         aspect == NULL ||

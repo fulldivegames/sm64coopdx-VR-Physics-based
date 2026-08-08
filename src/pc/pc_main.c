@@ -302,7 +302,14 @@ void produce_interpolation_frames_and_delay(void) {
 
         const struct GfxDimensions desktopDimensions =
             gfx_current_dimensions;
+        uint32_t desktopMirrorWidth = 0;
+        uint32_t desktopMirrorHeight = 0;
+        gWindowApi->get_dimensions(
+            &desktopMirrorWidth,
+            &desktopMirrorHeight
+        );
         bool renderedVrEye = false;
+        bool mirroredVrEye = false;
 
         for (uint32_t eye = 0; eye < 2; eye++) {
             uint32_t eyeWidth = 0;
@@ -336,6 +343,17 @@ void produce_interpolation_frames_and_delay(void) {
 
             send_display_list(gGfxSPTask);
             gfx_end_frame_render();
+
+            // Present the left eye in the desktop window for capture and
+            // spectators. Copy it while OpenXR still owns the acquired image.
+            if (eye == 0) {
+                mirroredVrEye = vr_mirror_eye(
+                    eye,
+                    desktopMirrorWidth,
+                    desktopMirrorHeight
+                );
+            }
+
             vr_end_eye(eye);
         }
 
@@ -349,8 +367,12 @@ void produce_interpolation_frames_and_delay(void) {
             patch_mtx_vr_ui_projection(2);
         }
 
-        send_display_list(gGfxSPTask);
-        gfx_end_frame_render();
+        // If mirroring was unavailable, retain the old independent desktop
+        // render as a fallback instead of presenting an empty window.
+        if (!mirroredVrEye) {
+            send_display_list(gGfxSPTask);
+            gfx_end_frame_render();
+        }
         vr_end_frame();
         gfx_display_frame();
 

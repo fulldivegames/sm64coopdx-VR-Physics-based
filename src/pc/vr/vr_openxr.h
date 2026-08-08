@@ -13,6 +13,11 @@ bool vr_openxr_begin_eye(
     uint32_t* height
 );
 bool vr_openxr_end_eye(uint32_t eyeIndex);
+bool vr_openxr_mirror_eye(
+    uint32_t eyeIndex,
+    uint32_t width,
+    uint32_t height
+);
 bool vr_openxr_get_eye_offset(
     uint32_t eyeIndex,
     float offset[3]

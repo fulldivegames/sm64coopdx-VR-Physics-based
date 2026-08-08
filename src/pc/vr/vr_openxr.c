@@ -82,7 +82,10 @@ static uint32_t sEyeDirectImageIndices[2] = { 0 };
 static int32_t sActiveRenderEye = -1;
 static GLint sPreviousDrawFramebuffer = 0;
 static GLint sPreviousReadFramebuffer = 0;
+static GLint sPreviousDrawBuffer = GL_BACK;
+static GLint sPreviousReadBuffer = GL_BACK;
 static bool sDirectRenderingLogged = false;
+static bool sDesktopMirrorLogged = false;
 static bool sStereoEyeOffsetsLogged = false;
 static bool sAsymmetricProjectionLogged = false;
 
@@ -1612,6 +1615,8 @@ bool vr_openxr_begin_eye(
         GL_READ_FRAMEBUFFER_BINDING,
         &sPreviousReadFramebuffer
     );
+    glGetIntegerv(GL_DRAW_BUFFER, &sPreviousDrawBuffer);
+    glGetIntegerv(GL_READ_BUFFER, &sPreviousReadBuffer);
 
     glBindFramebuffer(
         GL_FRAMEBUFFER,
@@ -1709,10 +1714,12 @@ bool vr_openxr_end_eye(uint32_t eyeIndex) {
         GL_DRAW_FRAMEBUFFER,
         (GLuint)sPreviousDrawFramebuffer
     );
+    glDrawBuffer((GLenum)sPreviousDrawBuffer);
     glBindFramebuffer(
         GL_READ_FRAMEBUFFER,
         (GLuint)sPreviousReadFramebuffer
     );
+    glReadBuffer((GLenum)sPreviousReadBuffer);
 
     sActiveRenderEye = -1;
 
@@ -1730,6 +1737,126 @@ bool vr_openxr_end_eye(uint32_t eyeIndex) {
             "OpenXR eye targets.\n"
         );
         sDirectRenderingLogged = true;
+    }
+
+    return true;
+}
+
+bool vr_openxr_mirror_eye(
+    uint32_t eyeIndex,
+    uint32_t width,
+    uint32_t height
+) {
+    if (eyeIndex >= 2 ||
+        sActiveRenderEye != (int32_t)eyeIndex ||
+        width == 0 ||
+        height == 0) {
+        return false;
+    }
+
+    const struct VrOpenXrSwapchain* swapchain =
+        &sColorSwapchains[eyeIndex];
+    if (swapchain->width == 0 || swapchain->height == 0) {
+        return false;
+    }
+
+    GLint activeDrawFramebuffer = 0;
+    GLint activeReadFramebuffer = 0;
+    GLint activeDrawBuffer = 0;
+    GLint activeReadBuffer = 0;
+    GLint activeScissorBox[4] = { 0 };
+    const GLboolean scissorWasEnabled =
+        glIsEnabled(GL_SCISSOR_TEST);
+
+    glGetIntegerv(
+        GL_DRAW_FRAMEBUFFER_BINDING,
+        &activeDrawFramebuffer
+    );
+    glGetIntegerv(
+        GL_READ_FRAMEBUFFER_BINDING,
+        &activeReadFramebuffer
+    );
+    glGetIntegerv(GL_DRAW_BUFFER, &activeDrawBuffer);
+    glGetIntegerv(GL_READ_BUFFER, &activeReadBuffer);
+    glGetIntegerv(GL_SCISSOR_BOX, activeScissorBox);
+
+    GLint sourceX = 0;
+    GLint sourceY = 0;
+    GLint sourceWidth = (GLint)swapchain->width;
+    GLint sourceHeight = (GLint)swapchain->height;
+    const float sourceAspect =
+        (float)sourceWidth / (float)sourceHeight;
+    const float destinationAspect =
+        (float)width / (float)height;
+
+    // Fill the desktop window without stretching the headset image. A
+    // single eye is taller than a typical capture window, so this normally
+    // center-crops the top and bottom while preserving the correct aspect.
+    if (sourceAspect > destinationAspect) {
+        const GLint croppedWidth =
+            (GLint)((float)sourceHeight * destinationAspect);
+        sourceX = (sourceWidth - croppedWidth) / 2;
+        sourceWidth = croppedWidth;
+    } else {
+        const GLint croppedHeight =
+            (GLint)((float)sourceWidth / destinationAspect);
+        sourceY = (sourceHeight - croppedHeight) / 2;
+        sourceHeight = croppedHeight;
+    }
+
+    glDisable(GL_SCISSOR_TEST);
+    glBindFramebuffer(
+        GL_READ_FRAMEBUFFER,
+        sEyeFramebuffer
+    );
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glBindFramebuffer(
+        GL_DRAW_FRAMEBUFFER,
+        (GLuint)sPreviousDrawFramebuffer
+    );
+    glDrawBuffer((GLenum)sPreviousDrawBuffer);
+    glBlitFramebuffer(
+        sourceX,
+        sourceY,
+        sourceX + sourceWidth,
+        sourceY + sourceHeight,
+        0,
+        0,
+        (GLint)width,
+        (GLint)height,
+        GL_COLOR_BUFFER_BIT,
+        GL_LINEAR
+    );
+
+    glBindFramebuffer(
+        GL_DRAW_FRAMEBUFFER,
+        (GLuint)activeDrawFramebuffer
+    );
+    glDrawBuffer((GLenum)activeDrawBuffer);
+    glBindFramebuffer(
+        GL_READ_FRAMEBUFFER,
+        (GLuint)activeReadFramebuffer
+    );
+    glReadBuffer((GLenum)activeReadBuffer);
+    glScissor(
+        activeScissorBox[0],
+        activeScissorBox[1],
+        activeScissorBox[2],
+        activeScissorBox[3]
+    );
+
+    if (scissorWasEnabled) {
+        glEnable(GL_SCISSOR_TEST);
+    } else {
+        glDisable(GL_SCISSOR_TEST);
+    }
+
+    if (!sDesktopMirrorLogged) {
+        printf(
+            "[VR] Desktop mirror is displaying the "
+            "left OpenXR eye.\n"
+        );
+        sDesktopMirrorLogged = true;
     }
 
     return true;
@@ -2235,7 +2362,10 @@ void vr_openxr_shutdown(void) {
     sActiveRenderEye = -1;
     sPreviousDrawFramebuffer = 0;
     sPreviousReadFramebuffer = 0;
+    sPreviousDrawBuffer = GL_BACK;
+    sPreviousReadBuffer = GL_BACK;
     sDirectRenderingLogged = false;
+    sDesktopMirrorLogged = false;
     sStereoEyeOffsetsLogged = false;
     sAsymmetricProjectionLogged = false;
     memset(
@@ -2327,6 +2457,17 @@ bool vr_openxr_begin_eye(
 
 bool vr_openxr_end_eye(uint32_t eyeIndex) {
     (void)eyeIndex;
+    return false;
+}
+
+bool vr_openxr_mirror_eye(
+    uint32_t eyeIndex,
+    uint32_t width,
+    uint32_t height
+) {
+    (void)eyeIndex;
+    (void)width;
+    (void)height;
     return false;
 }
 
