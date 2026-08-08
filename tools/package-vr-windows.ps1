@@ -17,7 +17,16 @@ $zipPath = Join-Path $outputPath "$packageName.zip"
 
 $requiredFiles = @(
     "sm64coopdx.exe",
-    "discord_game_sdk.dll"
+    "discord_game_sdk.dll",
+    "libopenxr_loader.dll",
+    "libgcc_s_seh-1.dll",
+    "libstdc++-6.dll",
+    "libwinpthread-1.dll",
+    "openxr-sdk-LICENSE",
+    "gcc-COPYING.LIB",
+    "gcc-COPYING.RUNTIME",
+    "gcc-COPYING3",
+    "libwinpthread-COPYING"
 )
 
 $requiredDirectories = @(
@@ -52,7 +61,19 @@ New-Item -ItemType Directory -Path $stagePath | Out-Null
 
 Copy-Item -LiteralPath (Join-Path $buildPath "sm64coopdx.exe") -Destination (Join-Path $stagePath "SM64-Co-Op-DX-VR.exe")
 Copy-Item -LiteralPath (Join-Path $buildPath "discord_game_sdk.dll") -Destination $stagePath
+Copy-Item -LiteralPath (Join-Path $buildPath "libopenxr_loader.dll") -Destination $stagePath
+Copy-Item -LiteralPath (Join-Path $buildPath "libgcc_s_seh-1.dll") -Destination $stagePath
+Copy-Item -LiteralPath (Join-Path $buildPath "libstdc++-6.dll") -Destination $stagePath
+Copy-Item -LiteralPath (Join-Path $buildPath "libwinpthread-1.dll") -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $repoRoot "docs/PLAYER-GUIDE.txt") -Destination (Join-Path $stagePath "README.txt")
+
+$licensesPath = Join-Path $stagePath "licenses"
+New-Item -ItemType Directory -Path $licensesPath | Out-Null
+Copy-Item -LiteralPath (Join-Path $buildPath "openxr-sdk-LICENSE") -Destination (Join-Path $licensesPath "OpenXR-SDK-LICENSE.txt")
+Copy-Item -LiteralPath (Join-Path $buildPath "gcc-COPYING.LIB") -Destination (Join-Path $licensesPath "GCC-COPYING.LIB.txt")
+Copy-Item -LiteralPath (Join-Path $buildPath "gcc-COPYING.RUNTIME") -Destination (Join-Path $licensesPath "GCC-Runtime-Library-Exception.txt")
+Copy-Item -LiteralPath (Join-Path $buildPath "gcc-COPYING3") -Destination (Join-Path $licensesPath "GCC-GPL-3.0.txt")
+Copy-Item -LiteralPath (Join-Path $buildPath "libwinpthread-COPYING") -Destination (Join-Path $licensesPath "libwinpthread-COPYING.txt")
 
 foreach ($directory in $requiredDirectories) {
     Copy-Item -LiteralPath (Join-Path $buildPath $directory) -Destination $stagePath -Recurse

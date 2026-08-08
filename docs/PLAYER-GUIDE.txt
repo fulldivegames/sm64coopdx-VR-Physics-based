@@ -10,6 +10,10 @@ WHAT YOU NEED
   (the ROM commonly identified as Super Mario 64 (U) [!].z64)
 
 Nintendo ROMs and game assets are not included in this download.
+The included OpenXR loader is distributed under the Khronos OpenXR SDK
+license, provided in licenses/OpenXR-SDK-LICENSE.txt. Its bundled MinGW runtime
+dependencies and their applicable license notices are also provided in the
+licenses folder.
 
 
 FIRST-TIME SETUP
