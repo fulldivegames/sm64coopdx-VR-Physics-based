@@ -224,6 +224,87 @@ static void djui_panel_vr_controls_create(struct DjuiBase* caller) {
             NULL
         );
 
+        djui_checkbox_create(
+            body,
+            "Enable Punch Button (Right Trigger)",
+            &configVrPunchButton,
+            NULL
+        );
+
+        djui_button_create(
+            body,
+            DLANG(MENU, BACK),
+            DJUI_BUTTON_STYLE_BACK,
+            djui_panel_menu_back
+        );
+    }
+
+    djui_panel_add(caller, panel, NULL);
+}
+
+static void djui_panel_vr_motion_control_settings_create(
+    struct DjuiBase* caller
+) {
+    configVrPunchSpeed = djui_panel_vr_clamp_uint(
+        configVrPunchSpeed,
+        75U,
+        300U
+    );
+    configVrPunchDistance = djui_panel_vr_clamp_uint(
+        configVrPunchDistance,
+        5U,
+        50U
+    );
+    configVrPunchGripThreshold = djui_panel_vr_clamp_uint(
+        configVrPunchGripThreshold,
+        10U,
+        100U
+    );
+
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create(
+            "Motion Control Settings",
+            false
+        );
+
+    struct DjuiBase* body =
+        djui_three_panel_get_body(panel);
+
+    {
+        djui_checkbox_create(
+            body,
+            "Enable Physical Punches",
+            &configVrPhysicalPunching,
+            NULL
+        );
+
+        djui_slider_create(
+            body,
+            "Punch Speed Required (cm/s)",
+            &configVrPunchSpeed,
+            75,
+            300,
+            NULL
+        );
+
+        djui_slider_create(
+            body,
+            "Punch Range of Motion (cm)",
+            &configVrPunchDistance,
+            5,
+            50,
+            NULL
+        );
+
+        djui_slider_create(
+            body,
+            "Grip / Trigger Strength Required (%)",
+            &configVrPunchGripThreshold,
+            10,
+            100,
+            NULL
+        );
+
         djui_button_create(
             body,
             DLANG(MENU, BACK),
@@ -479,6 +560,13 @@ void djui_panel_vr_create(struct DjuiBase* caller) {
             "VR Controls",
             DJUI_BUTTON_STYLE_NORMAL,
             djui_panel_vr_controls_create
+        );
+
+        djui_button_create(
+            body,
+            "Motion Control Settings",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_vr_motion_control_settings_create
         );
 
         djui_button_create(

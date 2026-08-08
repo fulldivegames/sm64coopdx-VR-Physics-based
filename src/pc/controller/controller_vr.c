@@ -9,13 +9,23 @@
 #define VR_STICK_DEADZONE 0.18f
 #define VR_TRIGGER_THRESHOLD 0.55f
 #define VR_CAMERA_BUTTON_THRESHOLD 0.55f
-#define VR_PUNCH_SPEED_THRESHOLD 0.90f
-#define VR_PUNCH_RESET_SPEED 0.35f
-#define VR_PUNCH_GRIP_THRESHOLD 0.35f
+#define VR_PUNCH_MIN_RESET_SPEED 0.20f
+#define VR_PUNCH_RESET_SPEED_SCALE 0.35f
+#define VR_PUNCH_TRAVEL_SPEED_SCALE 0.60f
 
 static bool sVrPunchArmed[VR_CONTROLLER_COUNT] = {
     true,
     true
+};
+static bool sVrPunchLastPositionValid[VR_CONTROLLER_COUNT] = {
+    false,
+    false
+};
+static float
+    sVrPunchLastPosition[VR_CONTROLLER_COUNT][3] = { 0 };
+static float sVrPunchTravel[VR_CONTROLLER_COUNT] = {
+    0.0f,
+    0.0f
 };
 
 static float controller_vr_clampf(
@@ -104,6 +114,8 @@ static bool controller_vr_update_physical_punch(
         !state->gripLinearVelocityValid) {
         if (hand < VR_CONTROLLER_COUNT) {
             sVrPunchArmed[hand] = false;
+            sVrPunchLastPositionValid[hand] = false;
+            sVrPunchTravel[hand] = 0.0f;
         }
         return false;
     }
@@ -117,29 +129,110 @@ static bool controller_vr_update_physical_punch(
             state->gripLinearVelocity[2]
     );
 
-    if (speed <= VR_PUNCH_RESET_SPEED) {
-        sVrPunchArmed[hand] = true;
-        return false;
-    }
-
     const float gripAmount = fmaxf(
         state->squeeze,
         state->trigger
     );
+    const float gripThreshold = controller_vr_clampf(
+        (float)configVrPunchGripThreshold,
+        10.0f,
+        100.0f
+    ) / 100.0f;
+    if (gripAmount < gripThreshold) {
+        sVrPunchArmed[hand] = true;
+        sVrPunchLastPositionValid[hand] = false;
+        sVrPunchTravel[hand] = 0.0f;
+        return false;
+    }
+
+    const float requiredSpeed = controller_vr_clampf(
+        (float)configVrPunchSpeed,
+        75.0f,
+        300.0f
+    ) / 100.0f;
+    const float requiredDistance = controller_vr_clampf(
+        (float)configVrPunchDistance,
+        5.0f,
+        50.0f
+    ) / 100.0f;
+    const float resetSpeed = fmaxf(
+        VR_PUNCH_MIN_RESET_SPEED,
+        requiredSpeed * VR_PUNCH_RESET_SPEED_SCALE
+    );
+    const float travelSpeed =
+        requiredSpeed * VR_PUNCH_TRAVEL_SPEED_SCALE;
+
+    if (!sVrPunchLastPositionValid[hand]) {
+        for (uint32_t axis = 0; axis < 3; axis++) {
+            sVrPunchLastPosition[hand][axis] =
+                state->gripPosition[axis];
+        }
+        sVrPunchLastPositionValid[hand] = true;
+        sVrPunchTravel[hand] = 0.0f;
+        return false;
+    }
+
+    const float deltaX = state->gripPosition[0] -
+        sVrPunchLastPosition[hand][0];
+    const float deltaY = state->gripPosition[1] -
+        sVrPunchLastPosition[hand][1];
+    const float deltaZ = state->gripPosition[2] -
+        sVrPunchLastPosition[hand][2];
+    const float frameTravel = sqrtf(
+        deltaX * deltaX +
+        deltaY * deltaY +
+        deltaZ * deltaZ
+    );
+    for (uint32_t axis = 0; axis < 3; axis++) {
+        sVrPunchLastPosition[hand][axis] =
+            state->gripPosition[axis];
+    }
+
+    if (speed <= resetSpeed) {
+        sVrPunchArmed[hand] = true;
+        sVrPunchTravel[hand] = 0.0f;
+        return false;
+    }
+
+    if (speed >= travelSpeed) {
+        sVrPunchTravel[hand] += frameTravel;
+    } else {
+        sVrPunchTravel[hand] = 0.0f;
+    }
+
     if (!sVrPunchArmed[hand] ||
-        speed < VR_PUNCH_SPEED_THRESHOLD ||
-        gripAmount < VR_PUNCH_GRIP_THRESHOLD) {
+        speed < requiredSpeed ||
+        sVrPunchTravel[hand] < requiredDistance) {
         return false;
     }
 
     sVrPunchArmed[hand] = false;
     printf(
-        "[VR] %s physical punch detected (%.2f m/s).\n",
+        "[VR] %s physical punch detected "
+        "(%.2f m/s, %.2f m travel).\n",
         hand == VR_CONTROLLER_LEFT ? "Left" : "Right",
-        speed
+        speed,
+        sVrPunchTravel[hand]
     );
+    sVrPunchTravel[hand] = 0.0f;
     vr_apply_haptic(hand, 0.25f, 0.04f, -1.0f);
     return true;
+}
+
+static void controller_vr_reset_physical_punch(uint32_t hand) {
+    if (hand < VR_CONTROLLER_COUNT) {
+        sVrPunchArmed[hand] = true;
+        sVrPunchLastPositionValid[hand] = false;
+        sVrPunchTravel[hand] = 0.0f;
+    }
+}
+
+static void controller_vr_reset_physical_punches(void) {
+    for (uint32_t hand = 0;
+         hand < VR_CONTROLLER_COUNT;
+         hand++) {
+        controller_vr_reset_physical_punch(hand);
+    }
 }
 
 static void controller_vr_init(void) {
@@ -149,6 +242,7 @@ static void controller_vr_read(OSContPad* pad) {
     if (!vr_is_active() ||
         !configVrMotionControllerInput ||
         pad == NULL) {
+        controller_vr_reset_physical_punches();
         return;
     }
 
@@ -164,21 +258,33 @@ static void controller_vr_read(OSContPad* pad) {
     );
 
     if (!leftAvailable && !rightAvailable) {
+        controller_vr_reset_physical_punches();
         return;
     }
 
-    bool physicalPunch = false;
-    if (leftAvailable) {
-        physicalPunch |= controller_vr_update_physical_punch(
-            VR_CONTROLLER_LEFT,
-            &left
-        );
+    if (!leftAvailable) {
+        controller_vr_reset_physical_punch(VR_CONTROLLER_LEFT);
     }
-    if (rightAvailable) {
-        physicalPunch |= controller_vr_update_physical_punch(
-            VR_CONTROLLER_RIGHT,
-            &right
-        );
+    if (!rightAvailable) {
+        controller_vr_reset_physical_punch(VR_CONTROLLER_RIGHT);
+    }
+
+    bool physicalPunch = false;
+    if (configVrPhysicalPunching) {
+        if (leftAvailable) {
+            physicalPunch |= controller_vr_update_physical_punch(
+                VR_CONTROLLER_LEFT,
+                &left
+            );
+        }
+        if (rightAvailable) {
+            physicalPunch |= controller_vr_update_physical_punch(
+                VR_CONTROLLER_RIGHT,
+                &right
+            );
+        }
+    } else {
+        controller_vr_reset_physical_punches();
     }
     if (physicalPunch) {
         pad->button |= B_BUTTON;
@@ -217,7 +323,8 @@ static void controller_vr_read(OSContPad* pad) {
             pad->button |= A_BUTTON;
         }
         if (right.secondaryButton ||
-            right.trigger >= VR_TRIGGER_THRESHOLD) {
+            (configVrPunchButton &&
+             right.trigger >= VR_TRIGGER_THRESHOLD)) {
             pad->button |= B_BUTTON;
         }
         if (right.thumbstickButton) {
