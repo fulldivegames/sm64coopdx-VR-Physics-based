@@ -2,7 +2,7 @@
 
 An experimental vibe coded OpenXR VR fork of [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx).
 
-The current playable milestone provides **third-person and first-person VR modes designed for a standard gamepad**. It keeps Mario's original movement and gameplay while rendering the game in stereoscopic 6DoF VR. Third Person Mode supports both the default camera and SM64 Co-Op DX's free camera; First Person Mode adds head-directed movement and smooth horizontal turning.
+The current playable milestone provides **third-person and experimental first-person VR modes designed for a standard gamepad**. It keeps Mario's original movement and gameplay while rendering the game in stereoscopic 6DoF VR. Third Person Mode supports both the default camera and SM64 Co-Op DX's free camera; First Person Mode (Experimental) adds head-directed movement and smooth horizontal turning.
 
 > [!IMPORTANT]
 > This is an early development fork, not a finished release. The current VR mode targets Windows and OpenGL. First Person Mode is an initial experimental implementation and motion-controller gameplay is still planned.
@@ -16,10 +16,10 @@ The current playable milestone provides **third-person and first-person VR modes
 - Runtime-provided per-eye position, rotation, field of view, and projection
 - 6DoF headset tracking for looking, leaning, and positional head movement
 - Playable third-person gamepad controls
-- Initial first-person gamepad mode with head-directed movement
+- Initial **First Person Mode (Experimental)** with gamepad controls and head-directed movement
 - Compatibility with both the default camera and free camera
 - A dedicated **VR** settings menu
-- A **Camera Settings** submenu with Third Person Mode, First Person Mode, camera distance, camera height, field of view, and movement-direction calibration
+- A **Camera Settings** submenu with Third Person Mode, First Person Mode (Experimental), camera distance, camera height, field of view, and movement-direction calibration
 - Smooth horizontal turning in First Person Mode
 - An **Experimental** submenu with optional smooth 180-degree backflip/side-flip camera turns and flat-screen first-person support
 - A **Performance** submenu with render-scale and desktop-mirror frame-rate controls
@@ -41,7 +41,7 @@ No compiler, Git, MSYS2, or command-line setup is required for a normal player r
 4. Connect a standard gamepad.
 5. Launch `SM64-Co-Op-DX-VR.exe`.
 6. On first launch, drag your legally obtained, unmodified **Super Mario 64 US `.z64` ROM** onto the game window when prompted.
-7. Open **Settings > VR**, enable **VR Mode**, then use **Camera Settings** to select Third Person or First Person Mode and adjust its settings.
+7. Open **Settings > VR**, enable **VR Mode**, then use **Camera Settings** to select Third Person Mode or First Person Mode (Experimental) and adjust its settings.
 
 The game validates the ROM and remembers it in the user-data folder. It should not need to be dragged into the window on every launch.
 
@@ -99,7 +99,7 @@ The ZIP is written to `dist/`. The packaging script includes only the runtime fi
 3. Launch `sm64coopdx.exe`.
 4. Open the game's settings and enter the **VR** menu.
 5. Enable **VR Mode**.
-6. Open **Camera Settings**, select **Third Person Mode** or **First Person Mode**, and adjust the available camera settings to your preference.
+6. Open **Camera Settings**, select **Third Person Mode** or **First Person Mode (Experimental)**, and adjust the available camera settings to your preference.
 
 The game can also be configured to launch in VR automatically. If VR initialization fails, launch with `--console` and check the lines beginning with `[VR]` for the detected loader, runtime, headset, and session state.
 
@@ -114,7 +114,7 @@ In **Third Person Mode**, both supported camera systems are valid choices:
 
 Neither camera mode is required or specifically recommended; use whichever you prefer.
 
-In **First Person Mode**, the headset controls Mario's forward direction while the right stick provides smooth horizontal turning. Sideways stick input is restricted to a narrower steering angle for comfort. Camera height, field of view, movement-direction calibration, and performance controls are available in the VR submenus. Mario's model is hidden locally in this mode so his head and body do not obstruct the headset view.
+In **First Person Mode (Experimental)**, the headset controls Mario's forward direction while the right stick provides smooth horizontal turning. Sideways stick input is restricted to a narrower steering angle for comfort. Camera height, field of view, movement-direction calibration, and performance controls are available in the VR submenus. Mario's model is hidden locally in this mode so his head and body do not obstruct the headset view.
 
 ## Current limitations
 

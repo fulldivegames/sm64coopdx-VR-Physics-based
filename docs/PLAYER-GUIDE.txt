@@ -27,8 +27,8 @@ FIRST-TIME SETUP
 5. The first-launch screen will ask for a ROM. Drag your legally obtained,
    unmodified US .z64 ROM onto the game window.
 6. Open Settings > VR, enable VR Mode, and choose Camera Settings.
-7. Select Third Person Mode or First Person Mode and adjust its camera
-   settings to your preference.
+7. Select Third Person Mode or First Person Mode (Experimental) and adjust
+   its camera settings to your preference.
 
 The game remembers the validated ROM in its user-data folder, so it should
 not need to be dragged in again on every launch.
@@ -38,10 +38,10 @@ VR CAMERA MODES
 
 - Third Person Mode keeps Mario visible and works with the default camera or
   SM64 Co-Op DX's free camera. Camera distance is adjustable.
-- First Person Mode hides the local Mario model, uses the headset as Mario's
-  forward direction, and supports smooth horizontal turning with the right
-  stick. Camera height, field of view, and movement-direction calibration are
-  adjustable under Camera Settings.
+- First Person Mode (Experimental) hides the local Mario model, uses the
+  headset as Mario's forward direction, and supports smooth horizontal
+  turning with the right stick. Camera height, field of view, and
+  movement-direction calibration are adjustable under Camera Settings.
 - Experimental settings include an optional smooth 180-degree camera turn for
   backflips and side flips, plus an opt-in flat-screen first-person mode.
 - Performance settings include headset render scale and desktop mirror FPS.

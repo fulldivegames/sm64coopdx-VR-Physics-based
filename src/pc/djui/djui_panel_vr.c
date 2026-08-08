@@ -48,7 +48,7 @@ static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
     {
         char* cameraModes[VR_CAMERA_MODE_COUNT] = {
             "Third Person Mode",
-            "First Person Mode"
+            "First Person Mode (Experimental)"
         };
 
         djui_selectionbox_create(
