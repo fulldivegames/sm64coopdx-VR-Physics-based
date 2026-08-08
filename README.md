@@ -1,6 +1,6 @@
 # SM64 Co-Op DX VR
 
-An experimental OpenXR VR fork of [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx).
+An experimental vibe coded OpenXR VR fork of [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx).
 
 The current playable milestone provides a polished **third-person VR mode designed for a standard gamepad**. It keeps Mario's original movement and gameplay while rendering the game in stereoscopic 6DoF VR. Both the default camera and SM64 Co-Op DX's free camera are supported.
 
