@@ -33,6 +33,7 @@
 #include "game/hardcoded.h"
 #include "game/sound_init.h"
 #include "pc/configfile.h"
+#include "pc/vr/vr.h"
 #include "pc/network/network.h"
 #include "pc/lua/smlua_hooks.h"
 #include "pc/djui/djui.h"
@@ -47,6 +48,12 @@ static u8 sForceRomhackCamera = FALSE;
 u8 gCameraUseCourseSpecificSettings = TRUE;
 u8 gOverrideFreezeCamera = FALSE;
 u8 gOverrideAllowToxicGasCamera = FALSE;
+
+static bool vr_first_person_locks_camera_input(void) {
+    return vr_is_active() &&
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
+        !gDjuiInMainMenu;
+}
 
 struct RomhackCameraSettings gRomhackCameraSettings = {
     .enable = RCO_ALL,
@@ -3189,6 +3196,16 @@ void update_camera(struct Camera *c) {
     gCamera = c;
     update_camera_hud_status(c);
 
+    // First-person VR borrows the existing Free Camera yaw path for smooth
+    // horizontal turning. Do not mutate the saved setting: if Free Camera was
+    // off it is enabled only for this mode and restored on exit; if it was
+    // already on, its normal enabled state is left alone.
+    newcam_toggle(
+        camera_config_is_free_cam_enabled() ||
+        gDjuiInMainMenu ||
+        vr_first_person_locks_camera_input()
+    );
+
     if ((gOverrideFreezeCamera || get_first_person_enabled()) && !gDjuiInMainMenu) {
         return;
     }
@@ -3206,7 +3223,9 @@ void update_camera(struct Camera *c) {
 
     if (c->cutscene == 0) {
         // Only process R_TRIG if 'fixed' is not selected in the menu
-        if (cam_select_alt_mode(0) == CAM_SELECTION_MARIO && c->mode != CAMERA_MODE_NEWCAM) {
+        if (!vr_first_person_locks_camera_input() &&
+            cam_select_alt_mode(0) == CAM_SELECTION_MARIO &&
+            c->mode != CAMERA_MODE_NEWCAM) {
             if ((sCurrPlayMode != PLAY_MODE_PAUSED) && gPlayer1Controller->buttonPressed & R_TRIG) {
                 bool allowSetCamAngle = true;
                 if (set_cam_angle(0) == CAM_ANGLE_LAKITU) {
@@ -3254,7 +3273,15 @@ void update_camera(struct Camera *c) {
     if (c->mode != CAMERA_MODE_NEWCAM) {
         camera_course_processing(c);
         stub_camera_3(c);
-        sCButtonsPressed = find_c_buttons_pressed(sCButtonsPressed, gPlayer1Controller->buttonPressed,gPlayer1Controller->buttonDown);
+        if (vr_first_person_locks_camera_input()) {
+            sCButtonsPressed = 0;
+        } else {
+            sCButtonsPressed = find_c_buttons_pressed(
+                sCButtonsPressed,
+                gPlayer1Controller->buttonPressed,
+                gPlayer1Controller->buttonDown
+            );
+        }
     }
 
     if (gMarioStates[0].action == ACT_SHOT_FROM_CANNON && gNewCamera.isActive) {

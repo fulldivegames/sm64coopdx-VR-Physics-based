@@ -1,5 +1,6 @@
 #include <PR/ultratypes.h>
 
+#include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -33,12 +34,14 @@
 #include "object_helpers.h"
 #include "object_list_processor.h"
 #include "print.h"
+#include "rendering_graph_node.h"
 #include "save_file.h"
 #include "sound_init.h"
 #include "rumble_init.h"
 #include "obj_behaviors.h"
 #include "hardcoded.h"
 #include "pc/configfile.h"
+#include "pc/vr/vr.h"
 #include "pc/network/network.h"
 #include "pc/lua/smlua.h"
 #include "pc/network/socket/socket.h"
@@ -46,6 +49,47 @@
 #include "first_person_cam.h"
 
 #define MAX_HANG_PREVENTION 64
+
+static s16 vr_first_person_head_yaw_offset(void) {
+    float rotation[4] = { 0 };
+
+    if (!vr_get_head_rotation(rotation)) {
+        return 0;
+    }
+
+    // Rotate OpenXR's forward vector (0, 0, -1) by the current HMD
+    // quaternion, then convert its horizontal direction to an SM64 yaw.
+    const float forwardX = -2.0f *
+        (rotation[3] * rotation[1] + rotation[0] * rotation[2]);
+    const float forwardZ = -1.0f + 2.0f *
+        (rotation[0] * rotation[0] + rotation[1] * rotation[1]);
+
+    if (fabsf(forwardX) < 0.0001f && fabsf(forwardZ) < 0.0001f) {
+        return 0;
+    }
+
+    // SM64's yaw direction is opposite OpenXR's pose-yaw direction. Measure
+    // X against OpenXR's -Z forward axis, then invert it so looking right
+    // produces rightward movement and looking left produces leftward movement.
+    return (s16)-atan2s(-forwardZ, forwardX);
+}
+
+static s16 vr_first_person_compress_stick_yaw(s16 stickYaw) {
+    // Express the stick direction relative to forward, halve its sideways
+    // angle, then convert it back. Forward and backward remain available,
+    // while full left/right become 45-degree steering directions.
+    s32 relativeYaw = (s16)(stickYaw + 0x8000);
+
+    if (relativeYaw > 0x4000) {
+        relativeYaw = 0x8000 - (0x8000 - relativeYaw) / 2;
+    } else if (relativeYaw < -0x4000) {
+        relativeYaw = -0x8000 + (0x8000 + relativeYaw) / 2;
+    } else {
+        relativeYaw /= 2;
+    }
+
+    return (s16)(relativeYaw + 0x8000);
+}
 
 u32 unused80339F10;
 s8 filler80339F1C[20];
@@ -1522,12 +1566,36 @@ void update_mario_joystick_inputs(struct MarioState *m) {
     if ((sCurrPlayMode == PLAY_MODE_PAUSED) || m->playerIndex != 0) { return; }
 
     if (m->intendedMag > 0.0f) {
+        const s16 stickYaw = atan2s(
+            -controller->stickY,
+            controller->stickX
+        );
+
         if (gLakituState.mode != CAMERA_MODE_NEWCAM) {
-            m->intendedYaw = atan2s(-controller->stickY, controller->stickX) + m->area->camera->yaw;
+            m->intendedYaw = stickYaw + m->area->camera->yaw;
         } else if (get_first_person_enabled()) {
-            m->intendedYaw = atan2s(-controller->stickY, controller->stickX) + gLakituState.yaw;
+            m->intendedYaw = stickYaw + gLakituState.yaw;
         } else {
-            m->intendedYaw = atan2s(-controller->stickY, controller->stickX) - gNewCamera.yaw + 0x4000;
+            m->intendedYaw = stickYaw - gNewCamera.yaw + 0x4000;
+        }
+
+        if (vr_is_active() &&
+            configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON) {
+            const s16 compressedStickYaw =
+                vr_first_person_compress_stick_yaw(stickYaw);
+
+            // The game's existing intended yaw already provides the correct
+            // flat-camera world direction. Apply only the restricted stick
+            // correction and the zero-centered HMD yaw delta on top of it.
+            m->intendedYaw += compressedStickYaw - stickYaw;
+            m->intendedYaw += vr_first_person_head_yaw_offset();
+            m->intendedYaw +=
+                vr_get_first_person_action_turn_yaw();
+
+            const s32 calibration =
+                (s32)MIN(configVrMovementCalibration, 100U) - 50;
+            m->intendedYaw +=
+                (s16)(calibration * 0x10000 / 720);
         }
         m->input |= INPUT_NONZERO_ANALOG;
     } else {

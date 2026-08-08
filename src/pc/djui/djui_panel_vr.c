@@ -26,7 +26,19 @@ static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
     } else if (configVrCameraDistance > 250) {
         configVrCameraDistance = 250;
     }
-
+    if (configVrCameraHeight < 50) {
+        configVrCameraHeight = 50;
+    } else if (configVrCameraHeight > 140) {
+        configVrCameraHeight = 140;
+    }
+    if (configVrMovementCalibration > 100) {
+        configVrMovementCalibration = 100;
+    }
+    if (configVrFov < 70) {
+        configVrFov = 70;
+    } else if (configVrFov > 120) {
+        configVrFov = 120;
+    }
     struct DjuiThreePanel* panel =
         djui_panel_menu_create("Camera Settings", false);
 
@@ -35,7 +47,8 @@ static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
 
     {
         char* cameraModes[VR_CAMERA_MODE_COUNT] = {
-            "Third Person Mode"
+            "Third Person Mode",
+            "First Person Mode"
         };
 
         djui_selectionbox_create(
@@ -53,6 +66,114 @@ static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
             &configVrCameraDistance,
             50,
             250,
+            NULL
+        );
+
+        djui_slider_create(
+            body,
+            "First Person Height",
+            &configVrCameraHeight,
+            50,
+            140,
+            NULL
+        );
+
+        djui_slider_create(
+            body,
+            "Movement Calibration (50 = Center)",
+            &configVrMovementCalibration,
+            0,
+            100,
+            NULL
+        );
+
+        djui_slider_create(
+            body,
+            "Field of View (%)",
+            &configVrFov,
+            70,
+            120,
+            NULL
+        );
+
+        djui_button_create(
+            body,
+            DLANG(MENU, BACK),
+            DJUI_BUTTON_STYLE_BACK,
+            djui_panel_menu_back
+        );
+    }
+
+    djui_panel_add(caller, panel, NULL);
+}
+
+static void djui_panel_vr_performance_create(struct DjuiBase* caller) {
+    if (configVrRenderScale < 50) {
+        configVrRenderScale = 50;
+    } else if (configVrRenderScale > 100) {
+        configVrRenderScale = 100;
+    }
+    if (configVrDesktopMirrorFps < 15) {
+        configVrDesktopMirrorFps = 15;
+    } else if (configVrDesktopMirrorFps > 60) {
+        configVrDesktopMirrorFps = 60;
+    }
+
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create("Performance", false);
+
+    struct DjuiBase* body =
+        djui_three_panel_get_body(panel);
+
+    {
+        djui_slider_create(
+            body,
+            "Render Scale (%)",
+            &configVrRenderScale,
+            50,
+            100,
+            NULL
+        );
+
+        djui_slider_create(
+            body,
+            "Desktop Mirror FPS",
+            &configVrDesktopMirrorFps,
+            15,
+            60,
+            NULL
+        );
+
+        djui_button_create(
+            body,
+            DLANG(MENU, BACK),
+            DJUI_BUTTON_STYLE_BACK,
+            djui_panel_menu_back
+        );
+    }
+
+    djui_panel_add(caller, panel, NULL);
+}
+
+static void djui_panel_vr_experimental_create(struct DjuiBase* caller) {
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create("Experimental", false);
+
+    struct DjuiBase* body =
+        djui_three_panel_get_body(panel);
+
+    {
+        djui_checkbox_create(
+            body,
+            "180 Degree Flip Camera Turn",
+            &configVrExperimentalFlipTurn,
+            NULL
+        );
+
+        djui_checkbox_create(
+            body,
+            "Enable First Person in Flat Mode",
+            &configVrExperimentalFlatFirstPerson,
             NULL
         );
 
@@ -134,9 +255,23 @@ void djui_panel_vr_create(struct DjuiBase* caller) {
 
         djui_button_create(
             body,
+            "Performance",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_vr_performance_create
+        );
+
+        djui_button_create(
+            body,
             "HUD Settings",
             DJUI_BUTTON_STYLE_NORMAL,
             djui_panel_vr_hud_settings_create
+        );
+
+        djui_button_create(
+            body,
+            "Experimental",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_vr_experimental_create
         );
 
         djui_button_create(

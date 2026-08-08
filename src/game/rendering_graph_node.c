@@ -23,7 +23,6 @@
 #include "skybox.h"
 #include "first_person_cam.h"
 #include "course_table.h"
-#include "skybox.h"
 #include "mario.h"
 #include "hardcoded.h"
 #include "levels/menu/header.h"
@@ -69,6 +68,9 @@ Mtx *gMatStackPrevFixed[MATRIX_STACK_SIZE] = { 0 };
 
 s32 gCamSkipInterp = 0;
 Vec3f gCamSkipInterpDisplacement = { 0 };
+
+extern u8 gRenderingInterpolated;
+extern f32 gRenderingDelta;
 
 u8 sUsingCamSpace = FALSE;
 static u8 sUsingBillboard = FALSE;
@@ -262,6 +264,160 @@ enum VrBillboardType {
 };
 
 static struct GrowingArray* sMtxTbl = NULL;
+static bool sVrFirstPersonAnchorValid = false;
+static u32 sVrFirstPersonAnchorTimestamp = 0;
+static Vec3f sVrFirstPersonAnchorPrev = { 0 };
+static Vec3f sVrFirstPersonAnchor = { 0 };
+static bool sVrActionTurnInitialized = false;
+static bool sVrActionTurnActive = false;
+static u32 sVrActionTurnLastMarioAction = 0;
+static f32 sVrActionTurnStartFrame = 0.0f;
+static f32 sVrActionTurnStartYaw = 0.0f;
+static f32 sVrActionTurnTargetYaw = 0.0f;
+static f32 sVrActionTurnCurrentYaw = 0.0f;
+static s16 sVrActionTurnYaw = 0;
+
+static void vr_update_first_person_action_turn(void) {
+    if (!vr_is_active() ||
+        configVrCameraMode != VR_CAMERA_MODE_FIRST_PERSON) {
+        sVrActionTurnInitialized = false;
+        sVrActionTurnActive = false;
+        sVrActionTurnCurrentYaw = 0.0f;
+        sVrActionTurnTargetYaw = 0.0f;
+        sVrActionTurnYaw = 0;
+        return;
+    }
+
+    const f32 renderFrame = (f32)gGlobalTimer +
+        (gRenderingInterpolated ? gRenderingDelta : 0.0f);
+    const u32 marioAction = gMarioStates[0].action;
+
+    if (!sVrActionTurnInitialized) {
+        sVrActionTurnInitialized = true;
+        sVrActionTurnLastMarioAction = marioAction;
+    }
+
+    if (sVrActionTurnActive) {
+        const f32 durationFrames = 12.0f;
+        f32 progress = clamp(
+            (renderFrame - sVrActionTurnStartFrame) /
+                durationFrames,
+            0.0f,
+            1.0f
+        );
+        const f32 smoothProgress =
+            progress * progress * (3.0f - 2.0f * progress);
+
+        sVrActionTurnCurrentYaw =
+            sVrActionTurnStartYaw +
+            (sVrActionTurnTargetYaw - sVrActionTurnStartYaw) *
+                smoothProgress;
+
+        if (progress >= 1.0f) {
+            sVrActionTurnActive = false;
+            sVrActionTurnCurrentYaw =
+                (f32)(s16)((s32)sVrActionTurnTargetYaw);
+            sVrActionTurnTargetYaw = sVrActionTurnCurrentYaw;
+        }
+    }
+
+    if (marioAction != sVrActionTurnLastMarioAction) {
+        sVrActionTurnLastMarioAction = marioAction;
+
+        if (configVrExperimentalFlipTurn &&
+            (marioAction == ACT_BACKFLIP ||
+             marioAction == ACT_SIDE_FLIP)) {
+            sVrActionTurnStartFrame = renderFrame;
+            sVrActionTurnStartYaw = sVrActionTurnCurrentYaw;
+            sVrActionTurnTargetYaw =
+                sVrActionTurnCurrentYaw + 0x8000;
+            sVrActionTurnActive = true;
+        }
+    }
+
+    sVrActionTurnYaw =
+        (s16)((s32)roundf(sVrActionTurnCurrentYaw));
+}
+
+s16 vr_get_first_person_action_turn_yaw(void) {
+    return sVrActionTurnYaw;
+}
+
+void vr_adjust_first_person_camera_direction(Vec3f direction) {
+    if (!vr_is_active() ||
+        configVrCameraMode != VR_CAMERA_MODE_FIRST_PERSON) {
+        return;
+    }
+
+    vr_update_first_person_action_turn();
+    direction[1] = 0.0f;
+
+    const f32 horizontalLength = sqrtf(
+        direction[0] * direction[0] +
+        direction[2] * direction[2]
+    );
+
+    if (horizontalLength <= 0.0001f) {
+        return;
+    }
+
+    direction[0] /= horizontalLength;
+    direction[2] /= horizontalLength;
+
+    if (sVrActionTurnYaw != 0) {
+        const f32 originalX = direction[0];
+        const f32 originalZ = direction[2];
+        const f32 yawSin = sins(sVrActionTurnYaw);
+        const f32 yawCos = coss(sVrActionTurnYaw);
+
+        direction[0] = originalX * yawCos + originalZ * yawSin;
+        direction[2] = originalZ * yawCos - originalX * yawSin;
+    }
+}
+
+static bool vr_get_first_person_anchor(Vec3f anchor) {
+    struct MarioState* mario = &gMarioStates[0];
+
+    if (mario->marioObj == NULL) {
+        sVrFirstPersonAnchorValid = false;
+        return false;
+    }
+
+    if (!sVrFirstPersonAnchorValid ||
+        sVrFirstPersonAnchorTimestamp != gGlobalTimer) {
+        const bool continuous =
+            sVrFirstPersonAnchorValid &&
+            gGlobalTimer == sVrFirstPersonAnchorTimestamp + 1 &&
+            gGlobalTimer !=
+                mario->marioObj->header.gfx.skipInterpolationTimestamp;
+
+        if (continuous) {
+            vec3f_copy(
+                sVrFirstPersonAnchorPrev,
+                sVrFirstPersonAnchor
+            );
+        } else {
+            vec3f_copy(sVrFirstPersonAnchorPrev, mario->pos);
+        }
+
+        vec3f_copy(sVrFirstPersonAnchor, mario->pos);
+        sVrFirstPersonAnchorTimestamp = gGlobalTimer;
+        sVrFirstPersonAnchorValid = true;
+    }
+
+    if (gRenderingInterpolated) {
+        delta_interpolate_vec3f(
+            anchor,
+            sVrFirstPersonAnchorPrev,
+            sVrFirstPersonAnchor,
+            gRenderingDelta
+        );
+    } else {
+        vec3f_copy(anchor, sVrFirstPersonAnchor);
+    }
+
+    return true;
+}
 
 static void vr_rotate_head_vector(
     const float rotation[4],
@@ -330,9 +486,12 @@ static void vr_build_game_camera_matrix(
     s16 roll
 ) {
     Vec3f cameraPosition;
+    Vec3f cameraFocus;
     vec3f_copy(cameraPosition, position);
+    vec3f_copy(cameraFocus, focus);
 
     if (configVrCameraMode == VR_CAMERA_MODE_THIRD_PERSON) {
+        sVrFirstPersonAnchorValid = false;
         const float distanceScale =
             (float)clamp(configVrCameraDistance, 50U, 250U) / 100.0f;
 
@@ -340,23 +499,118 @@ static void vr_build_game_camera_matrix(
             cameraPosition[axis] = focus[axis] +
                 (position[axis] - focus[axis]) * distanceScale;
         }
+    } else if (configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON) {
+        Vec3f marioAnchor;
+
+        if (vr_get_first_person_anchor(marioAnchor)) {
+            Vec3f forward = {
+                focus[0] - position[0],
+                0.0f,
+                focus[2] - position[2]
+            };
+            const float forwardLength = sqrtf(
+                forward[0] * forward[0] +
+                forward[1] * forward[1] +
+                forward[2] * forward[2]
+            );
+
+            if (forwardLength > 0.0001f) {
+                vec3f_mul(forward, 1.0f / forwardLength);
+            } else {
+                forward[0] = sins(gMarioStates[0].faceAngle[1]);
+                forward[1] = 0.0f;
+                forward[2] = coss(gMarioStates[0].faceAngle[1]);
+            }
+
+            vr_adjust_first_person_camera_direction(forward);
+
+            // Follow Mario's interpolated position directly so vertical
+            // actions such as jumps do not inherit the normal third-person
+            // camera's delayed focus tracking.
+            cameraPosition[0] = marioAnchor[0] + forward[0] * 10.0f;
+            cameraPosition[1] = marioAnchor[1] +
+                (f32)clamp(configVrCameraHeight, 50U, 140U);
+            cameraPosition[2] = marioAnchor[2] + forward[2] * 10.0f;
+
+            cameraFocus[0] = cameraPosition[0] + forward[0] * 100.0f;
+            cameraFocus[1] = cameraPosition[1] + forward[1] * 100.0f;
+            cameraFocus[2] = cameraPosition[2] + forward[2] * 100.0f;
+        }
     }
 
     // Keep the game's camera transform independent from the headset. The
     // HMD pose is applied later in the projection path so world-space
     // lighting, billboards, and other camera-sensitive effects do not turn
     // with the player's head.
-    mtxf_lookat(matrix, cameraPosition, focus, roll);
+    mtxf_lookat(matrix, cameraPosition, cameraFocus, roll);
+}
+
+static bool vr_is_menu_scene(void) {
+    return gCurrentArea != NULL &&
+        (const Collision *)gCurrentArea->terrainData ==
+            main_menu_seg7_collision;
+}
+
+static bool vr_get_ui_plane_ndc(
+    uint32_t eyeIndex,
+    f32 *centerX,
+    f32 *centerY,
+    f32 *halfWidth,
+    f32 *halfHeight
+) {
+    float eyeFov[4] = { 0 };
+    float eyeOffset[3] = { 0 };
+
+    *centerX = 0.0f;
+    *centerY = 0.0f;
+    *halfWidth = 1.0f;
+    *halfHeight = 1.0f;
+
+    if (eyeIndex >= 2 ||
+        !vr_get_eye_fov(eyeIndex, eyeFov) ||
+        !vr_get_eye_offset(eyeIndex, eyeOffset)) {
+        return false;
+    }
+
+    const float tanLeft = tanf(eyeFov[0]);
+    const float tanRight = tanf(eyeFov[1]);
+    const float tanDown = tanf(eyeFov[2]);
+    const float tanUp = tanf(eyeFov[3]);
+    const float tanWidth = tanRight - tanLeft;
+    const float tanHeight = tanUp - tanDown;
+
+    if (tanWidth <= 0.000001f || tanHeight <= 0.000001f) {
+        return false;
+    }
+
+    // Match the comfortable 1.5 m head-locked plane used by the rest of the
+    // VR UI, including its per-eye convergence.
+    const float uiDistance = 1.5f;
+    const float uiHalfHeight = uiDistance * 0.45f;
+    const float uiHalfWidth = uiHalfHeight *
+        ((float)SCREEN_WIDTH / (float)SCREEN_HEIGHT);
+    const float eyeDepth = uiDistance + eyeOffset[2];
+    const float projectionScaleX = 2.0f / tanWidth;
+    const float projectionScaleY = 2.0f / tanHeight;
+    const float projectionOffsetX =
+        (tanRight + tanLeft) / tanWidth;
+    const float projectionOffsetY =
+        (tanUp + tanDown) / tanHeight;
+
+    *centerX = -projectionOffsetX -
+        projectionScaleX * eyeOffset[0] / eyeDepth;
+    *centerY = -projectionOffsetY -
+        projectionScaleY * eyeOffset[1] / eyeDepth;
+    *halfWidth = projectionScaleX * uiHalfWidth / eyeDepth;
+    *halfHeight = projectionScaleY * uiHalfHeight / eyeDepth;
+    return *halfWidth > 0.000001f && *halfHeight > 0.000001f;
 }
 
 static bool vr_build_head_view_matrix(
     uint32_t eyeIndex,
     Mat4 matrix
 ) {
-    const bool menuScene =
-        gCurrentArea != NULL &&
-        (const Collision *)gCurrentArea->terrainData ==
-            main_menu_seg7_collision;
+    const bool menuScene = vr_is_menu_scene();
     const float worldUnitsPerMeter = menuScene ? 850.0f : 100.0f;
     float headTranslation[3] = { 0 };
 
@@ -422,6 +676,16 @@ static void patch_mtx_vr_billboards(uint32_t eyeIndex) {
         vr_is_active() &&
         eyeIndex < 2 &&
         vr_build_head_rotation_matrix(headRotation);
+    Vec3f cylindricalBackward = { 0.0f, 0.0f, 1.0f };
+
+    if (useHeadRotation) {
+        cylindricalBackward[0] = headRotation[0][2];
+        cylindricalBackward[1] = headRotation[1][2];
+        cylindricalBackward[2] = headRotation[2][2];
+        vr_adjust_first_person_camera_direction(
+            cylindricalBackward
+        );
+    }
 
     for (u32 i = 0; i < sMtxTbl->count; i++) {
         struct MtxInterp *interp = sMtxTbl->buffer[i];
@@ -440,8 +704,8 @@ static void patch_mtx_vr_billboards(uint32_t eyeIndex) {
         mtxf_copy(facingRotation, headRotation);
 
         if (interp->billboard == VR_BILLBOARD_CYLINDRICAL) {
-            const f32 backwardX = headRotation[0][2];
-            const f32 backwardZ = headRotation[2][2];
+            const f32 backwardX = cylindricalBackward[0];
+            const f32 backwardZ = cylindricalBackward[2];
             const f32 horizontalLength = sqrtf(
                 backwardX * backwardX +
                 backwardZ * backwardZ
@@ -559,63 +823,33 @@ static void patch_mtx_vr_ui(uint32_t eyeIndex) {
     float bottom = 0.0f;
     float top = SCREEN_HEIGHT;
 
-    float eyeFov[4] = { 0 };
-    float eyeOffset[3] = { 0 };
+    f32 centerNdcX = 0.0f;
+    f32 centerNdcY = 0.0f;
+    f32 halfNdcX = 1.0f;
+    f32 halfNdcY = 1.0f;
 
-    if (eyeIndex < 2 &&
-        vr_get_eye_fov(eyeIndex, eyeFov) &&
-        vr_get_eye_offset(eyeIndex, eyeOffset)) {
-        const float tanLeft = tanf(eyeFov[0]);
-        const float tanRight = tanf(eyeFov[1]);
-        const float tanDown = tanf(eyeFov[2]);
-        const float tanUp = tanf(eyeFov[3]);
-        const float tanWidth = tanRight - tanLeft;
-        const float tanHeight = tanUp - tanDown;
+    if (vr_get_ui_plane_ndc(
+            eyeIndex,
+            &centerNdcX,
+            &centerNdcY,
+            &halfNdcX,
+            &halfNdcY
+        )) {
+        const float boundsWidth =
+            (float)SCREEN_WIDTH / halfNdcX;
+        const float boundsHeight =
+            (float)SCREEN_HEIGHT / halfNdcY;
+        const float boundsCenterX =
+            (float)SCREEN_WIDTH * 0.5f -
+            centerNdcX * boundsWidth * 0.5f;
+        const float boundsCenterY =
+            (float)SCREEN_HEIGHT * 0.5f -
+            centerNdcY * boundsHeight * 0.5f;
 
-        if (tanWidth > 0.000001f &&
-            tanHeight > 0.000001f) {
-            // Render DJUI as a head-locked plane about 1.5 meters away.
-            // Its roughly 49-degree vertical size is comfortable while still
-            // leaving enough room for full menu panels.
-            const float uiDistance = 1.5f;
-            const float uiHalfHeight = uiDistance * 0.45f;
-            const float uiHalfWidth = uiHalfHeight *
-                ((float)SCREEN_WIDTH / (float)SCREEN_HEIGHT);
-            const float eyeDepth = uiDistance + eyeOffset[2];
-            const float projectionScaleX = 2.0f / tanWidth;
-            const float projectionScaleY = 2.0f / tanHeight;
-            const float projectionOffsetX =
-                (tanRight + tanLeft) / tanWidth;
-            const float projectionOffsetY =
-                (tanUp + tanDown) / tanHeight;
-            const float centerNdcX = -projectionOffsetX -
-                projectionScaleX * eyeOffset[0] / eyeDepth;
-            const float centerNdcY = -projectionOffsetY -
-                projectionScaleY * eyeOffset[1] / eyeDepth;
-            const float halfNdcX =
-                projectionScaleX * uiHalfWidth / eyeDepth;
-            const float halfNdcY =
-                projectionScaleY * uiHalfHeight / eyeDepth;
-
-            if (halfNdcX > 0.000001f &&
-                halfNdcY > 0.000001f) {
-                const float boundsWidth =
-                    (float)SCREEN_WIDTH / halfNdcX;
-                const float boundsHeight =
-                    (float)SCREEN_HEIGHT / halfNdcY;
-                const float boundsCenterX =
-                    (float)SCREEN_WIDTH * 0.5f -
-                    centerNdcX * boundsWidth * 0.5f;
-                const float boundsCenterY =
-                    (float)SCREEN_HEIGHT * 0.5f -
-                    centerNdcY * boundsHeight * 0.5f;
-
-                left = boundsCenterX - boundsWidth * 0.5f;
-                right = boundsCenterX + boundsWidth * 0.5f;
-                bottom = boundsCenterY - boundsHeight * 0.5f;
-                top = boundsCenterY + boundsHeight * 0.5f;
-            }
-        }
+        left = boundsCenterX - boundsWidth * 0.5f;
+        right = boundsCenterX + boundsWidth * 0.5f;
+        bottom = boundsCenterY - boundsHeight * 0.5f;
+        top = boundsCenterY + boundsHeight * 0.5f;
     }
 
     for (u32 i = 0; i < sVrUiMatrixCount; i++) {
@@ -684,10 +918,12 @@ static void patch_mtx_perspective(
     float eyeFov[4] = { 0 };
 
     if (vr_get_eye_fov(eyeIndex, eyeFov)) {
-        const float tanLeft = tanf(eyeFov[0]);
-        const float tanRight = tanf(eyeFov[1]);
-        const float tanDown = tanf(eyeFov[2]);
-        const float tanUp = tanf(eyeFov[3]);
+        const float fovScale =
+            (float)clamp(configVrFov, 70U, 120U) / 100.0f;
+        const float tanLeft = tanf(eyeFov[0]) * fovScale;
+        const float tanRight = tanf(eyeFov[1]) * fovScale;
+        const float tanDown = tanf(eyeFov[2]) * fovScale;
+        const float tanUp = tanf(eyeFov[3]) * fovScale;
         const float tanWidth = tanRight - tanLeft;
         const float tanHeight = tanUp - tanDown;
 
@@ -1073,7 +1309,11 @@ static void geo_append_display_list(void *displayList, s16 layer) {
         if (sUsingBillboard ||
             (gCurGraphNodeObject != NULL &&
              (gCurGraphNodeObject->node.flags & GRAPH_RENDER_BILLBOARD))) {
-            listNode->billboard = VR_BILLBOARD_FULL;
+            listNode->billboard =
+                vr_is_active() &&
+                configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON
+                    ? VR_BILLBOARD_CYLINDRICAL
+                    : VR_BILLBOARD_FULL;
         } else if (gCurGraphNodeObject != NULL &&
                    (gCurGraphNodeObject->node.flags & GRAPH_RENDER_CYLBOARD)) {
             listNode->billboard = VR_BILLBOARD_CYLINDRICAL;
@@ -1969,6 +2209,80 @@ static void geo_process_shadow(struct GraphNodeShadow *node) {
  *
  * Since (0,0,0) is unaffected by rotation, columns 0, 1 and 2 are ignored.
  */
+static bool vr_get_object_culling_context(
+    Mat4 headRotation,
+    f32 *horizontalTangent,
+    f32 *verticalTangent
+) {
+    static u32 sTimestamp = UINT32_MAX;
+    static bool sValid = false;
+    static Mat4 sHeadRotation;
+    static f32 sHorizontalTangent = 0.0f;
+    static f32 sVerticalTangent = 0.0f;
+
+    if (sTimestamp != gGlobalTimer) {
+        sTimestamp = gGlobalTimer;
+        sValid = false;
+
+        // Menu models are deliberately head locked, so ordinary headset
+        // direction culling must not be applied to them.
+        if (!vr_is_menu_scene() &&
+            vr_build_head_rotation_matrix(sHeadRotation)) {
+            f32 maxHorizontalTangent = 0.0f;
+            f32 maxVerticalTangent = 0.0f;
+
+            for (uint32_t eye = 0; eye < 2; eye++) {
+                float eyeFov[4] = { 0 };
+                if (!vr_get_eye_fov(eye, eyeFov)) {
+                    continue;
+                }
+
+                maxHorizontalTangent = MAX(
+                    maxHorizontalTangent,
+                    MAX(
+                        fabsf(tanf(eyeFov[0])),
+                        fabsf(tanf(eyeFov[1]))
+                    )
+                );
+                maxVerticalTangent = MAX(
+                    maxVerticalTangent,
+                    MAX(
+                        fabsf(tanf(eyeFov[2])),
+                        fabsf(tanf(eyeFov[3]))
+                    )
+                );
+            }
+
+            if (maxHorizontalTangent > 0.0f &&
+                maxVerticalTangent > 0.0f) {
+                // Add 20 degrees beyond the runtime FOV. At the game's 30 Hz
+                // scene-update rate this protects fast head turns while still
+                // rejecting distant objects far outside both eyes.
+                const f32 padding = 0.34906585f;
+                const f32 maxHalfAngle = 1.48352986f;
+                sHorizontalTangent = tanf(MIN(
+                    atanf(maxHorizontalTangent) + padding,
+                    maxHalfAngle
+                ));
+                sVerticalTangent = tanf(MIN(
+                    atanf(maxVerticalTangent) + padding,
+                    maxHalfAngle
+                ));
+                sValid = true;
+            }
+        }
+    }
+
+    if (!sValid) {
+        return false;
+    }
+
+    mtxf_copy(headRotation, sHeadRotation);
+    *horizontalTangent = sHorizontalTangent;
+    *verticalTangent = sVerticalTangent;
+    return true;
+}
+
 static s32 obj_is_in_view(struct GraphNodeObject *node, Mat4 matrix) {
     if (!node || !gCurGraphNodeCamFrustum) { return FALSE; }
 
@@ -1978,15 +2292,73 @@ static s32 obj_is_in_view(struct GraphNodeObject *node, Mat4 matrix) {
         return TRUE;
     }
 
+    s16 cullingRadius = 300;
+    struct GraphNode *geo = node->sharedChild;
+    if (geo != NULL && geo->type == GRAPH_NODE_TYPE_CULLING_RADIUS) {
+        cullingRadius = (f32)((struct GraphNodeCullingRadius *) geo)->cullingRadius; //! Why is there a f32 cast?
+    }
+
     if (vr_is_active()) {
-        // Display lists are built against the desktop camera before the HMD
-        // rotation is applied. Keep objects in every look direction, while
-        // retaining a conservative bound that avoids fixed-point overflow.
         const f32 x = matrix[3][0];
         const f32 y = matrix[3][1];
         const f32 z = matrix[3][2];
         const f32 safeDistance = 60000.0f;
-        return x * x + y * y + z * z < safeDistance * safeDistance;
+        const f32 distanceSquared = x * x + y * y + z * z;
+        const f32 maximumDistance = safeDistance + cullingRadius;
+
+        if (distanceSquared >= maximumDistance * maximumDistance) {
+            return FALSE;
+        }
+
+        // Always retain nearby objects. Besides preventing visible pop-in,
+        // this covers the offset between the normal camera used to build the
+        // display list and the first-person camera applied during eye render.
+        const f32 nearbyDistance = 4000.0f + cullingRadius;
+        if (distanceSquared <= nearbyDistance * nearbyDistance) {
+            return TRUE;
+        }
+
+        Mat4 headRotation;
+        f32 horizontalTangent = 0.0f;
+        f32 verticalTangent = 0.0f;
+
+        if (!vr_get_object_culling_context(
+                headRotation,
+                &horizontalTangent,
+                &verticalTangent
+            )) {
+            return TRUE;
+        }
+
+        // Apply the same HMD view rotation used later by the eye projection.
+        const f32 viewX =
+            x * headRotation[0][0] +
+            y * headRotation[1][0] +
+            z * headRotation[2][0];
+        const f32 viewY =
+            x * headRotation[0][1] +
+            y * headRotation[1][1] +
+            z * headRotation[2][1];
+        const f32 viewZ =
+            x * headRotation[0][2] +
+            y * headRotation[1][2] +
+            z * headRotation[2][2];
+        const f32 depth = -viewZ;
+
+        if (depth + cullingRadius <= 0.0f) {
+            return FALSE;
+        }
+
+        const f32 positiveDepth = MAX(depth, 0.0f);
+        if (fabsf(viewX) >
+            positiveDepth * horizontalTangent + cullingRadius) {
+            return FALSE;
+        }
+        if (fabsf(viewY) >
+            positiveDepth * verticalTangent + cullingRadius) {
+            return FALSE;
+        }
+        return TRUE;
     }
 
     // ! @bug The aspect ratio is not accounted for. When the fov value is 45,
@@ -2006,12 +2378,6 @@ static s32 obj_is_in_view(struct GraphNodeObject *node, Mat4 matrix) {
     // This multiplication should really be performed on 4:3 as well,
     // but the issue will be more apparent on widescreen.
     hScreenEdge *= GFX_DIMENSIONS_ASPECT_RATIO;
-
-    s16 cullingRadius = 300;
-    struct GraphNode *geo = node->sharedChild;
-    if (geo != NULL && geo->type == GRAPH_NODE_TYPE_CULLING_RADIUS) {
-        cullingRadius = (f32)((struct GraphNodeCullingRadius *) geo)->cullingRadius; //! Why is there a f32 cast?
-    }
 
     // Don't render if the object is close to or behind the camera
     if (matrix[3][2] > -100.0f + cullingRadius) {
@@ -2063,6 +2429,10 @@ static void geo_process_object(struct Object *node) {
     Mat4 mtxf;
     s32 hasAnimation = (node->header.gfx.node.flags & GRAPH_RENDER_HAS_ANIMATION) != 0;
     Vec3f scalePrev;
+    const bool hideLocalMarioInVrFirstPerson =
+        vr_is_active() &&
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
+        node == gMarioStates[0].marioObj;
 
     // Sanity check our stack index, If we above or equal to our stack size. Return to prevent OOB.
     if ((gMatStackIndex + 1) >= MATRIX_STACK_SIZE) { LOG_ERROR("Preventing attempt to exceed the maximum size %i for our matrix stack with size of %i.", MATRIX_STACK_SIZE - 1, gMatStackIndex); return; }
@@ -2200,7 +2570,8 @@ static void geo_process_object(struct Object *node) {
             mtxf_to_mtx(mtxPrev, gMatStackPrev[gMatStackIndex]);
             gMatStackPrevFixed[gMatStackIndex] = mtxPrev;
 
-            if (node->header.gfx.sharedChild != NULL) {
+            if (node->header.gfx.sharedChild != NULL &&
+                !hideLocalMarioInVrFirstPerson) {
                 gCurMarioBodyState = get_mario_body_state_from_mario_object(node);
                 if (gCurMarioBodyState) {
                     gCurMarioBodyState->currAnimPart = MARIO_ANIM_PART_NONE;

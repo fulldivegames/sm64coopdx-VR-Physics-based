@@ -2,10 +2,10 @@
 
 An experimental vibe coded OpenXR VR fork of [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx).
 
-The current playable milestone provides a **third-person VR mode designed for a standard gamepad**. It keeps Mario's original movement and gameplay while rendering the game in stereoscopic 6DoF VR. Both the default camera and SM64 Co-Op DX's free camera are supported.
+The current playable milestone provides **third-person and first-person VR modes designed for a standard gamepad**. It keeps Mario's original movement and gameplay while rendering the game in stereoscopic 6DoF VR. Third Person Mode supports both the default camera and SM64 Co-Op DX's free camera; First Person Mode adds head-directed movement and smooth horizontal turning.
 
 > [!IMPORTANT]
-> This is an early development fork, not a finished release. The current VR mode targets Windows and OpenGL. Motion-controller gameplay, first-person mode is planned.
+> This is an early development fork, not a finished release. The current VR mode targets Windows and OpenGL. First Person Mode is an initial experimental implementation and motion-controller gameplay is still planned.
 > Coop is currently untested, solo hosting is tested and works.
 > I recommend adjusting camera distance to your liking in the VR menu, as well as testing if you prefer default or free camera.
 
@@ -16,9 +16,14 @@ The current playable milestone provides a **third-person VR mode designed for a 
 - Runtime-provided per-eye position, rotation, field of view, and projection
 - 6DoF headset tracking for looking, leaning, and positional head movement
 - Playable third-person gamepad controls
+- Initial first-person gamepad mode with head-directed movement
 - Compatibility with both the default camera and free camera
 - A dedicated **VR** settings menu
-- A **Camera Settings** submenu with Third Person Mode and an adjustable camera-distance slider
+- A **Camera Settings** submenu with Third Person Mode, First Person Mode, camera distance, camera height, field of view, and movement-direction calibration
+- Smooth horizontal turning in First Person Mode
+- An **Experimental** submenu with optional smooth 180-degree backflip/side-flip camera turns and flat-screen first-person support
+- A **Performance** submenu with render-scale and desktop-mirror frame-rate controls
+- Adjustable HUD opacity
 - Optional automatic VR startup
 - VR-aware rendering and culling so scenery remains visible while looking around
 - Corrected skybox, lighting, terrain, and billboard behavior for stereo head movement
@@ -36,7 +41,7 @@ No compiler, Git, MSYS2, or command-line setup is required for a normal player r
 4. Connect a standard gamepad.
 5. Launch `SM64-Co-Op-DX-VR.exe`.
 6. On first launch, drag your legally obtained, unmodified **Super Mario 64 US `.z64` ROM** onto the game window when prompted.
-7. Open **Settings > VR**, enable **VR Mode**, then use **Camera Settings** to adjust the third-person camera distance.
+7. Open **Settings > VR**, enable **VR Mode**, then use **Camera Settings** to select Third Person or First Person Mode and adjust its settings.
 
 The game validates the ROM and remembers it in the user-data folder. It should not need to be dragged into the window on every launch.
 
@@ -94,7 +99,7 @@ The ZIP is written to `dist/`. The packaging script includes only the runtime fi
 3. Launch `sm64coopdx.exe`.
 4. Open the game's settings and enter the **VR** menu.
 5. Enable **VR Mode**.
-6. Open **Camera Settings**, select **Third Person Mode**, and adjust **Camera Distance (%)** to your preference.
+6. Open **Camera Settings**, select **Third Person Mode** or **First Person Mode**, and adjust the available camera settings to your preference.
 
 The game can also be configured to launch in VR automatically. If VR initialization fails, launch with `--console` and check the lines beginning with `[VR]` for the detected loader, runtime, headset, and session state.
 
@@ -102,19 +107,21 @@ The game can also be configured to launch in VR automatically. If VR initializat
 
 This milestone is intentionally a seated or standing **gamepad VR** experience. Mario is controlled with the same gamepad bindings used by regular SM64 Co-Op DX, while the headset controls the player's view.
 
-Both supported camera systems are valid choices:
+In **Third Person Mode**, both supported camera systems are valid choices:
 
 - **Default camera:** works with the original SM64-style camera behavior.
 - **Free camera:** works with SM64 Co-Op DX's free-camera behavior.
 
 Neither camera mode is required or specifically recommended; use whichever you prefer.
 
+In **First Person Mode**, the headset controls Mario's forward direction while the right stick provides smooth horizontal turning. Sideways stick input is restricted to a narrower steering angle for comfort. Camera height, field of view, movement-direction calibration, and performance controls are available in the VR submenus. Mario's model is hidden locally in this mode so his head and body do not obstruct the headset view.
+
 ## Current limitations
 
 - Windows/OpenGL is the only implemented OpenXR graphics path.
-- Third Person Mode is the only playable VR camera mode currently exposed.
 - Motion controllers, tracked hands, hand interaction, and haptics are not implemented yet.
-- First-person rendering and head-directed movement are not implemented yet.
+- First Person Mode is an early implementation and may still have performance or camera edge cases in some levels, actions, mods, and ROM hacks.
+- The 3D star models currently do not appear on the Star Select screen in VR. The screen remains usable, but this visual bug is still under investigation.
 - Some flat billboard objects, such as original 2D trees, may make their camera-facing rotation more noticeable in VR. True 3D replacement models can improve this in the future.
 - Hardware and runtime compatibility testing is still limited.
 - General Lua mods, model packs, texture packs, and ROM hacks require broader compatibility testing in VR.
@@ -125,8 +132,6 @@ Please include the headset, OpenXR runtime, GPU, reproduction steps, and the rel
 
 The long-term goal is to expand this foundation without sacrificing SM64 Co-Op DX's multiplayer and mod support. Planned work includes:
 
-- First-person VR mode
-- Head-facing movement direction for first-person play
 - Permanently floating tracked hands instead of VR arms
 - option to hide torso and legs
 - Motion-based punching and physical interactions
@@ -141,7 +146,7 @@ These are just goals and I'm not sure when I'll have time to work on this
 
 ## Project status
 
-The current third-person milestone is considered feature-complete for now. Development will continue from this stable checkpoint toward the first-person and tracked-hand systems.
+The current third-person milestone is considered feature-complete for now. Version 0.2 introduces the first playable version of First Person Mode; development will continue with first-person refinement and the future tracked-hand systems.
 
 ## Credits and acknowledgements
 

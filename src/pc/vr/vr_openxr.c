@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "pc/configfile.h"
 #include "pc/vr/vr_openxr.h"
 
 #ifdef _WIN32
@@ -57,6 +58,7 @@ struct VrOpenXrFunctions {
 struct VrOpenXrSwapchain {
     XrSwapchain handle;
     XrSwapchainImageOpenGLKHR* images;
+    bool* framebufferValidated;
     uint32_t imageCount;
     uint32_t width;
     uint32_t height;
@@ -76,6 +78,13 @@ static struct VrOpenXrSwapchain sColorSwapchains[2] = { 0 };
 static int64_t sColorSwapchainFormat = 0;
 static GLuint sEyeFramebuffer = 0;
 static GLuint sEyeDepthRenderbuffers[2] = { 0 };
+static GLuint sScaledEyeFramebuffer = 0;
+static GLuint sScaledEyeColorRenderbuffers[2] = { 0 };
+static GLuint sScaledEyeDepthRenderbuffers[2] = { 0 };
+static uint32_t sScaledEyeWidths[2] = { 0 };
+static uint32_t sScaledEyeHeights[2] = { 0 };
+static bool sScaledEyeFramebufferValidated[2] = { false };
+static bool sActiveEyeUsesScaledTarget = false;
 static bool sEyeDirectRendered[2] = { false };
 static bool sEyeImageAcquired[2] = { false };
 static uint32_t sEyeDirectImageIndices[2] = { 0 };
@@ -84,14 +93,28 @@ static GLint sPreviousDrawFramebuffer = 0;
 static GLint sPreviousReadFramebuffer = 0;
 static GLint sPreviousDrawBuffer = GL_BACK;
 static GLint sPreviousReadBuffer = GL_BACK;
+static bool sPreviousFramebufferStateValid = false;
 static bool sDirectRenderingLogged = false;
 static bool sDesktopMirrorLogged = false;
 static bool sStereoEyeOffsetsLogged = false;
 static bool sAsymmetricProjectionLogged = false;
 
+static uint32_t vr_openxr_scaled_dimension(uint32_t dimension) {
+    uint32_t scale = configVrRenderScale;
+
+    if (scale < 50) {
+        scale = 50;
+    } else if (scale > 100) {
+        scale = 100;
+    }
+
+    return (dimension * scale + 50) / 100;
+}
+
 static bool sViewPoseValid = false;
-static uint32_t sPoseLogFrame = 0;
-static uint32_t sSwapchainLogFrame = 0;
+static bool sViewPoseLogged = false;
+static bool sInvalidViewPoseLogged = false;
+static bool sSwapchainCycleLogged = false;
 static XrTime sFrameDisplayTime = 0;
 static bool sFrameBegun = false;
 static bool sFrameShouldRender = false;
@@ -506,6 +529,38 @@ static void vr_openxr_destroy_eye_framebuffer(void) {
         sizeof(sEyeDepthRenderbuffers)
     );
 
+    if (sScaledEyeFramebuffer != 0) {
+        glDeleteFramebuffers(1, &sScaledEyeFramebuffer);
+        sScaledEyeFramebuffer = 0;
+    }
+
+    if (sScaledEyeColorRenderbuffers[0] != 0 ||
+        sScaledEyeColorRenderbuffers[1] != 0) {
+        glDeleteRenderbuffers(2, sScaledEyeColorRenderbuffers);
+    }
+    if (sScaledEyeDepthRenderbuffers[0] != 0 ||
+        sScaledEyeDepthRenderbuffers[1] != 0) {
+        glDeleteRenderbuffers(2, sScaledEyeDepthRenderbuffers);
+    }
+    memset(
+        sScaledEyeColorRenderbuffers,
+        0,
+        sizeof(sScaledEyeColorRenderbuffers)
+    );
+    memset(
+        sScaledEyeDepthRenderbuffers,
+        0,
+        sizeof(sScaledEyeDepthRenderbuffers)
+    );
+    memset(sScaledEyeWidths, 0, sizeof(sScaledEyeWidths));
+    memset(sScaledEyeHeights, 0, sizeof(sScaledEyeHeights));
+    memset(
+        sScaledEyeFramebufferValidated,
+        0,
+        sizeof(sScaledEyeFramebufferValidated)
+    );
+    sActiveEyeUsesScaledTarget = false;
+
     if (hadFramebuffer) {
         printf("[VR] OpenXR eye framebuffer destroyed.\n");
     }
@@ -527,6 +582,7 @@ static void vr_openxr_destroy_color_swapchains(void) {
         }
 
         free(swapchain->images);
+        free(swapchain->framebufferValidated);
         memset(swapchain, 0, sizeof(*swapchain));
     }
 
@@ -696,12 +752,19 @@ static bool vr_openxr_create_eye_color_swapchain(uint32_t eyeIndex) {
 
     swapchain->images =
         calloc(imageCount, sizeof(XrSwapchainImageOpenGLKHR));
+    swapchain->framebufferValidated =
+        calloc(imageCount, sizeof(bool));
 
-    if (swapchain->images == NULL) {
+    if (swapchain->images == NULL ||
+        swapchain->framebufferValidated == NULL) {
         printf(
             "[VR] Could not allocate %s eye swapchain image list.\n",
             eyeName
         );
+        free(swapchain->images);
+        free(swapchain->framebufferValidated);
+        swapchain->images = NULL;
+        swapchain->framebufferValidated = NULL;
         return false;
     }
 
@@ -1183,13 +1246,9 @@ static bool vr_openxr_locate_views(XrTime displayTime) {
         (viewState.viewStateFlags & requiredFlags) == requiredFlags;
 
     if (!poseValid) {
-        if (sViewPoseValid ||
-            sPoseLogFrame == 0 ||
-            sPoseLogFrame >= 90) {
+        if (sViewPoseValid || !sInvalidViewPoseLogged) {
             printf("[VR] OpenXR view pose is temporarily invalid.\n");
-            sPoseLogFrame = 1;
-        } else {
-            sPoseLogFrame++;
+            sInvalidViewPoseLogged = true;
         }
         sViewPoseValid = false;
         return true;
@@ -1197,16 +1256,13 @@ static bool vr_openxr_locate_views(XrTime displayTime) {
 
     if (!sViewPoseValid) {
         printf("[VR] Valid stereo 6DoF view poses acquired.\n");
-        vr_openxr_log_views();
-        sPoseLogFrame = 0;
-    } else {
-        sPoseLogFrame++;
-        if (sPoseLogFrame >= 90) {
+        if (!sViewPoseLogged) {
             vr_openxr_log_views();
-            sPoseLogFrame = 0;
+            sViewPoseLogged = true;
         }
     }
 
+    sInvalidViewPoseLogged = false;
     sViewPoseValid = true;
     return true;
 }
@@ -1494,7 +1550,8 @@ static bool vr_openxr_release_eye_image(uint32_t eyeIndex) {
 }
 
 static bool vr_openxr_ensure_direct_eye_target(
-    uint32_t eyeIndex
+    uint32_t eyeIndex,
+    bool requireDepthBuffer
 ) {
     const struct VrOpenXrSwapchain* swapchain =
         &sColorSwapchains[eyeIndex];
@@ -1514,7 +1571,8 @@ static bool vr_openxr_ensure_direct_eye_target(
         printf("[VR] OpenXR eye framebuffer created.\n");
     }
 
-    if (sEyeDepthRenderbuffers[eyeIndex] != 0) {
+    if (!requireDepthBuffer ||
+        sEyeDepthRenderbuffers[eyeIndex] != 0) {
         return true;
     }
 
@@ -1565,6 +1623,151 @@ static bool vr_openxr_ensure_direct_eye_target(
     return true;
 }
 
+static bool vr_openxr_bind_scaled_eye_target(
+    uint32_t eyeIndex,
+    uint32_t width,
+    uint32_t height
+) {
+    const XrViewConfigurationView* view =
+        &sViewConfigurationViews[eyeIndex];
+    GLint previousRenderbuffer = 0;
+    const bool recreateTargets =
+        sScaledEyeWidths[eyeIndex] != width ||
+        sScaledEyeHeights[eyeIndex] != height;
+    const bool allocateColor =
+        recreateTargets ||
+        sScaledEyeColorRenderbuffers[eyeIndex] == 0;
+    const bool allocateDepth =
+        recreateTargets ||
+        sScaledEyeDepthRenderbuffers[eyeIndex] == 0;
+
+    if (sScaledEyeFramebuffer == 0) {
+        glGenFramebuffers(1, &sScaledEyeFramebuffer);
+    }
+
+    if (sScaledEyeFramebuffer == 0) {
+        printf("[VR] Could not create scaled eye framebuffer.\n");
+        return false;
+    }
+
+    if (recreateTargets) {
+        glDeleteRenderbuffers(
+            1,
+            &sScaledEyeColorRenderbuffers[eyeIndex]
+        );
+        glDeleteRenderbuffers(
+            1,
+            &sScaledEyeDepthRenderbuffers[eyeIndex]
+        );
+        sScaledEyeColorRenderbuffers[eyeIndex] = 0;
+        sScaledEyeDepthRenderbuffers[eyeIndex] = 0;
+        sScaledEyeFramebufferValidated[eyeIndex] = false;
+    }
+
+    if (allocateColor || allocateDepth) {
+        glGetIntegerv(
+            GL_RENDERBUFFER_BINDING,
+            &previousRenderbuffer
+        );
+    }
+
+    if (sScaledEyeColorRenderbuffers[eyeIndex] == 0) {
+        glGenRenderbuffers(
+            1,
+            &sScaledEyeColorRenderbuffers[eyeIndex]
+        );
+        glBindRenderbuffer(
+            GL_RENDERBUFFER,
+            sScaledEyeColorRenderbuffers[eyeIndex]
+        );
+
+        if (view->recommendedSwapchainSampleCount > 1) {
+            glRenderbufferStorageMultisample(
+                GL_RENDERBUFFER,
+                (GLsizei)view->recommendedSwapchainSampleCount,
+                (GLenum)sColorSwapchainFormat,
+                (GLsizei)width,
+                (GLsizei)height
+            );
+        } else {
+            glRenderbufferStorage(
+                GL_RENDERBUFFER,
+                (GLenum)sColorSwapchainFormat,
+                (GLsizei)width,
+                (GLsizei)height
+            );
+        }
+    }
+
+    if (sScaledEyeDepthRenderbuffers[eyeIndex] == 0) {
+        glGenRenderbuffers(
+            1,
+            &sScaledEyeDepthRenderbuffers[eyeIndex]
+        );
+        glBindRenderbuffer(
+            GL_RENDERBUFFER,
+            sScaledEyeDepthRenderbuffers[eyeIndex]
+        );
+
+        if (view->recommendedSwapchainSampleCount > 1) {
+            glRenderbufferStorageMultisample(
+                GL_RENDERBUFFER,
+                (GLsizei)view->recommendedSwapchainSampleCount,
+                GL_DEPTH_COMPONENT24,
+                (GLsizei)width,
+                (GLsizei)height
+            );
+        } else {
+            glRenderbufferStorage(
+                GL_RENDERBUFFER,
+                GL_DEPTH_COMPONENT24,
+                (GLsizei)width,
+                (GLsizei)height
+            );
+        }
+    }
+
+    sScaledEyeWidths[eyeIndex] = width;
+    sScaledEyeHeights[eyeIndex] = height;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, sScaledEyeFramebuffer);
+    glFramebufferRenderbuffer(
+        GL_FRAMEBUFFER,
+        GL_COLOR_ATTACHMENT0,
+        GL_RENDERBUFFER,
+        sScaledEyeColorRenderbuffers[eyeIndex]
+    );
+    glFramebufferRenderbuffer(
+        GL_FRAMEBUFFER,
+        GL_DEPTH_ATTACHMENT,
+        GL_RENDERBUFFER,
+        sScaledEyeDepthRenderbuffers[eyeIndex]
+    );
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    if (allocateColor || allocateDepth) {
+        glBindRenderbuffer(
+            GL_RENDERBUFFER,
+            (GLuint)previousRenderbuffer
+        );
+    }
+
+    if (!sScaledEyeFramebufferValidated[eyeIndex]) {
+        const GLenum status =
+            glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        if (status != GL_FRAMEBUFFER_COMPLETE) {
+            printf(
+                "[VR] Scaled %s eye framebuffer is incomplete: 0x%X.\n",
+                eyeIndex == 0 ? "left" : "right",
+                (unsigned int)status
+            );
+            return false;
+        }
+        sScaledEyeFramebufferValidated[eyeIndex] = true;
+    }
+
+    return true;
+}
+
 bool vr_openxr_begin_eye(
     uint32_t eyeIndex,
     uint32_t* width,
@@ -1591,11 +1794,6 @@ bool vr_openxr_begin_eye(
         return false;
     }
 
-    if (!vr_openxr_ensure_direct_eye_target(eyeIndex)) {
-        vr_openxr_release_eye_image(eyeIndex);
-        return false;
-    }
-
     const struct VrOpenXrSwapchain* swapchain =
         &sColorSwapchains[eyeIndex];
     const XrViewConfigurationView* view =
@@ -1607,16 +1805,43 @@ bool vr_openxr_begin_eye(
     const GLuint texture =
         swapchain->images[imageIndex].image;
 
-    glGetIntegerv(
-        GL_DRAW_FRAMEBUFFER_BINDING,
-        &sPreviousDrawFramebuffer
-    );
-    glGetIntegerv(
-        GL_READ_FRAMEBUFFER_BINDING,
-        &sPreviousReadFramebuffer
-    );
-    glGetIntegerv(GL_DRAW_BUFFER, &sPreviousDrawBuffer);
-    glGetIntegerv(GL_READ_BUFFER, &sPreviousReadBuffer);
+    uint32_t renderWidth =
+        vr_openxr_scaled_dimension(swapchain->width);
+    uint32_t renderHeight =
+        vr_openxr_scaled_dimension(swapchain->height);
+
+    // OpenGL cannot scale while resolving a multisampled renderbuffer.
+    // Keep the runtime's full size for the uncommon MSAA swapchain case.
+    if (view->recommendedSwapchainSampleCount > 1) {
+        renderWidth = swapchain->width;
+        renderHeight = swapchain->height;
+    }
+    sActiveEyeUsesScaledTarget =
+        renderWidth != swapchain->width ||
+        renderHeight != swapchain->height;
+
+    if (!vr_openxr_ensure_direct_eye_target(
+            eyeIndex,
+            !sActiveEyeUsesScaledTarget
+        )) {
+        sActiveEyeUsesScaledTarget = false;
+        vr_openxr_release_eye_image(eyeIndex);
+        return false;
+    }
+
+    if (!sPreviousFramebufferStateValid) {
+        glGetIntegerv(
+            GL_DRAW_FRAMEBUFFER_BINDING,
+            &sPreviousDrawFramebuffer
+        );
+        glGetIntegerv(
+            GL_READ_FRAMEBUFFER_BINDING,
+            &sPreviousReadFramebuffer
+        );
+        glGetIntegerv(GL_DRAW_BUFFER, &sPreviousDrawBuffer);
+        glGetIntegerv(GL_READ_BUFFER, &sPreviousReadBuffer);
+        sPreviousFramebufferStateValid = true;
+    }
 
     glBindFramebuffer(
         GL_FRAMEBUFFER,
@@ -1633,12 +1858,17 @@ bool vr_openxr_begin_eye(
         GL_FRAMEBUFFER,
         GL_DEPTH_ATTACHMENT,
         GL_RENDERBUFFER,
-        sEyeDepthRenderbuffers[eyeIndex]
+        sActiveEyeUsesScaledTarget
+            ? 0
+            : sEyeDepthRenderbuffers[eyeIndex]
     );
     glDrawBuffer(GL_COLOR_ATTACHMENT0);
 
-    const GLenum framebufferStatus =
-        glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    GLenum framebufferStatus = GL_FRAMEBUFFER_COMPLETE;
+    if (!swapchain->framebufferValidated[imageIndex]) {
+        framebufferStatus =
+            glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    }
 
     if (framebufferStatus != GL_FRAMEBUFFER_COMPLETE) {
         printf(
@@ -1672,10 +1902,44 @@ bool vr_openxr_begin_eye(
         return false;
     }
 
+    if (sActiveEyeUsesScaledTarget &&
+        !vr_openxr_bind_scaled_eye_target(
+            eyeIndex,
+            renderWidth,
+            renderHeight
+        )) {
+        sActiveEyeUsesScaledTarget = false;
+        glBindFramebuffer(GL_FRAMEBUFFER, sEyeFramebuffer);
+        glFramebufferTexture2D(
+            GL_FRAMEBUFFER,
+            GL_COLOR_ATTACHMENT0,
+            textureTarget,
+            0,
+            0
+        );
+        glFramebufferRenderbuffer(
+            GL_FRAMEBUFFER,
+            GL_DEPTH_ATTACHMENT,
+            GL_RENDERBUFFER,
+            0
+        );
+        glBindFramebuffer(
+            GL_DRAW_FRAMEBUFFER,
+            (GLuint)sPreviousDrawFramebuffer
+        );
+        glBindFramebuffer(
+            GL_READ_FRAMEBUFFER,
+            (GLuint)sPreviousReadFramebuffer
+        );
+        vr_openxr_release_eye_image(eyeIndex);
+        return false;
+    }
+    swapchain->framebufferValidated[imageIndex] = true;
+
     sEyeDirectImageIndices[eyeIndex] = imageIndex;
     sActiveRenderEye = (int32_t)eyeIndex;
-    *width = swapchain->width;
-    *height = swapchain->height;
+    *width = renderWidth;
+    *height = renderHeight;
     return true;
 }
 
@@ -1691,6 +1955,42 @@ bool vr_openxr_end_eye(uint32_t eyeIndex) {
         view->recommendedSwapchainSampleCount > 1
             ? GL_TEXTURE_2D_MULTISAMPLE
             : GL_TEXTURE_2D;
+
+    if (sActiveEyeUsesScaledTarget) {
+        const struct VrOpenXrSwapchain* swapchain =
+            &sColorSwapchains[eyeIndex];
+        const GLboolean scissorWasEnabled =
+            glIsEnabled(GL_SCISSOR_TEST);
+
+        glDisable(GL_SCISSOR_TEST);
+
+        glBindFramebuffer(
+            GL_READ_FRAMEBUFFER,
+            sScaledEyeFramebuffer
+        );
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        glBindFramebuffer(
+            GL_DRAW_FRAMEBUFFER,
+            sEyeFramebuffer
+        );
+        glDrawBuffer(GL_COLOR_ATTACHMENT0);
+        glBlitFramebuffer(
+            0,
+            0,
+            (GLint)sScaledEyeWidths[eyeIndex],
+            (GLint)sScaledEyeHeights[eyeIndex],
+            0,
+            0,
+            (GLint)swapchain->width,
+            (GLint)swapchain->height,
+            GL_COLOR_BUFFER_BIT,
+            GL_LINEAR
+        );
+
+        if (scissorWasEnabled) {
+            glEnable(GL_SCISSOR_TEST);
+        }
+    }
 
     glFlush();
     glBindFramebuffer(
@@ -1722,6 +2022,7 @@ bool vr_openxr_end_eye(uint32_t eyeIndex) {
     glReadBuffer((GLenum)sPreviousReadBuffer);
 
     sActiveRenderEye = -1;
+    sActiveEyeUsesScaledTarget = false;
 
     if (!vr_openxr_release_eye_image(eyeIndex)) {
         return false;
@@ -1760,30 +2061,15 @@ bool vr_openxr_mirror_eye(
         return false;
     }
 
-    GLint activeDrawFramebuffer = 0;
-    GLint activeReadFramebuffer = 0;
-    GLint activeDrawBuffer = 0;
-    GLint activeReadBuffer = 0;
-    GLint activeScissorBox[4] = { 0 };
     const GLboolean scissorWasEnabled =
         glIsEnabled(GL_SCISSOR_TEST);
 
-    glGetIntegerv(
-        GL_DRAW_FRAMEBUFFER_BINDING,
-        &activeDrawFramebuffer
-    );
-    glGetIntegerv(
-        GL_READ_FRAMEBUFFER_BINDING,
-        &activeReadFramebuffer
-    );
-    glGetIntegerv(GL_DRAW_BUFFER, &activeDrawBuffer);
-    glGetIntegerv(GL_READ_BUFFER, &activeReadBuffer);
-    glGetIntegerv(GL_SCISSOR_BOX, activeScissorBox);
-
     GLint sourceX = 0;
     GLint sourceY = 0;
-    GLint sourceWidth = (GLint)swapchain->width;
-    GLint sourceHeight = (GLint)swapchain->height;
+    GLint sourceWidth = (GLint)
+        vr_openxr_scaled_dimension(swapchain->width);
+    GLint sourceHeight = (GLint)
+        vr_openxr_scaled_dimension(swapchain->height);
     const float sourceAspect =
         (float)sourceWidth / (float)sourceHeight;
     const float destinationAspect =
@@ -1807,7 +2093,9 @@ bool vr_openxr_mirror_eye(
     glDisable(GL_SCISSOR_TEST);
     glBindFramebuffer(
         GL_READ_FRAMEBUFFER,
-        sEyeFramebuffer
+        sActiveEyeUsesScaledTarget
+            ? sScaledEyeFramebuffer
+            : sEyeFramebuffer
     );
     glReadBuffer(GL_COLOR_ATTACHMENT0);
     glBindFramebuffer(
@@ -1828,22 +2116,20 @@ bool vr_openxr_mirror_eye(
         GL_LINEAR
     );
 
+    const GLuint activeEyeFramebuffer =
+        sActiveEyeUsesScaledTarget
+            ? sScaledEyeFramebuffer
+            : sEyeFramebuffer;
     glBindFramebuffer(
         GL_DRAW_FRAMEBUFFER,
-        (GLuint)activeDrawFramebuffer
+        activeEyeFramebuffer
     );
-    glDrawBuffer((GLenum)activeDrawBuffer);
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
     glBindFramebuffer(
         GL_READ_FRAMEBUFFER,
-        (GLuint)activeReadFramebuffer
+        activeEyeFramebuffer
     );
-    glReadBuffer((GLenum)activeReadBuffer);
-    glScissor(
-        activeScissorBox[0],
-        activeScissorBox[1],
-        activeScissorBox[2],
-        activeScissorBox[3]
-    );
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
 
     if (scissorWasEnabled) {
         glEnable(GL_SCISSOR_TEST);
@@ -1888,20 +2174,17 @@ static bool vr_openxr_cycle_swapchain_image(
 static void vr_openxr_log_swapchain_cycle(
     const uint32_t imageIndices[2]
 ) {
-    if (sSwapchainLogFrame == 0) {
-        printf(
-            "[VR] Live game stereo frame: left image %u, "
-            "right image %u.\n",
-            imageIndices[0],
-            imageIndices[1]
-        );
+    if (sSwapchainCycleLogged) {
+        return;
     }
 
-    sSwapchainLogFrame++;
-
-    if (sSwapchainLogFrame >= 90) {
-        sSwapchainLogFrame = 0;
-    }
+    printf(
+        "[VR] Live game stereo frame: left image %u, "
+        "right image %u.\n",
+        imageIndices[0],
+        imageIndices[1]
+    );
+    sSwapchainCycleLogged = true;
 }
 
 bool vr_openxr_begin_frame(void) {
@@ -1955,6 +2238,7 @@ bool vr_openxr_begin_frame(void) {
     }
 
     sFrameBegun = true;
+    sPreviousFramebufferStateValid = false;
     memset(
         sEyeDirectRendered,
         0,
@@ -2337,8 +2621,9 @@ void vr_openxr_shutdown(void) {
     );
 
     sViewPoseValid = false;
-    sPoseLogFrame = 0;
-    sSwapchainLogFrame = 0;
+    sViewPoseLogged = false;
+    sInvalidViewPoseLogged = false;
+    sSwapchainCycleLogged = false;
     sFrameDisplayTime = 0;
     sFrameBegun = false;
     sFrameShouldRender = false;

@@ -13,10 +13,12 @@
 #include "engine/math_util.h"
 
 #include "pc/controller/controller_mouse.h"
+#include "pc/configfile.h"
 #include "pc/djui/djui.h"
 #include "pc/djui/djui_hud_utils.h"
 #include "pc/lua/utils/smlua_camera_utils.h"
 #include "pc/lua/smlua_hooks.h"
+#include "pc/vr/vr.h"
 
 struct FirstPersonCamera gFirstPersonCamera = {
     .enabled = false,
@@ -32,6 +34,15 @@ struct FirstPersonCamera gFirstPersonCamera = {
 };
 
 extern s16 gMenuMode;
+
+static bool flat_first_person_requested(void) {
+    // VR has its own stereo first-person camera. The original single-camera
+    // implementation is available on a monitor only through the explicit
+    // Experimental opt-in.
+    return !vr_is_active() &&
+        configVrExperimentalFlatFirstPerson &&
+        !gDjuiInMainMenu;
+}
 
 bool first_person_check_cancels(struct MarioState *m) {
     if (m->action == ACT_FIRST_PERSON || m->action == ACT_IN_CANNON || m->action == ACT_READING_NPC_DIALOG || m->action == ACT_DISAPPEARED || m->action == ACT_FLYING) {
@@ -52,7 +63,8 @@ bool first_person_check_cancels(struct MarioState *m) {
 }
 
 bool get_first_person_enabled(void) {
-    return gFirstPersonCamera.enabled && !first_person_check_cancels(&gMarioStates[0]);
+    return flat_first_person_requested() &&
+        !first_person_check_cancels(&gMarioStates[0]);
 }
 
 void set_first_person_enabled(bool enable) {
@@ -154,7 +166,17 @@ static void first_person_camera_update(void) {
 }
 
 void first_person_update(void) {
-    if (gFirstPersonCamera.enabled && !gDjuiInMainMenu) {
+    static bool sFlatFirstPersonWasActive = false;
+    const bool flatFirstPersonActive = flat_first_person_requested();
+
+    if (flatFirstPersonActive && !sFlatFirstPersonWasActive) {
+        gFirstPersonCamera.pitch = 0;
+        gFirstPersonCamera.yaw =
+            gMarioStates[0].faceAngle[1] + 0x8000;
+    }
+    sFlatFirstPersonWasActive = flatFirstPersonActive;
+
+    if (flatFirstPersonActive) {
         struct MarioState *m = &gMarioStates[0];
 
         // check cancels

@@ -6,6 +6,7 @@
 #include "gfx_dimensions.h"
 #include "level_update.h"
 #include "memory.h"
+#include "rendering_graph_node.h"
 #include "save_file.h"
 #include "segment2.h"
 #include "sm64.h"
@@ -581,9 +582,15 @@ Gfx *create_skybox_facing_camera(s8 player, s8 background, f32 fov,
     gReadOnlyBackground = background;
     background = gOverrideBackground == -1 ? background : gOverrideBackground;
 
-    f32 cameraFaceX = focX - posX;
-    f32 cameraFaceY = focY - posY;
-    f32 cameraFaceZ = focZ - posZ;
+    Vec3f cameraDirection = {
+        focX - posX,
+        focY - posY,
+        focZ - posZ
+    };
+    vr_adjust_first_person_camera_direction(cameraDirection);
+    f32 cameraFaceX = cameraDirection[0];
+    f32 cameraFaceY = cameraDirection[1];
+    f32 cameraFaceZ = cameraDirection[2];
     s8 colorIndex = 1;
 
     // If the first star is collected in JRB, make the sky darker and slightly green

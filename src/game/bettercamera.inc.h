@@ -189,6 +189,26 @@ void newcam_init_settings(void) {
 
 static void newcam_rotate_button(void) {
 
+    // Keep only horizontal analogue turning in VR first person. C-buttons,
+    // vertical camera input, mouse look, D-pad shortcuts, recentering and zoom
+    // can otherwise change the hidden camera basis underneath HMD movement.
+    if (vr_first_person_locks_camera_input()) {
+        if (ABS(gNewCamera.extStick[0]) > 20) {
+            gNewCamera.yawAccel = newcam_adjust_value(
+                gNewCamera.yawAccel,
+                gNewCamera.extStick[0] * 0.125f,
+                gNewCamera.extStick[0] * 1.25f
+            );
+        } else {
+            gNewCamera.yawAccel -=
+                gNewCamera.yawAccel *
+                (gNewCamera.deceleration / 100);
+        }
+        gNewCamera.tiltAccel = 0;
+        gNewCamera.centering = false;
+        return;
+    }
+
     // Standard camera movement
     // Buzz if the camera can't move due to being locked
     if (gPlayer1Controller->buttonPressed & (L_CBUTTONS | R_CBUTTONS) && gNewCamera.directionLocked) {
@@ -303,6 +323,11 @@ static void newcam_zoom_button(void) {
     if (gDjuiInMainMenu) {
         gNewCamera.distance = NEWCAM_DISTANCES[0];
         gNewCamera.distanceTargetIndex = 0;
+        return;
+    }
+
+    if (vr_first_person_locks_camera_input()) {
+        gNewCamera.centering = false;
         return;
     }
 

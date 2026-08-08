@@ -88,7 +88,14 @@ bool         configShowFPS                        = false;
 bool         configVrAutoStart                    = false;
 unsigned int configVrCameraMode                   = VR_CAMERA_MODE_THIRD_PERSON;
 unsigned int configVrCameraDistance               = 100;
+unsigned int configVrCameraHeight                 = 90;
+unsigned int configVrMovementCalibration          = 50;
+unsigned int configVrFov                          = 100;
+unsigned int configVrRenderScale                  = 100;
+unsigned int configVrDesktopMirrorFps             = 60;
 unsigned int configVrHudOpacity                   = 100;
+bool         configVrExperimentalFlipTurn         = true;
+bool         configVrExperimentalFlatFirstPerson  = false;
 bool         configShowPing                       = false;
 enum RefreshRateMode configFramerateMode          = RRM_AUTO;
 unsigned int configFrameLimit                     = 60;
@@ -266,7 +273,14 @@ static const struct ConfigOption options[] = {
     {.name = "vr_auto_start",                  .type = CONFIG_TYPE_BOOL, .boolValue = &configVrAutoStart},
     {.name = "vr_camera_mode",                 .type = CONFIG_TYPE_UINT, .uintValue = &configVrCameraMode},
     {.name = "vr_camera_distance",             .type = CONFIG_TYPE_UINT, .uintValue = &configVrCameraDistance},
+    {.name = "vr_camera_height",               .type = CONFIG_TYPE_UINT, .uintValue = &configVrCameraHeight},
+    {.name = "vr_movement_calibration",        .type = CONFIG_TYPE_UINT, .uintValue = &configVrMovementCalibration},
+    {.name = "vr_fov",                         .type = CONFIG_TYPE_UINT, .uintValue = &configVrFov},
+    {.name = "vr_render_scale",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrRenderScale},
+    {.name = "vr_desktop_mirror_fps",          .type = CONFIG_TYPE_UINT, .uintValue = &configVrDesktopMirrorFps},
     {.name = "vr_hud_opacity",                 .type = CONFIG_TYPE_UINT, .uintValue = &configVrHudOpacity},
+    {.name = "vr_experimental_flip_turn",      .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalFlipTurn},
+    {.name = "vr_experimental_flat_first_person", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalFlatFirstPerson},
     {.name = "show_ping",                      .type = CONFIG_TYPE_BOOL, .boolValue = &configShowPing},
     {.name = "framerate_mode",                 .type = CONFIG_TYPE_UINT, .uintValue = &configFramerateMode},
     {.name = "frame_limit",                    .type = CONFIG_TYPE_UINT, .uintValue = &configFrameLimit},

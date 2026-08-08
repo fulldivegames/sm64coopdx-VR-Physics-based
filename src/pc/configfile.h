@@ -53,6 +53,7 @@ enum GraphicsBackend {
 
 enum VrCameraMode {
     VR_CAMERA_MODE_THIRD_PERSON,
+    VR_CAMERA_MODE_FIRST_PERSON,
     VR_CAMERA_MODE_COUNT
 };
 
@@ -67,7 +68,14 @@ extern bool         configShowFPS;
 extern bool         configVrAutoStart;
 extern unsigned int configVrCameraMode;
 extern unsigned int configVrCameraDistance;
+extern unsigned int configVrCameraHeight;
+extern unsigned int configVrMovementCalibration;
+extern unsigned int configVrFov;
+extern unsigned int configVrRenderScale;
+extern unsigned int configVrDesktopMirrorFps;
 extern unsigned int configVrHudOpacity;
+extern bool         configVrExperimentalFlipTurn;
+extern bool         configVrExperimentalFlatFirstPerson;
 extern bool         configShowPing;
 extern enum RefreshRateMode configFramerateMode;
 extern unsigned int configFrameLimit;

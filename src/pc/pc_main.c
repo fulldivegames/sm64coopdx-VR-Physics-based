@@ -94,6 +94,8 @@ static const f64 sFrameTime = (1.0 / ((double)FRAMERATE));
 static f64 sFpsTimeLast = 0;
 static f64 sFrameTimeStart = 0;
 static u32 sDrawnFrames = 0;
+static bool sVrFramePacingEnabled = false;
+static f64 sVrDesktopMirrorNextTime = 0.0;
 
 bool gGameInited = false;
 bool gGfxInited = false;
@@ -222,6 +224,27 @@ static u32 get_target_refresh_rate(void) {
     return get_display_refresh_rate();
 }
 
+static void update_vr_frame_pacing(void) {
+    const bool enable = vr_is_active();
+
+    if (enable == sVrFramePacingEnabled) {
+        return;
+    }
+
+    // xrWaitFrame is the authoritative clock while VR is active. Desktop
+    // VSync would otherwise add a second, often mismatched 60 Hz wait and
+    // cause uneven headset delivery on 72/90/120 Hz runtimes.
+    SDL_GL_SetSwapInterval(enable ? 0 : configWindow.vsync);
+    sVrFramePacingEnabled = enable;
+
+    if (enable) {
+        printf(
+            "[VR] OpenXR frame pacing enabled; "
+            "desktop VSync bypassed.\n"
+        );
+    }
+}
+
 static void select_graphics_backend(void) {
     if (gCLIOpts.headless) {
         return;
@@ -263,19 +286,28 @@ static void select_graphics_backend(void) {
 }
 
 void produce_interpolation_frames_and_delay(void) {
+    update_vr_frame_pacing();
+
+    const bool vrFramePaced = vr_is_active();
     u32 refreshRate = get_target_refresh_rate();
 
     gRenderingInterpolated = true;
 
     u32 displayRefreshRate = get_display_refresh_rate();
-    bool shouldDelay = configFramerateMode != RRM_UNLIMITED;
-    if (configWindow.vsync && displayRefreshRate <= refreshRate) {
+    bool shouldDelay =
+        !vrFramePaced &&
+        configFramerateMode != RRM_UNLIMITED;
+    if (!vrFramePaced &&
+        configWindow.vsync &&
+        displayRefreshRate <= refreshRate) {
         shouldDelay = false;
         refreshRate = displayRefreshRate;
     }
 
     f64 targetTime = sFrameTimeStart + sFrameTime;
-    s32 numFramesToDraw = get_num_frames_to_draw(sFrameTimeStart, refreshRate);
+    s32 numFramesToDraw = vrFramePaced
+        ? 8
+        : get_num_frames_to_draw(sFrameTimeStart, refreshRate);
 
     f64 curTime = clock_elapsed_f64();
     f64 loopStartTime = curTime;
@@ -298,16 +330,58 @@ void produce_interpolation_frames_and_delay(void) {
 
         gfx_start_frame();
         vr_begin_frame();
+
+        if (vrFramePaced && vr_is_active()) {
+            // xrWaitFrame may block until the runtime's next display slot.
+            // Recalculate interpolation afterwards so Mario and the camera
+            // use the pose frame's current time instead of a stale delta.
+            curTime = clock_elapsed_f64();
+            delta = clamp(
+                (curTime - sFrameTimeStart) / sFrameTime,
+                0.f,
+                1.f
+            );
+            gFramePercentage = delta;
+            gRenderingDelta = delta;
+        }
+
+        bool presentDesktopFrame = true;
+        if (vrFramePaced && vr_is_active()) {
+            const f64 mirrorInterval = 1.0 /
+                (f64)clamp(
+                    configVrDesktopMirrorFps,
+                    15U,
+                    60U
+                );
+
+            if (sVrDesktopMirrorNextTime == 0.0) {
+                sVrDesktopMirrorNextTime = curTime;
+            }
+
+            if (curTime + 0.001 < sVrDesktopMirrorNextTime) {
+                presentDesktopFrame = false;
+            } else {
+                sVrDesktopMirrorNextTime =
+                    sVrDesktopMirrorNextTime + mirrorInterval;
+
+                if (sVrDesktopMirrorNextTime <
+                    curTime - mirrorInterval) {
+                    sVrDesktopMirrorNextTime =
+                        curTime + mirrorInterval;
+                }
+            }
+        } else {
+            sVrDesktopMirrorNextTime = 0.0;
+        }
+
         if (!gSkipInterpolationTitleScreen) { patch_interpolations(delta); }
 
         const struct GfxDimensions desktopDimensions =
             gfx_current_dimensions;
-        uint32_t desktopMirrorWidth = 0;
-        uint32_t desktopMirrorHeight = 0;
-        gWindowApi->get_dimensions(
-            &desktopMirrorWidth,
-            &desktopMirrorHeight
-        );
+        const uint32_t desktopMirrorWidth =
+            desktopDimensions.width;
+        const uint32_t desktopMirrorHeight =
+            desktopDimensions.height;
         bool renderedVrEye = false;
         bool mirroredVrEye = false;
 
@@ -346,7 +420,7 @@ void produce_interpolation_frames_and_delay(void) {
 
             // Present the left eye in the desktop window for capture and
             // spectators. Copy it while OpenXR still owns the acquired image.
-            if (eye == 0) {
+            if (eye == 0 && presentDesktopFrame) {
                 mirroredVrEye = vr_mirror_eye(
                     eye,
                     desktopMirrorWidth,
@@ -359,6 +433,10 @@ void produce_interpolation_frames_and_delay(void) {
 
         gfx_current_dimensions = desktopDimensions;
 
+        if (!renderedVrEye) {
+            presentDesktopFrame = true;
+        }
+
         if (renderedVrEye &&
             !gSkipInterpolationTitleScreen) {
             patch_mtx_vr_projection(delta, 2);
@@ -369,12 +447,14 @@ void produce_interpolation_frames_and_delay(void) {
 
         // If mirroring was unavailable, retain the old independent desktop
         // render as a fallback instead of presenting an empty window.
-        if (!mirroredVrEye) {
+        if (presentDesktopFrame && !mirroredVrEye) {
             send_display_list(gGfxSPTask);
             gfx_end_frame_render();
         }
         vr_end_frame();
-        gfx_display_frame();
+        if (presentDesktopFrame) {
+            gfx_display_frame();
+        }
 
         // delay if our framerate is capped
         if (shouldDelay) {
