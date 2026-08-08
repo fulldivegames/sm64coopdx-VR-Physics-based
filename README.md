@@ -23,45 +23,69 @@ The current playable milestone provides a **third-person VR mode designed for a 
 - VR-aware rendering and culling so scenery remains visible while looking around
 - Corrected skybox, lighting, terrain, and billboard behavior for stereo head movement
 - Head-locked main menu, pause menu, HUD, text boxes, and star-select UI
+- Left-eye desktop mirroring for recording and streaming VR gameplay
 - Flat-screen mode remains available when VR mode is disabled
 
-## Requirements
+## Download and play on Windows
 
-### To play
+No compiler, Git, MSYS2, or command-line setup is required for a normal player release.
+
+1. Open the [latest release](https://github.com/fulldivegames/sm64coopdx-VR/releases/latest) and download the Windows ZIP.
+2. Extract the entire ZIP to a normal folder. Do not launch the game from inside the ZIP.
+3. Start your headset software and make sure your preferred OpenXR runtime is active.
+4. Connect a standard gamepad.
+5. Launch `SM64-Co-Op-DX-VR.exe`.
+6. On first launch, drag your legally obtained, unmodified **Super Mario 64 US `.z64` ROM** onto the game window when prompted.
+7. Open **Settings > VR**, enable **VR Mode**, then use **Camera Settings** to adjust the third-person camera distance.
+
+The game validates the ROM and remembers it in the user-data folder. It should not need to be dragged into the window on every launch.
+
+> [!IMPORTANT]
+> The release ZIP does not contain a ROM or Nintendo game assets. You must provide your own legally obtained, unmodified US ROM. Do not upload ROMs when reporting a problem.
+
+If Windows SmartScreen appears, confirm that the ZIP came from this repository's official release page. This community build is not currently code-signed.
+
+### Player requirements
 
 - A 64-bit Windows PC
 - A PC VR headset with a working OpenXR runtime
-- An OpenXR loader available to the game
 - OpenGL support compatible with the active OpenXR runtime
 - A standard gamepad
-- SM64 Co-Op DX's normal game files and legally obtained Super Mario 64 assets
+- A legally obtained, unmodified Super Mario 64 US ROM
 
 The current development build has been tested with a Meta Quest 3 using Virtual Desktop's OpenXR runtime. Other conformant OpenXR headsets and runtimes may work, but have not all been tested yet. Coop play and rom hacks have also not been tested.
 
-### To build from source
+## Building from source (developers only)
+
+Players should use the release ZIP above. Building is only necessary if you want to modify the source or test an unreleased commit.
+
+### Developer requirements
 
 - The normal [SM64 Co-Op DX build prerequisites](https://github.com/coop-deluxe/sm64coopdx)
-- A legally obtained Super Mario 64 US ROM
 - A Windows/MSYS2 MinGW64 build environment
 - Git and GNU Make
 
-Nintendo game assets and ROM files are **not** included in this repository and must not be uploaded to GitHub or attached to a release.
-
-## Building on Windows
-
-Follow the upstream SM64 Co-Op DX setup instructions to install its dependencies and extract the required assets, then build from an MSYS2 MinGW64 shell:
+After installing the upstream Windows build prerequisites, clone this fork, check out the `vr` branch, and build it from an **MSYS2 MinGW64** shell:
 
 ```sh
+git clone --branch vr https://github.com/fulldivegames/sm64coopdx-VR.git
+cd sm64coopdx-VR
 make -j
 ```
 
-The executable is normally produced at:
+The executable is produced at:
 
 ```text
 build/us_pc/sm64coopdx.exe
 ```
 
-Prebuilt releases may be added later, but they must not contain a ROM or copyrighted assets that the project is not permitted to redistribute.
+To create the same allow-listed Windows player ZIP used by releases, run this from PowerShell after a successful build:
+
+```powershell
+.\tools\package-vr-windows.ps1 -Version dev
+```
+
+The ZIP is written to `dist/`. The packaging script includes only the runtime files needed by players and verifies that no `.z64`, `.n64`, or `.v64` ROM was staged. Nintendo ROMs and game assets must never be committed, uploaded as workflow artifacts, or attached to a release.
 
 ## Using VR mode
 

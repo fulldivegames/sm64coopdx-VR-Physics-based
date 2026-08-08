@@ -1,0 +1,51 @@
+SM64 CO-OP DX VR - WINDOWS PLAYER GUIDE
+========================================
+
+WHAT YOU NEED
+
+- A 64-bit Windows PC
+- A PC VR headset with an active OpenXR runtime
+- A standard gamepad
+- Your own legally obtained, unmodified Super Mario 64 US ROM
+  (the ROM commonly identified as Super Mario 64 (U) [!].z64)
+
+Nintendo ROMs and game assets are not included in this download.
+
+
+FIRST-TIME SETUP
+
+1. Extract the entire ZIP to a normal folder. Do not run the game from
+   inside the ZIP.
+2. Start your headset software and make sure the OpenXR runtime you want
+   to use is active.
+3. Connect your gamepad.
+4. Launch SM64-Co-Op-DX-VR.exe.
+5. The first-launch screen will ask for a ROM. Drag your legally obtained,
+   unmodified US .z64 ROM onto the game window.
+6. Open Settings > VR, enable VR Mode, and choose Camera Settings to adjust
+   the third-person camera distance.
+
+The game remembers the validated ROM in its user-data folder, so it should
+not need to be dragged in again on every launch.
+
+
+TROUBLESHOOTING
+
+- If Windows SmartScreen appears, confirm that you downloaded the ZIP from
+  the official fulldivegames GitHub release page. This community build is
+  not currently code-signed.
+- If VR does not start, confirm that your headset's OpenXR runtime is active.
+- For diagnostic output, open PowerShell in the extracted folder and run:
+
+    .\SM64-Co-Op-DX-VR.exe --console
+
+- Include your headset, OpenXR runtime, GPU, reproduction steps, and the
+  console lines beginning with [VR] when reporting a VR problem.
+
+
+PROJECT PAGE
+
+https://github.com/fulldivegames/sm64coopdx-VR
+
+This is an unofficial fan project. It is not affiliated with or endorsed by
+Nintendo, the SM64 Co-Op DX team, Meta, Virtual Desktop, or Khronos.
