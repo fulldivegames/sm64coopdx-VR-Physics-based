@@ -15,6 +15,10 @@ struct VrControllerState {
     bool gripPoseValid;
     float gripPosition[3];
     float gripRotation[4];
+    bool gripLinearVelocityValid;
+    float gripLinearVelocity[3];
+    bool gripAngularVelocityValid;
+    float gripAngularVelocity[3];
     bool aimPoseValid;
     float aimPosition[3];
     float aimRotation[4];

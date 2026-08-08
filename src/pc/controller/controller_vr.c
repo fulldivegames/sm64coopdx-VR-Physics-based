@@ -1,4 +1,5 @@
 #include <math.h>
+#include <stdio.h>
 
 #include "controller_vr.h"
 
@@ -8,6 +9,14 @@
 #define VR_STICK_DEADZONE 0.18f
 #define VR_TRIGGER_THRESHOLD 0.55f
 #define VR_CAMERA_BUTTON_THRESHOLD 0.55f
+#define VR_PUNCH_SPEED_THRESHOLD 0.90f
+#define VR_PUNCH_RESET_SPEED 0.35f
+#define VR_PUNCH_GRIP_THRESHOLD 0.35f
+
+static bool sVrPunchArmed[VR_CONTROLLER_COUNT] = {
+    true,
+    true
+};
 
 static float controller_vr_clampf(
     float value,
@@ -85,6 +94,54 @@ static void controller_vr_merge_stick(
     }
 }
 
+static bool controller_vr_update_physical_punch(
+    uint32_t hand,
+    const struct VrControllerState* state
+) {
+    if (hand >= VR_CONTROLLER_COUNT ||
+        state == NULL ||
+        !state->gripPoseValid ||
+        !state->gripLinearVelocityValid) {
+        if (hand < VR_CONTROLLER_COUNT) {
+            sVrPunchArmed[hand] = false;
+        }
+        return false;
+    }
+
+    const float speed = sqrtf(
+        state->gripLinearVelocity[0] *
+            state->gripLinearVelocity[0] +
+        state->gripLinearVelocity[1] *
+            state->gripLinearVelocity[1] +
+        state->gripLinearVelocity[2] *
+            state->gripLinearVelocity[2]
+    );
+
+    if (speed <= VR_PUNCH_RESET_SPEED) {
+        sVrPunchArmed[hand] = true;
+        return false;
+    }
+
+    const float gripAmount = fmaxf(
+        state->squeeze,
+        state->trigger
+    );
+    if (!sVrPunchArmed[hand] ||
+        speed < VR_PUNCH_SPEED_THRESHOLD ||
+        gripAmount < VR_PUNCH_GRIP_THRESHOLD) {
+        return false;
+    }
+
+    sVrPunchArmed[hand] = false;
+    printf(
+        "[VR] %s physical punch detected (%.2f m/s).\n",
+        hand == VR_CONTROLLER_LEFT ? "Left" : "Right",
+        speed
+    );
+    vr_apply_haptic(hand, 0.25f, 0.04f, -1.0f);
+    return true;
+}
+
 static void controller_vr_init(void) {
 }
 
@@ -108,6 +165,23 @@ static void controller_vr_read(OSContPad* pad) {
 
     if (!leftAvailable && !rightAvailable) {
         return;
+    }
+
+    bool physicalPunch = false;
+    if (leftAvailable) {
+        physicalPunch |= controller_vr_update_physical_punch(
+            VR_CONTROLLER_LEFT,
+            &left
+        );
+    }
+    if (rightAvailable) {
+        physicalPunch |= controller_vr_update_physical_punch(
+            VR_CONTROLLER_RIGHT,
+            &right
+        );
+    }
+    if (physicalPunch) {
+        pad->button |= B_BUTTON;
     }
 
     if (leftAvailable) {

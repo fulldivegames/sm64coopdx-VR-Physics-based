@@ -109,6 +109,7 @@ unsigned int configVrRightGloveRotationZ          = 0;
 unsigned int configVrRightGlovePositionX          = 100;
 unsigned int configVrRightGlovePositionY          = 100;
 unsigned int configVrRightGlovePositionZ          = 100;
+static unsigned int configVrGloveCalibrationVersion = 0;
 bool         configVrExperimentalFlipTurn         = true;
 bool         configVrExperimentalFlatFirstPerson  = false;
 bool         configShowPing                       = false;
@@ -309,6 +310,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_right_glove_position_x",      .type = CONFIG_TYPE_UINT, .uintValue = &configVrRightGlovePositionX},
     {.name = "vr_right_glove_position_y",      .type = CONFIG_TYPE_UINT, .uintValue = &configVrRightGlovePositionY},
     {.name = "vr_right_glove_position_z",      .type = CONFIG_TYPE_UINT, .uintValue = &configVrRightGlovePositionZ},
+    {.name = "vr_glove_calibration_version",   .type = CONFIG_TYPE_UINT, .uintValue = &configVrGloveCalibrationVersion},
     {.name = "vr_experimental_flip_turn",      .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalFlipTurn},
     {.name = "vr_experimental_flat_first_person", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalFlatFirstPerson},
     {.name = "show_ping",                      .type = CONFIG_TYPE_BOOL, .boolValue = &configShowPing},
@@ -738,6 +740,30 @@ const char *configfile_backup_name(void) {
     return CONFIGFILE_BACKUP;
 }
 
+static void configfile_migrate_vr_glove_calibration(void) {
+    if (configVrGloveCalibrationVersion >= 1) {
+        return;
+    }
+
+    // Early motion-controller builds saved the uncalibrated 100% / 0-degree
+    // values. Apply the tested baseline once, including to those existing
+    // files, then preserve all future user adjustments.
+    configVrGloveSize = 70;
+    configVrLeftGloveRotationX = 180;
+    configVrLeftGloveRotationY = 0;
+    configVrLeftGloveRotationZ = 0;
+    configVrLeftGlovePositionX = 100;
+    configVrLeftGlovePositionY = 100;
+    configVrLeftGlovePositionZ = 100;
+    configVrRightGloveRotationX = 180;
+    configVrRightGloveRotationY = 0;
+    configVrRightGloveRotationZ = 0;
+    configVrRightGlovePositionX = 100;
+    configVrRightGlovePositionY = 100;
+    configVrRightGlovePositionZ = 100;
+    configVrGloveCalibrationVersion = 1;
+}
+
 // Loads the config file specified by 'filename'
 static void configfile_load_internal(const char *filename, bool* error) {
     fs_file_t *file;
@@ -753,6 +779,7 @@ static void configfile_load_internal(const char *filename, bool* error) {
     if (file == NULL) {
         // Create a new config file and save defaults
         printf("Config file '%s' not found. Creating it.\n", filename);
+        configfile_migrate_vr_glove_calibration();
         configfile_save(filename);
         return;
     }
@@ -864,6 +891,8 @@ NEXT_OPTION:
     }
 
     fs_close(file);
+
+    configfile_migrate_vr_glove_calibration();
 
     if (configGraphicsBackend < GAPI_GL || configGraphicsBackend > GAPI_MAX) { configGraphicsBackend = GAPI_GL; }
 

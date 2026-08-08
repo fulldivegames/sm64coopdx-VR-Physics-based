@@ -110,6 +110,17 @@ static XrSpace sControllerAimSpaces[VR_CONTROLLER_COUNT] = {
 };
 static struct VrControllerState
     sControllerStates[VR_CONTROLLER_COUNT] = { 0 };
+static bool sControllerPreviousGripValid[VR_CONTROLLER_COUNT] = {
+    false,
+    false
+};
+static float
+    sControllerPreviousGripPosition[VR_CONTROLLER_COUNT][3] = { 0 };
+static XrTime sControllerPreviousGripTime[VR_CONTROLLER_COUNT] = {
+    0,
+    0
+};
+static bool sControllerVelocityFallbackLogged = false;
 static bool sControllerActionsReady = false;
 static bool sControllerActionsAttached = false;
 static bool sControllerSyncErrorLogged = false;
@@ -520,6 +531,22 @@ static void vr_openxr_destroy_controller_actions(void) {
         sizeof(sControllerHandPaths)
     );
     memset(sControllerStates, 0, sizeof(sControllerStates));
+    memset(
+        sControllerPreviousGripValid,
+        0,
+        sizeof(sControllerPreviousGripValid)
+    );
+    memset(
+        sControllerPreviousGripPosition,
+        0,
+        sizeof(sControllerPreviousGripPosition)
+    );
+    memset(
+        sControllerPreviousGripTime,
+        0,
+        sizeof(sControllerPreviousGripTime)
+    );
+    sControllerVelocityFallbackLogged = false;
     sControllerActionsReady = false;
     sControllerSyncErrorLogged = false;
 }
@@ -1919,15 +1946,29 @@ static bool vr_openxr_locate_controller_pose(
     XrSpace space,
     XrTime displayTime,
     float position[3],
-    float rotation[4]
+    float rotation[4],
+    bool* linearVelocityValid,
+    float linearVelocity[3],
+    bool* angularVelocityValid,
+    float angularVelocity[3]
 ) {
+    if (linearVelocityValid != NULL) {
+        *linearVelocityValid = false;
+    }
+    if (angularVelocityValid != NULL) {
+        *angularVelocityValid = false;
+    }
     if (space == XR_NULL_HANDLE ||
         !sHeadOrientationReferenceValid) {
         return false;
     }
 
+    XrSpaceVelocity velocity = { 0 };
+    velocity.type = XR_TYPE_SPACE_VELOCITY;
+
     XrSpaceLocation location = { 0 };
     location.type = XR_TYPE_SPACE_LOCATION;
+    location.next = &velocity;
 
     XrResult result = sXr.xrLocateSpace(
         space,
@@ -1995,6 +2036,29 @@ static bool vr_openxr_locate_controller_pose(
         &positionDelta,
         position
     );
+
+    if (linearVelocityValid != NULL &&
+        linearVelocity != NULL &&
+        (velocity.velocityFlags &
+         XR_SPACE_VELOCITY_LINEAR_VALID_BIT) != 0) {
+        vr_openxr_rotate_vector(
+            &referenceInverse,
+            &velocity.linearVelocity,
+            linearVelocity
+        );
+        *linearVelocityValid = true;
+    }
+    if (angularVelocityValid != NULL &&
+        angularVelocity != NULL &&
+        (velocity.velocityFlags &
+         XR_SPACE_VELOCITY_ANGULAR_VALID_BIT) != 0) {
+        vr_openxr_rotate_vector(
+            &referenceInverse,
+            &velocity.angularVelocity,
+            angularVelocity
+        );
+        *angularVelocityValid = true;
+    }
     return true;
 }
 
@@ -2069,6 +2133,59 @@ static void vr_openxr_get_vector_action(
     }
 }
 
+static void vr_openxr_apply_controller_velocity_fallback(
+    uint32_t hand,
+    XrTime displayTime
+) {
+    if (hand >= VR_CONTROLLER_COUNT) {
+        return;
+    }
+
+    struct VrControllerState* state = &sControllerStates[hand];
+    if (!state->gripPoseValid) {
+        sControllerPreviousGripValid[hand] = false;
+        sControllerPreviousGripTime[hand] = 0;
+        return;
+    }
+
+    if (!state->gripLinearVelocityValid &&
+        sControllerPreviousGripValid[hand] &&
+        displayTime > sControllerPreviousGripTime[hand]) {
+        const double deltaSeconds =
+            (double)(displayTime -
+                     sControllerPreviousGripTime[hand]) /
+            1000000000.0;
+
+        // Reject stale samples after a pause or tracking loss. Normal OpenXR
+        // frame intervals are comfortably inside this range.
+        if (deltaSeconds >= 0.001 && deltaSeconds <= 0.100) {
+            for (uint32_t axis = 0; axis < 3; axis++) {
+                state->gripLinearVelocity[axis] =
+                    (state->gripPosition[axis] -
+                     sControllerPreviousGripPosition[hand][axis]) /
+                    (float)deltaSeconds;
+            }
+            state->gripLinearVelocityValid = true;
+
+            if (!sControllerVelocityFallbackLogged) {
+                printf(
+                    "[VR] Runtime controller velocity unavailable; "
+                    "using tracked-pose fallback.\n"
+                );
+                sControllerVelocityFallbackLogged = true;
+            }
+        }
+    }
+
+    memcpy(
+        sControllerPreviousGripPosition[hand],
+        state->gripPosition,
+        sizeof(sControllerPreviousGripPosition[hand])
+    );
+    sControllerPreviousGripTime[hand] = displayTime;
+    sControllerPreviousGripValid[hand] = true;
+}
+
 static void vr_openxr_update_controller_states(
     XrTime displayTime
 ) {
@@ -2090,6 +2207,11 @@ static void vr_openxr_update_controller_states(
     XrResult result = sXr.xrSyncActions(sSession, &syncInfo);
     if (result == XR_SESSION_NOT_FOCUSED) {
         memset(sControllerStates, 0, sizeof(sControllerStates));
+        memset(
+            sControllerPreviousGripValid,
+            0,
+            sizeof(sControllerPreviousGripValid)
+        );
         return;
     }
     if (XR_FAILED(result)) {
@@ -2102,6 +2224,11 @@ static void vr_openxr_update_controller_states(
             sControllerSyncErrorLogged = true;
         }
         memset(sControllerStates, 0, sizeof(sControllerStates));
+        memset(
+            sControllerPreviousGripValid,
+            0,
+            sizeof(sControllerPreviousGripValid)
+        );
         return;
     }
 
@@ -2127,9 +2254,18 @@ static void vr_openxr_update_controller_states(
                     sControllerGripSpaces[hand],
                     displayTime,
                     sControllerStates[hand].gripPosition,
-                    sControllerStates[hand].gripRotation
+                    sControllerStates[hand].gripRotation,
+                    &sControllerStates[hand].gripLinearVelocityValid,
+                    sControllerStates[hand].gripLinearVelocity,
+                    &sControllerStates[hand].gripAngularVelocityValid,
+                    sControllerStates[hand].gripAngularVelocity
                 );
         }
+
+        vr_openxr_apply_controller_velocity_fallback(
+            hand,
+            displayTime
+        );
 
         if (vr_openxr_controller_pose_is_active(
                 sAimPoseAction,
@@ -2140,7 +2276,11 @@ static void vr_openxr_update_controller_states(
                     sControllerAimSpaces[hand],
                     displayTime,
                     sControllerStates[hand].aimPosition,
-                    sControllerStates[hand].aimRotation
+                    sControllerStates[hand].aimRotation,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL
                 );
         }
 

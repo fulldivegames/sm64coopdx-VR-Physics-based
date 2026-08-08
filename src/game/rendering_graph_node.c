@@ -24,6 +24,7 @@
 #include "first_person_cam.h"
 #include "course_table.h"
 #include "mario.h"
+#include "mario_misc.h"
 #include "hardcoded.h"
 #include "levels/menu/header.h"
 #include "actors/mario/geo_header.h"
@@ -1488,6 +1489,16 @@ static void vr_append_controller_hands(
         mode2List->modes[LAYER_OPAQUE]
     );
     gSPDisplayList(gDisplayListHead++, obj_sanitize_gfx);
+
+    // The floating gloves render after the normal scene graph, so explicitly
+    // reload the local player's complete palette. This keeps the gloves—and
+    // future VR-only body parts—matched to the player's selected colors even
+    // when another network player's model was rendered most recently.
+    Gfx* localPlayerColors =
+        mario_create_local_player_colors_dl();
+    if (localPlayerColors != NULL) {
+        gSPDisplayList(gDisplayListHead++, localPlayerColors);
+    }
 
     for (uint32_t hand = 0;
          hand < VR_CONTROLLER_COUNT;

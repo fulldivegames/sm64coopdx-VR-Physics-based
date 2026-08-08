@@ -801,9 +801,11 @@ Gfx* geo_mirror_mario_backface_culling(s32 callContext, struct GraphNode* node, 
     return gfx;
 }
 
-static struct PlayerColor geo_mario_get_player_color(const struct PlayerPalette *palette) {
+static struct PlayerColor geo_mario_get_player_color(
+    u8 index,
+    const struct PlayerPalette *palette
+) {
     struct PlayerColor color = { 0 };
-    u8 index = geo_get_processing_object_index();
     struct MarioBodyState* bodyState = &gBodyStates[index];
     for (s32 part = 0; part != PLAYER_PART_MAX; ++part) {
         color.parts[part] = (Lights1) gdSPDefLights1(
@@ -847,6 +849,16 @@ static Gfx *geo_mario_create_player_colors_dl(s32 index, Gfx *capEnemyGfx, Gfx *
     return gfx;
 }
 
+Gfx *mario_create_local_player_colors_dl(void) {
+    const u8 index = 0;
+    struct PlayerColor color = geo_mario_get_player_color(
+        index,
+        &gNetworkPlayers[index].overridePalette
+    );
+    gNetworkPlayerColors[index] = color;
+    return geo_mario_create_player_colors_dl(index, NULL, NULL);
+}
+
 /**
  * Generate DL that sets player color depending on player number.
  */
@@ -855,7 +867,10 @@ Gfx* geo_mario_set_player_colors(s32 callContext, struct GraphNode* node, UNUSED
     Gfx* gfx = NULL;
     u8 index = geo_get_processing_object_index();
 
-    struct PlayerColor color = geo_mario_get_player_color(&gNetworkPlayers[index].overridePalette);
+    struct PlayerColor color = geo_mario_get_player_color(
+        index,
+        &gNetworkPlayers[index].overridePalette
+    );
     gNetworkPlayerColors[index] = color;
 
     struct MarioBodyState* bodyState = &gBodyStates[index];
@@ -887,7 +902,10 @@ Gfx* geo_mario_cap_display_list(s32 callContext, struct GraphNode* node, UNUSED 
     if (callContext != GEO_CONTEXT_RENDER) { return NULL; }
     u8 localIndex = geo_get_processing_object_index();
 
-    struct PlayerColor color = geo_mario_get_player_color(&gNetworkPlayers[localIndex].overridePalette);
+    struct PlayerColor color = geo_mario_get_player_color(
+        localIndex,
+        &gNetworkPlayers[localIndex].overridePalette
+    );
     gNetworkPlayerColors[localIndex] = color;
 
     u8 charIndex = gNetworkPlayers[localIndex].overrideModelIndex;
