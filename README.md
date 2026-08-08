@@ -108,7 +108,7 @@ The long-term goal is to expand this foundation without sacrificing SM64 Co-Op D
 - Motion-based punching and physical interactions
 - Hand anchoring for wall slides and wall jumps
 - Hand-mounted HUD placement options on either hand
-- HUD opacity, size, angle, position, and distance adjustments
+- HUD size, angle, position, and distance adjustments
 - Controller haptics and calibration options
 - Smooth switching between VR and flat-screen play (Might work currently)
 - Continued multiplayer, Lua mod, model/texture mod, and ROM-hack compatibility work
