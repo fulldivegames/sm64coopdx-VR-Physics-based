@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+struct VrControllerState;
+
 bool vr_openxr_startup(void);
 bool vr_openxr_create_session(void);
 bool vr_openxr_begin_frame(void);
@@ -28,6 +30,16 @@ bool vr_openxr_get_eye_fov(
 );
 bool vr_openxr_get_head_rotation(float rotation[4]);
 bool vr_openxr_get_head_translation(float translation[3]);
+bool vr_openxr_get_controller_state(
+    uint32_t handIndex,
+    struct VrControllerState* state
+);
+bool vr_openxr_apply_haptic(
+    uint32_t handIndex,
+    float amplitude,
+    float durationSeconds,
+    float frequency
+);
 
 void vr_openxr_shutdown(void);
 

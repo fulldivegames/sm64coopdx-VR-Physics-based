@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "pc/configfile.h"
+#include "pc/vr/vr.h"
 #include "pc/vr/vr_openxr.h"
 
 #ifdef _WIN32
@@ -43,8 +44,23 @@ struct VrOpenXrFunctions {
     PFN_xrEndFrame xrEndFrame;
     PFN_xrEnumerateEnvironmentBlendModes xrEnumerateEnvironmentBlendModes;
     PFN_xrCreateReferenceSpace xrCreateReferenceSpace;
+    PFN_xrCreateActionSpace xrCreateActionSpace;
     PFN_xrDestroySpace xrDestroySpace;
+    PFN_xrLocateSpace xrLocateSpace;
     PFN_xrLocateViews xrLocateViews;
+    PFN_xrStringToPath xrStringToPath;
+    PFN_xrCreateActionSet xrCreateActionSet;
+    PFN_xrDestroyActionSet xrDestroyActionSet;
+    PFN_xrCreateAction xrCreateAction;
+    PFN_xrSuggestInteractionProfileBindings xrSuggestInteractionProfileBindings;
+    PFN_xrAttachSessionActionSets xrAttachSessionActionSets;
+    PFN_xrGetActionStateBoolean xrGetActionStateBoolean;
+    PFN_xrGetActionStateFloat xrGetActionStateFloat;
+    PFN_xrGetActionStateVector2f xrGetActionStateVector2f;
+    PFN_xrGetActionStatePose xrGetActionStatePose;
+    PFN_xrSyncActions xrSyncActions;
+    PFN_xrApplyHapticFeedback xrApplyHapticFeedback;
+    PFN_xrStopHapticFeedback xrStopHapticFeedback;
     PFN_xrEnumerateViewConfigurationViews xrEnumerateViewConfigurationViews;
     PFN_xrEnumerateSwapchainFormats xrEnumerateSwapchainFormats;
     PFN_xrCreateSwapchain xrCreateSwapchain;
@@ -69,6 +85,34 @@ static XrInstance sInstance = XR_NULL_HANDLE;
 static XrSystemId sSystemId = XR_NULL_SYSTEM_ID;
 static XrSession sSession = XR_NULL_HANDLE;
 static XrSpace sViewSpace = XR_NULL_HANDLE;
+static XrActionSet sControllerActionSet = XR_NULL_HANDLE;
+static XrAction sGripPoseAction = XR_NULL_HANDLE;
+static XrAction sAimPoseAction = XR_NULL_HANDLE;
+static XrAction sTriggerAction = XR_NULL_HANDLE;
+static XrAction sSqueezeAction = XR_NULL_HANDLE;
+static XrAction sThumbstickAction = XR_NULL_HANDLE;
+static XrAction sPrimaryButtonAction = XR_NULL_HANDLE;
+static XrAction sSecondaryButtonAction = XR_NULL_HANDLE;
+static XrAction sMenuButtonAction = XR_NULL_HANDLE;
+static XrAction sThumbstickButtonAction = XR_NULL_HANDLE;
+static XrAction sHapticAction = XR_NULL_HANDLE;
+static XrPath sControllerHandPaths[VR_CONTROLLER_COUNT] = {
+    XR_NULL_PATH,
+    XR_NULL_PATH
+};
+static XrSpace sControllerGripSpaces[VR_CONTROLLER_COUNT] = {
+    XR_NULL_HANDLE,
+    XR_NULL_HANDLE
+};
+static XrSpace sControllerAimSpaces[VR_CONTROLLER_COUNT] = {
+    XR_NULL_HANDLE,
+    XR_NULL_HANDLE
+};
+static struct VrControllerState
+    sControllerStates[VR_CONTROLLER_COUNT] = { 0 };
+static bool sControllerActionsReady = false;
+static bool sControllerActionsAttached = false;
+static bool sControllerSyncErrorLogged = false;
 static XrSessionState sSessionState = XR_SESSION_STATE_UNKNOWN;
 static bool sSessionRunning = false;
 static XrEnvironmentBlendMode sEnvironmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
@@ -147,6 +191,15 @@ static const char* vr_openxr_result_name(XrResult result) {
         case XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED: return "XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED";
         case XR_TIMEOUT_EXPIRED: return "XR_TIMEOUT_EXPIRED";
         case XR_SESSION_LOSS_PENDING: return "XR_SESSION_LOSS_PENDING";
+        case XR_SESSION_NOT_FOCUSED: return "XR_SESSION_NOT_FOCUSED";
+        case XR_ERROR_PATH_UNSUPPORTED: return "XR_ERROR_PATH_UNSUPPORTED";
+        case XR_ERROR_ACTION_TYPE_MISMATCH: return "XR_ERROR_ACTION_TYPE_MISMATCH";
+        case XR_ERROR_NAME_DUPLICATED: return "XR_ERROR_NAME_DUPLICATED";
+        case XR_ERROR_NAME_INVALID: return "XR_ERROR_NAME_INVALID";
+        case XR_ERROR_ACTIONSET_NOT_ATTACHED: return "XR_ERROR_ACTIONSET_NOT_ATTACHED";
+        case XR_ERROR_ACTIONSETS_ALREADY_ATTACHED: return "XR_ERROR_ACTIONSETS_ALREADY_ATTACHED";
+        case XR_ERROR_LOCALIZED_NAME_DUPLICATED: return "XR_ERROR_LOCALIZED_NAME_DUPLICATED";
+        case XR_ERROR_LOCALIZED_NAME_INVALID: return "XR_ERROR_LOCALIZED_NAME_INVALID";
         default: return "UNKNOWN_OPENXR_ERROR";
     }
 }
@@ -249,8 +302,23 @@ static bool vr_openxr_load_instance_functions(void) {
     LOAD_XR_FUNCTION(xrEndFrame, "xrEndFrame", PFN_xrEndFrame);
     LOAD_XR_FUNCTION(xrEnumerateEnvironmentBlendModes, "xrEnumerateEnvironmentBlendModes", PFN_xrEnumerateEnvironmentBlendModes);
     LOAD_XR_FUNCTION(xrCreateReferenceSpace, "xrCreateReferenceSpace", PFN_xrCreateReferenceSpace);
+    LOAD_XR_FUNCTION(xrCreateActionSpace, "xrCreateActionSpace", PFN_xrCreateActionSpace);
     LOAD_XR_FUNCTION(xrDestroySpace, "xrDestroySpace", PFN_xrDestroySpace);
+    LOAD_XR_FUNCTION(xrLocateSpace, "xrLocateSpace", PFN_xrLocateSpace);
     LOAD_XR_FUNCTION(xrLocateViews, "xrLocateViews", PFN_xrLocateViews);
+    LOAD_XR_FUNCTION(xrStringToPath, "xrStringToPath", PFN_xrStringToPath);
+    LOAD_XR_FUNCTION(xrCreateActionSet, "xrCreateActionSet", PFN_xrCreateActionSet);
+    LOAD_XR_FUNCTION(xrDestroyActionSet, "xrDestroyActionSet", PFN_xrDestroyActionSet);
+    LOAD_XR_FUNCTION(xrCreateAction, "xrCreateAction", PFN_xrCreateAction);
+    LOAD_XR_FUNCTION(xrSuggestInteractionProfileBindings, "xrSuggestInteractionProfileBindings", PFN_xrSuggestInteractionProfileBindings);
+    LOAD_XR_FUNCTION(xrAttachSessionActionSets, "xrAttachSessionActionSets", PFN_xrAttachSessionActionSets);
+    LOAD_XR_FUNCTION(xrGetActionStateBoolean, "xrGetActionStateBoolean", PFN_xrGetActionStateBoolean);
+    LOAD_XR_FUNCTION(xrGetActionStateFloat, "xrGetActionStateFloat", PFN_xrGetActionStateFloat);
+    LOAD_XR_FUNCTION(xrGetActionStateVector2f, "xrGetActionStateVector2f", PFN_xrGetActionStateVector2f);
+    LOAD_XR_FUNCTION(xrGetActionStatePose, "xrGetActionStatePose", PFN_xrGetActionStatePose);
+    LOAD_XR_FUNCTION(xrSyncActions, "xrSyncActions", PFN_xrSyncActions);
+    LOAD_XR_FUNCTION(xrApplyHapticFeedback, "xrApplyHapticFeedback", PFN_xrApplyHapticFeedback);
+    LOAD_XR_FUNCTION(xrStopHapticFeedback, "xrStopHapticFeedback", PFN_xrStopHapticFeedback);
     LOAD_XR_FUNCTION(xrEnumerateViewConfigurationViews, "xrEnumerateViewConfigurationViews", PFN_xrEnumerateViewConfigurationViews);
     LOAD_XR_FUNCTION(xrEnumerateSwapchainFormats, "xrEnumerateSwapchainFormats", PFN_xrEnumerateSwapchainFormats);
     LOAD_XR_FUNCTION(xrCreateSwapchain, "xrCreateSwapchain", PFN_xrCreateSwapchain);
@@ -268,6 +336,424 @@ static bool vr_openxr_load_instance_functions(void) {
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
+
+struct VrOpenXrBindingSpec {
+    XrAction action;
+    const char* path;
+};
+
+static bool vr_openxr_string_to_path(
+    const char* pathString,
+    XrPath* path
+) {
+    XrResult result =
+        sXr.xrStringToPath(sInstance, pathString, path);
+
+    if (XR_FAILED(result)) {
+        printf(
+            "[VR] Could not create OpenXR path %s: %s (%d)\n",
+            pathString,
+            vr_openxr_result_name(result),
+            (int)result
+        );
+        *path = XR_NULL_PATH;
+        return false;
+    }
+
+    return true;
+}
+
+static bool vr_openxr_create_controller_action(
+    XrAction* action,
+    XrActionType type,
+    const char* name,
+    const char* localizedName
+) {
+    XrActionCreateInfo createInfo = { 0 };
+    createInfo.type = XR_TYPE_ACTION_CREATE_INFO;
+    createInfo.actionType = type;
+    createInfo.countSubactionPaths = VR_CONTROLLER_COUNT;
+    createInfo.subactionPaths = sControllerHandPaths;
+    snprintf(
+        createInfo.actionName,
+        XR_MAX_ACTION_NAME_SIZE,
+        "%s",
+        name
+    );
+    snprintf(
+        createInfo.localizedActionName,
+        XR_MAX_LOCALIZED_ACTION_NAME_SIZE,
+        "%s",
+        localizedName
+    );
+
+    XrResult result = sXr.xrCreateAction(
+        sControllerActionSet,
+        &createInfo,
+        action
+    );
+
+    if (XR_FAILED(result)) {
+        printf(
+            "[VR] Could not create controller action %s: %s (%d)\n",
+            name,
+            vr_openxr_result_name(result),
+            (int)result
+        );
+        *action = XR_NULL_HANDLE;
+        return false;
+    }
+
+    return true;
+}
+
+static void vr_openxr_suggest_controller_bindings(
+    const char* profilePathString,
+    const struct VrOpenXrBindingSpec* specs,
+    uint32_t specCount
+) {
+    enum { VR_OPENXR_BINDING_COUNT_MAX = 32 };
+    XrActionSuggestedBinding bindings[
+        VR_OPENXR_BINDING_COUNT_MAX
+    ] = { 0 };
+    XrPath profilePath = XR_NULL_PATH;
+
+    if (specCount > VR_OPENXR_BINDING_COUNT_MAX ||
+        !vr_openxr_string_to_path(
+            profilePathString,
+            &profilePath
+        )) {
+        return;
+    }
+
+    uint32_t bindingCount = 0;
+    for (uint32_t i = 0; i < specCount; i++) {
+        XrPath bindingPath = XR_NULL_PATH;
+        if (!vr_openxr_string_to_path(
+                specs[i].path,
+                &bindingPath
+            )) {
+            continue;
+        }
+
+        bindings[bindingCount].action = specs[i].action;
+        bindings[bindingCount].binding = bindingPath;
+        bindingCount++;
+    }
+
+    if (bindingCount == 0) {
+        return;
+    }
+
+    XrInteractionProfileSuggestedBinding suggested = { 0 };
+    suggested.type =
+        XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING;
+    suggested.interactionProfile = profilePath;
+    suggested.countSuggestedBindings = bindingCount;
+    suggested.suggestedBindings = bindings;
+
+    XrResult result =
+        sXr.xrSuggestInteractionProfileBindings(
+            sInstance,
+            &suggested
+        );
+
+    if (XR_FAILED(result)) {
+        printf(
+            "[VR] Controller profile %s was not accepted: %s (%d)\n",
+            profilePathString,
+            vr_openxr_result_name(result),
+            (int)result
+        );
+    }
+}
+
+static void vr_openxr_destroy_controller_action_spaces(void) {
+    if (sXr.xrDestroySpace != NULL) {
+        for (uint32_t hand = 0;
+             hand < VR_CONTROLLER_COUNT;
+             hand++) {
+            if (sControllerGripSpaces[hand] != XR_NULL_HANDLE) {
+                sXr.xrDestroySpace(sControllerGripSpaces[hand]);
+            }
+            if (sControllerAimSpaces[hand] != XR_NULL_HANDLE) {
+                sXr.xrDestroySpace(sControllerAimSpaces[hand]);
+            }
+        }
+    }
+
+    memset(
+        sControllerGripSpaces,
+        0,
+        sizeof(sControllerGripSpaces)
+    );
+    memset(
+        sControllerAimSpaces,
+        0,
+        sizeof(sControllerAimSpaces)
+    );
+    sControllerActionsAttached = false;
+}
+
+static void vr_openxr_destroy_controller_actions(void) {
+    vr_openxr_destroy_controller_action_spaces();
+
+    if (sControllerActionSet != XR_NULL_HANDLE &&
+        sXr.xrDestroyActionSet != NULL) {
+        sXr.xrDestroyActionSet(sControllerActionSet);
+    }
+
+    sControllerActionSet = XR_NULL_HANDLE;
+    sGripPoseAction = XR_NULL_HANDLE;
+    sAimPoseAction = XR_NULL_HANDLE;
+    sTriggerAction = XR_NULL_HANDLE;
+    sSqueezeAction = XR_NULL_HANDLE;
+    sThumbstickAction = XR_NULL_HANDLE;
+    sPrimaryButtonAction = XR_NULL_HANDLE;
+    sSecondaryButtonAction = XR_NULL_HANDLE;
+    sMenuButtonAction = XR_NULL_HANDLE;
+    sThumbstickButtonAction = XR_NULL_HANDLE;
+    sHapticAction = XR_NULL_HANDLE;
+    memset(
+        sControllerHandPaths,
+        0,
+        sizeof(sControllerHandPaths)
+    );
+    memset(sControllerStates, 0, sizeof(sControllerStates));
+    sControllerActionsReady = false;
+    sControllerSyncErrorLogged = false;
+}
+
+static bool vr_openxr_create_controller_actions(void) {
+    if (sControllerActionsReady) {
+        return true;
+    }
+
+    XrActionSetCreateInfo actionSetInfo = { 0 };
+    actionSetInfo.type = XR_TYPE_ACTION_SET_CREATE_INFO;
+    actionSetInfo.priority = 0;
+    snprintf(
+        actionSetInfo.actionSetName,
+        XR_MAX_ACTION_SET_NAME_SIZE,
+        "%s",
+        "sm64_vr_controls"
+    );
+    snprintf(
+        actionSetInfo.localizedActionSetName,
+        XR_MAX_LOCALIZED_ACTION_SET_NAME_SIZE,
+        "%s",
+        "SM64 VR Controls"
+    );
+
+    XrResult result = sXr.xrCreateActionSet(
+        sInstance,
+        &actionSetInfo,
+        &sControllerActionSet
+    );
+
+    if (XR_FAILED(result)) {
+        printf(
+            "[VR] Could not create controller action set: %s (%d)\n",
+            vr_openxr_result_name(result),
+            (int)result
+        );
+        sControllerActionSet = XR_NULL_HANDLE;
+        return false;
+    }
+
+    if (!vr_openxr_string_to_path(
+            "/user/hand/left",
+            &sControllerHandPaths[VR_CONTROLLER_LEFT]
+        ) ||
+        !vr_openxr_string_to_path(
+            "/user/hand/right",
+            &sControllerHandPaths[VR_CONTROLLER_RIGHT]
+        ) ||
+        !vr_openxr_create_controller_action(
+            &sGripPoseAction,
+            XR_ACTION_TYPE_POSE_INPUT,
+            "grip_pose",
+            "Grip Pose"
+        ) ||
+        !vr_openxr_create_controller_action(
+            &sAimPoseAction,
+            XR_ACTION_TYPE_POSE_INPUT,
+            "aim_pose",
+            "Aim Pose"
+        ) ||
+        !vr_openxr_create_controller_action(
+            &sTriggerAction,
+            XR_ACTION_TYPE_FLOAT_INPUT,
+            "trigger",
+            "Trigger"
+        ) ||
+        !vr_openxr_create_controller_action(
+            &sSqueezeAction,
+            XR_ACTION_TYPE_FLOAT_INPUT,
+            "squeeze",
+            "Squeeze"
+        ) ||
+        !vr_openxr_create_controller_action(
+            &sThumbstickAction,
+            XR_ACTION_TYPE_VECTOR2F_INPUT,
+            "thumbstick",
+            "Thumbstick"
+        ) ||
+        !vr_openxr_create_controller_action(
+            &sPrimaryButtonAction,
+            XR_ACTION_TYPE_BOOLEAN_INPUT,
+            "primary_button",
+            "Primary Button"
+        ) ||
+        !vr_openxr_create_controller_action(
+            &sSecondaryButtonAction,
+            XR_ACTION_TYPE_BOOLEAN_INPUT,
+            "secondary_button",
+            "Secondary Button"
+        ) ||
+        !vr_openxr_create_controller_action(
+            &sMenuButtonAction,
+            XR_ACTION_TYPE_BOOLEAN_INPUT,
+            "menu_button",
+            "Menu Button"
+        ) ||
+        !vr_openxr_create_controller_action(
+            &sThumbstickButtonAction,
+            XR_ACTION_TYPE_BOOLEAN_INPUT,
+            "thumbstick_button",
+            "Thumbstick Button"
+        ) ||
+        !vr_openxr_create_controller_action(
+            &sHapticAction,
+            XR_ACTION_TYPE_VIBRATION_OUTPUT,
+            "haptic",
+            "Haptic Feedback"
+        )) {
+        vr_openxr_destroy_controller_actions();
+        return false;
+    }
+
+    const struct VrOpenXrBindingSpec touchBindings[] = {
+        { sGripPoseAction, "/user/hand/left/input/grip/pose" },
+        { sGripPoseAction, "/user/hand/right/input/grip/pose" },
+        { sAimPoseAction, "/user/hand/left/input/aim/pose" },
+        { sAimPoseAction, "/user/hand/right/input/aim/pose" },
+        { sTriggerAction, "/user/hand/left/input/trigger/value" },
+        { sTriggerAction, "/user/hand/right/input/trigger/value" },
+        { sSqueezeAction, "/user/hand/left/input/squeeze/value" },
+        { sSqueezeAction, "/user/hand/right/input/squeeze/value" },
+        { sThumbstickAction, "/user/hand/left/input/thumbstick" },
+        { sThumbstickAction, "/user/hand/right/input/thumbstick" },
+        { sPrimaryButtonAction, "/user/hand/left/input/x/click" },
+        { sPrimaryButtonAction, "/user/hand/right/input/a/click" },
+        { sSecondaryButtonAction, "/user/hand/left/input/y/click" },
+        { sSecondaryButtonAction, "/user/hand/right/input/b/click" },
+        { sMenuButtonAction, "/user/hand/left/input/menu/click" },
+        { sThumbstickButtonAction, "/user/hand/left/input/thumbstick/click" },
+        { sThumbstickButtonAction, "/user/hand/right/input/thumbstick/click" },
+        { sHapticAction, "/user/hand/left/output/haptic" },
+        { sHapticAction, "/user/hand/right/output/haptic" }
+    };
+    vr_openxr_suggest_controller_bindings(
+        "/interaction_profiles/oculus/touch_controller",
+        touchBindings,
+        sizeof(touchBindings) / sizeof(touchBindings[0])
+    );
+
+    const struct VrOpenXrBindingSpec simpleBindings[] = {
+        { sGripPoseAction, "/user/hand/left/input/grip/pose" },
+        { sGripPoseAction, "/user/hand/right/input/grip/pose" },
+        { sAimPoseAction, "/user/hand/left/input/aim/pose" },
+        { sAimPoseAction, "/user/hand/right/input/aim/pose" },
+        { sPrimaryButtonAction, "/user/hand/left/input/select/click" },
+        { sPrimaryButtonAction, "/user/hand/right/input/select/click" },
+        { sMenuButtonAction, "/user/hand/left/input/menu/click" },
+        { sMenuButtonAction, "/user/hand/right/input/menu/click" },
+        { sHapticAction, "/user/hand/left/output/haptic" },
+        { sHapticAction, "/user/hand/right/output/haptic" }
+    };
+    vr_openxr_suggest_controller_bindings(
+        "/interaction_profiles/khr/simple_controller",
+        simpleBindings,
+        sizeof(simpleBindings) / sizeof(simpleBindings[0])
+    );
+
+    sControllerActionsReady = true;
+    printf("[VR] OpenXR motion-controller action set is ready.\n");
+    return true;
+}
+
+static bool vr_openxr_attach_controller_actions(void) {
+    if (!sControllerActionsReady) {
+        return false;
+    }
+
+    XrSessionActionSetsAttachInfo attachInfo = { 0 };
+    attachInfo.type = XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO;
+    attachInfo.countActionSets = 1;
+    attachInfo.actionSets = &sControllerActionSet;
+
+    XrResult result = sXr.xrAttachSessionActionSets(
+        sSession,
+        &attachInfo
+    );
+
+    if (XR_FAILED(result)) {
+        printf(
+            "[VR] Could not attach controller actions: %s (%d)\n",
+            vr_openxr_result_name(result),
+            (int)result
+        );
+        return false;
+    }
+
+    for (uint32_t hand = 0;
+         hand < VR_CONTROLLER_COUNT;
+         hand++) {
+        XrActionSpaceCreateInfo spaceInfo = { 0 };
+        spaceInfo.type = XR_TYPE_ACTION_SPACE_CREATE_INFO;
+        spaceInfo.subactionPath = sControllerHandPaths[hand];
+        spaceInfo.poseInActionSpace.orientation.w = 1.0f;
+
+        spaceInfo.action = sGripPoseAction;
+        result = sXr.xrCreateActionSpace(
+            sSession,
+            &spaceInfo,
+            &sControllerGripSpaces[hand]
+        );
+        if (XR_FAILED(result)) {
+            printf(
+                "[VR] Could not create %s grip action space: %s (%d)\n",
+                hand == VR_CONTROLLER_LEFT ? "left" : "right",
+                vr_openxr_result_name(result),
+                (int)result
+            );
+            vr_openxr_destroy_controller_action_spaces();
+            return false;
+        }
+
+        spaceInfo.action = sAimPoseAction;
+        result = sXr.xrCreateActionSpace(
+            sSession,
+            &spaceInfo,
+            &sControllerAimSpaces[hand]
+        );
+        if (XR_FAILED(result)) {
+            printf(
+                "[VR] Could not create %s aim action space: %s (%d)\n",
+                hand == VR_CONTROLLER_LEFT ? "left" : "right",
+                vr_openxr_result_name(result),
+                (int)result
+            );
+            vr_openxr_destroy_controller_action_spaces();
+            return false;
+        }
+    }
+
+    sControllerActionsAttached = true;
+    printf("[VR] OpenXR motion-controller actions attached.\n");
+    return true;
+}
 
 static bool vr_openxr_has_opengl_extension(void) {
     uint32_t extensionCount = 0;
@@ -915,6 +1401,13 @@ bool vr_openxr_startup(void) {
         return false;
     }
 
+    if (!vr_openxr_create_controller_actions()) {
+        printf(
+            "[VR] Motion-controller actions are unavailable; "
+            "gamepad VR will remain active.\n"
+        );
+    }
+
     XrInstanceProperties instanceProperties = { 0 };
     instanceProperties.type = XR_TYPE_INSTANCE_PROPERTIES;
 
@@ -1055,6 +1548,14 @@ bool vr_openxr_create_session(void) {
         sXr.xrDestroySession(sSession);
         sSession = XR_NULL_HANDLE;
         return false;
+    }
+
+    if (sControllerActionsReady &&
+        !vr_openxr_attach_controller_actions()) {
+        printf(
+            "[VR] Motion-controller tracking is unavailable; "
+            "gamepad VR will remain active.\n"
+        );
     }
 
     printf("[VR] OpenXR OpenGL session created successfully.\n");
@@ -1392,6 +1893,304 @@ static void vr_openxr_update_cached_tracking(void) {
         sCachedHeadTranslation
     );
     sCachedTrackingValid = true;
+}
+
+static bool vr_openxr_controller_pose_is_active(
+    XrAction action,
+    XrPath handPath
+) {
+    XrActionStateGetInfo getInfo = { 0 };
+    getInfo.type = XR_TYPE_ACTION_STATE_GET_INFO;
+    getInfo.action = action;
+    getInfo.subactionPath = handPath;
+
+    XrActionStatePose state = { 0 };
+    state.type = XR_TYPE_ACTION_STATE_POSE;
+
+    XrResult result = sXr.xrGetActionStatePose(
+        sSession,
+        &getInfo,
+        &state
+    );
+    return XR_SUCCEEDED(result) && state.isActive;
+}
+
+static bool vr_openxr_locate_controller_pose(
+    XrSpace space,
+    XrTime displayTime,
+    float position[3],
+    float rotation[4]
+) {
+    if (space == XR_NULL_HANDLE ||
+        !sHeadOrientationReferenceValid) {
+        return false;
+    }
+
+    XrSpaceLocation location = { 0 };
+    location.type = XR_TYPE_SPACE_LOCATION;
+
+    XrResult result = sXr.xrLocateSpace(
+        space,
+        sViewSpace,
+        displayTime,
+        &location
+    );
+    const XrSpaceLocationFlags requiredFlags =
+        XR_SPACE_LOCATION_POSITION_VALID_BIT |
+        XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+
+    if (XR_FAILED(result) ||
+        (location.locationFlags & requiredFlags) != requiredFlags) {
+        return false;
+    }
+
+    const XrQuaternionf referenceInverse = {
+        -sHeadOrientationReference.x,
+        -sHeadOrientationReference.y,
+        -sHeadOrientationReference.z,
+        sHeadOrientationReference.w
+    };
+    const XrQuaternionf current = location.pose.orientation;
+    const XrQuaternionf relative = {
+        referenceInverse.w * current.x +
+            referenceInverse.x * current.w +
+            referenceInverse.y * current.z -
+            referenceInverse.z * current.y,
+        referenceInverse.w * current.y -
+            referenceInverse.x * current.z +
+            referenceInverse.y * current.w +
+            referenceInverse.z * current.x,
+        referenceInverse.w * current.z +
+            referenceInverse.x * current.y -
+            referenceInverse.y * current.x +
+            referenceInverse.z * current.w,
+        referenceInverse.w * current.w -
+            referenceInverse.x * current.x -
+            referenceInverse.y * current.y -
+            referenceInverse.z * current.z
+    };
+    const float rotationLength = sqrtf(
+        relative.x * relative.x +
+        relative.y * relative.y +
+        relative.z * relative.z +
+        relative.w * relative.w
+    );
+
+    if (rotationLength <= 0.000001f) {
+        return false;
+    }
+
+    rotation[0] = relative.x / rotationLength;
+    rotation[1] = relative.y / rotationLength;
+    rotation[2] = relative.z / rotationLength;
+    rotation[3] = relative.w / rotationLength;
+
+    const XrVector3f positionDelta = {
+        location.pose.position.x - sHeadPositionReference.x,
+        location.pose.position.y - sHeadPositionReference.y,
+        location.pose.position.z - sHeadPositionReference.z
+    };
+    vr_openxr_rotate_vector(
+        &referenceInverse,
+        &positionDelta,
+        position
+    );
+    return true;
+}
+
+static float vr_openxr_get_float_action(
+    XrAction action,
+    XrPath handPath
+) {
+    XrActionStateGetInfo getInfo = { 0 };
+    getInfo.type = XR_TYPE_ACTION_STATE_GET_INFO;
+    getInfo.action = action;
+    getInfo.subactionPath = handPath;
+
+    XrActionStateFloat state = { 0 };
+    state.type = XR_TYPE_ACTION_STATE_FLOAT;
+    XrResult result = sXr.xrGetActionStateFloat(
+        sSession,
+        &getInfo,
+        &state
+    );
+
+    return XR_SUCCEEDED(result) && state.isActive
+        ? state.currentState
+        : 0.0f;
+}
+
+static bool vr_openxr_get_boolean_action(
+    XrAction action,
+    XrPath handPath
+) {
+    XrActionStateGetInfo getInfo = { 0 };
+    getInfo.type = XR_TYPE_ACTION_STATE_GET_INFO;
+    getInfo.action = action;
+    getInfo.subactionPath = handPath;
+
+    XrActionStateBoolean state = { 0 };
+    state.type = XR_TYPE_ACTION_STATE_BOOLEAN;
+    XrResult result = sXr.xrGetActionStateBoolean(
+        sSession,
+        &getInfo,
+        &state
+    );
+
+    return XR_SUCCEEDED(result) &&
+        state.isActive &&
+        state.currentState;
+}
+
+static void vr_openxr_get_vector_action(
+    XrAction action,
+    XrPath handPath,
+    float value[2]
+) {
+    XrActionStateGetInfo getInfo = { 0 };
+    getInfo.type = XR_TYPE_ACTION_STATE_GET_INFO;
+    getInfo.action = action;
+    getInfo.subactionPath = handPath;
+
+    XrActionStateVector2f state = { 0 };
+    state.type = XR_TYPE_ACTION_STATE_VECTOR2F;
+    XrResult result = sXr.xrGetActionStateVector2f(
+        sSession,
+        &getInfo,
+        &state
+    );
+
+    if (XR_SUCCEEDED(result) && state.isActive) {
+        value[0] = state.currentState.x;
+        value[1] = state.currentState.y;
+    } else {
+        value[0] = 0.0f;
+        value[1] = 0.0f;
+    }
+}
+
+static void vr_openxr_update_controller_states(
+    XrTime displayTime
+) {
+    if (!sControllerActionsAttached ||
+        !sSessionRunning ||
+        displayTime == 0) {
+        return;
+    }
+
+    XrActiveActionSet activeActionSet = {
+        sControllerActionSet,
+        XR_NULL_PATH
+    };
+    XrActionsSyncInfo syncInfo = { 0 };
+    syncInfo.type = XR_TYPE_ACTIONS_SYNC_INFO;
+    syncInfo.countActiveActionSets = 1;
+    syncInfo.activeActionSets = &activeActionSet;
+
+    XrResult result = sXr.xrSyncActions(sSession, &syncInfo);
+    if (result == XR_SESSION_NOT_FOCUSED) {
+        memset(sControllerStates, 0, sizeof(sControllerStates));
+        return;
+    }
+    if (XR_FAILED(result)) {
+        if (!sControllerSyncErrorLogged) {
+            printf(
+                "[VR] Could not synchronize controller actions: %s (%d)\n",
+                vr_openxr_result_name(result),
+                (int)result
+            );
+            sControllerSyncErrorLogged = true;
+        }
+        memset(sControllerStates, 0, sizeof(sControllerStates));
+        return;
+    }
+
+    sControllerSyncErrorLogged = false;
+    for (uint32_t hand = 0;
+         hand < VR_CONTROLLER_COUNT;
+         hand++) {
+        const bool wasTracked =
+            sControllerStates[hand].gripPoseValid ||
+            sControllerStates[hand].aimPoseValid;
+        memset(
+            &sControllerStates[hand],
+            0,
+            sizeof(sControllerStates[hand])
+        );
+
+        if (vr_openxr_controller_pose_is_active(
+                sGripPoseAction,
+                sControllerHandPaths[hand]
+            )) {
+            sControllerStates[hand].gripPoseValid =
+                vr_openxr_locate_controller_pose(
+                    sControllerGripSpaces[hand],
+                    displayTime,
+                    sControllerStates[hand].gripPosition,
+                    sControllerStates[hand].gripRotation
+                );
+        }
+
+        if (vr_openxr_controller_pose_is_active(
+                sAimPoseAction,
+                sControllerHandPaths[hand]
+            )) {
+            sControllerStates[hand].aimPoseValid =
+                vr_openxr_locate_controller_pose(
+                    sControllerAimSpaces[hand],
+                    displayTime,
+                    sControllerStates[hand].aimPosition,
+                    sControllerStates[hand].aimRotation
+                );
+        }
+
+        sControllerStates[hand].trigger =
+            vr_openxr_get_float_action(
+                sTriggerAction,
+                sControllerHandPaths[hand]
+            );
+        sControllerStates[hand].squeeze =
+            vr_openxr_get_float_action(
+                sSqueezeAction,
+                sControllerHandPaths[hand]
+            );
+        vr_openxr_get_vector_action(
+            sThumbstickAction,
+            sControllerHandPaths[hand],
+            sControllerStates[hand].thumbstick
+        );
+        sControllerStates[hand].primaryButton =
+            vr_openxr_get_boolean_action(
+                sPrimaryButtonAction,
+                sControllerHandPaths[hand]
+            );
+        sControllerStates[hand].secondaryButton =
+            vr_openxr_get_boolean_action(
+                sSecondaryButtonAction,
+                sControllerHandPaths[hand]
+            );
+        sControllerStates[hand].menuButton =
+            vr_openxr_get_boolean_action(
+                sMenuButtonAction,
+                sControllerHandPaths[hand]
+            );
+        sControllerStates[hand].thumbstickButton =
+            vr_openxr_get_boolean_action(
+                sThumbstickButtonAction,
+                sControllerHandPaths[hand]
+            );
+
+        const bool isTracked =
+            sControllerStates[hand].gripPoseValid ||
+            sControllerStates[hand].aimPoseValid;
+        if (isTracked != wasTracked) {
+            printf(
+                "[VR] %s motion controller tracking %s.\n",
+                hand == VR_CONTROLLER_LEFT ? "Left" : "Right",
+                isTracked ? "acquired" : "lost"
+            );
+        }
+    }
 }
 
 static void vr_openxr_blit_game_frame(
@@ -2399,6 +3198,7 @@ bool vr_openxr_begin_frame(void) {
     }
 
     vr_openxr_update_cached_tracking();
+    vr_openxr_update_controller_states(sFrameDisplayTime);
 
     if (!sFrameTimingLogged &&
         sFrameViewsLocated &&
@@ -2601,6 +3401,67 @@ bool vr_openxr_get_head_translation(float translation[3]) {
     return true;
 }
 
+bool vr_openxr_get_controller_state(
+    uint32_t handIndex,
+    struct VrControllerState* state
+) {
+    if (handIndex >= VR_CONTROLLER_COUNT ||
+        state == NULL ||
+        !sControllerActionsAttached) {
+        return false;
+    }
+
+    *state = sControllerStates[handIndex];
+    return true;
+}
+
+bool vr_openxr_apply_haptic(
+    uint32_t handIndex,
+    float amplitude,
+    float durationSeconds,
+    float frequency
+) {
+    if (handIndex >= VR_CONTROLLER_COUNT ||
+        !sControllerActionsAttached ||
+        !sSessionRunning) {
+        return false;
+    }
+
+    XrHapticActionInfo actionInfo = { 0 };
+    actionInfo.type = XR_TYPE_HAPTIC_ACTION_INFO;
+    actionInfo.action = sHapticAction;
+    actionInfo.subactionPath = sControllerHandPaths[handIndex];
+
+    if (amplitude <= 0.0f) {
+        return XR_SUCCEEDED(
+            sXr.xrStopHapticFeedback(sSession, &actionInfo)
+        );
+    }
+
+    if (amplitude > 1.0f) {
+        amplitude = 1.0f;
+    }
+    if (frequency < 0.0f) {
+        frequency = XR_FREQUENCY_UNSPECIFIED;
+    }
+
+    XrHapticVibration vibration = { 0 };
+    vibration.type = XR_TYPE_HAPTIC_VIBRATION;
+    vibration.amplitude = amplitude;
+    vibration.frequency = frequency;
+    vibration.duration = durationSeconds > 0.0f
+        ? (XrDuration)(durationSeconds * 1000000000.0f)
+        : XR_MIN_HAPTIC_DURATION;
+
+    return XR_SUCCEEDED(
+        sXr.xrApplyHapticFeedback(
+            sSession,
+            &actionInfo,
+            (const XrHapticBaseHeader*)&vibration
+        )
+    );
+}
+
 void vr_openxr_shutdown(void) {
     bool hadOpenXR =
         sColorSwapchains[0].handle != XR_NULL_HANDLE ||
@@ -2612,6 +3473,7 @@ void vr_openxr_shutdown(void) {
 
     vr_openxr_destroy_eye_framebuffer();
     vr_openxr_destroy_color_swapchains();
+    vr_openxr_destroy_controller_action_spaces();
 
     if (sViewSpace != XR_NULL_HANDLE &&
         sXr.xrDestroySpace != NULL) {
@@ -2684,6 +3546,8 @@ void vr_openxr_shutdown(void) {
     sSessionRunning = false;
     sSessionState = XR_SESSION_STATE_UNKNOWN;
     sEnvironmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+
+    vr_openxr_destroy_controller_actions();
 
     if (sInstance != XR_NULL_HANDLE &&
         sXr.xrDestroyInstance != NULL) {
@@ -2790,6 +3654,28 @@ bool vr_openxr_get_head_rotation(float rotation[4]) {
 
 bool vr_openxr_get_head_translation(float translation[3]) {
     (void)translation;
+    return false;
+}
+
+bool vr_openxr_get_controller_state(
+    uint32_t handIndex,
+    struct VrControllerState* state
+) {
+    (void)handIndex;
+    (void)state;
+    return false;
+}
+
+bool vr_openxr_apply_haptic(
+    uint32_t handIndex,
+    float amplitude,
+    float durationSeconds,
+    float frequency
+) {
+    (void)handIndex;
+    (void)amplitude;
+    (void)durationSeconds;
+    (void)frequency;
     return false;
 }
 

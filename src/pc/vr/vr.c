@@ -177,6 +177,35 @@ bool vr_get_head_translation(float translation[3]) {
     return vr_openxr_get_head_translation(translation);
 }
 
+bool vr_get_controller_state(
+    uint32_t handIndex,
+    struct VrControllerState* state
+) {
+    if (!sVrActive || state == NULL) {
+        return false;
+    }
+
+    return vr_openxr_get_controller_state(handIndex, state);
+}
+
+bool vr_apply_haptic(
+    uint32_t handIndex,
+    float amplitude,
+    float durationSeconds,
+    float frequency
+) {
+    if (!sVrActive) {
+        return false;
+    }
+
+    return vr_openxr_apply_haptic(
+        handIndex,
+        amplitude,
+        durationSeconds,
+        frequency
+    );
+}
+
 void vr_shutdown(void) {
     vr_openxr_shutdown();
 
