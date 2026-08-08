@@ -92,6 +92,7 @@ unsigned int configVrCameraHeight                 = 90;
 unsigned int configVrMovementCalibration          = 50;
 unsigned int configVrFov                          = 100;
 unsigned int configVrRenderScale                  = 100;
+bool         configVrDesktopMirror                = true;
 unsigned int configVrDesktopMirrorFps             = 60;
 unsigned int configVrHudOpacity                   = 100;
 bool         configVrExperimentalFlipTurn         = true;
@@ -277,6 +278,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_movement_calibration",        .type = CONFIG_TYPE_UINT, .uintValue = &configVrMovementCalibration},
     {.name = "vr_fov",                         .type = CONFIG_TYPE_UINT, .uintValue = &configVrFov},
     {.name = "vr_render_scale",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrRenderScale},
+    {.name = "vr_desktop_mirror",              .type = CONFIG_TYPE_BOOL, .boolValue = &configVrDesktopMirror},
     {.name = "vr_desktop_mirror_fps",          .type = CONFIG_TYPE_UINT, .uintValue = &configVrDesktopMirrorFps},
     {.name = "vr_hud_opacity",                 .type = CONFIG_TYPE_UINT, .uintValue = &configVrHudOpacity},
     {.name = "vr_experimental_flip_turn",      .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalFlipTurn},

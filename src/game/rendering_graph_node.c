@@ -276,6 +276,9 @@ static f32 sVrActionTurnStartYaw = 0.0f;
 static f32 sVrActionTurnTargetYaw = 0.0f;
 static f32 sVrActionTurnCurrentYaw = 0.0f;
 static s16 sVrActionTurnYaw = 0;
+static bool sVrHeadRotationMatrixValid = false;
+static float sVrHeadRotationQuaternion[4] = { 0 };
+static Mat4 sVrHeadRotationMatrix;
 
 static void vr_update_first_person_action_turn(void) {
     if (!vr_is_active() ||
@@ -454,7 +457,17 @@ static bool vr_build_head_rotation_matrix(Mat4 matrix) {
     float headRotation[4] = { 0 };
 
     if (!vr_get_head_rotation(headRotation)) {
+        sVrHeadRotationMatrixValid = false;
         return false;
+    }
+
+    if (sVrHeadRotationMatrixValid &&
+        headRotation[0] == sVrHeadRotationQuaternion[0] &&
+        headRotation[1] == sVrHeadRotationQuaternion[1] &&
+        headRotation[2] == sVrHeadRotationQuaternion[2] &&
+        headRotation[3] == sVrHeadRotationQuaternion[3]) {
+        mtxf_copy(matrix, sVrHeadRotationMatrix);
+        return true;
     }
 
     Vec3f right = { 1.0f, 0.0f, 0.0f };
@@ -475,6 +488,12 @@ static bool vr_build_head_rotation_matrix(Mat4 matrix) {
     matrix[3][1] = 0.0f;
     matrix[3][2] = 0.0f;
     matrix[3][3] = 1.0f;
+
+    for (u32 component = 0; component < 4; component++) {
+        sVrHeadRotationQuaternion[component] = headRotation[component];
+    }
+    mtxf_copy(sVrHeadRotationMatrix, matrix);
+    sVrHeadRotationMatrixValid = true;
 
     return true;
 }
@@ -551,6 +570,45 @@ static bool vr_is_menu_scene(void) {
             main_menu_seg7_collision;
 }
 
+static bool sVrEyeTangentsValid[2] = { false };
+static float sVrEyeFovCache[2][4] = { 0 };
+static float sVrEyeTangents[2][4] = { 0 };
+
+static bool vr_get_eye_tangents(
+    uint32_t eyeIndex,
+    float tangents[4]
+) {
+    float eyeFov[4] = { 0 };
+
+    if (eyeIndex >= 2 ||
+        tangents == NULL ||
+        !vr_get_eye_fov(eyeIndex, eyeFov)) {
+        return false;
+    }
+
+    bool changed = !sVrEyeTangentsValid[eyeIndex];
+    for (u32 component = 0; component < 4; component++) {
+        if (eyeFov[component] !=
+            sVrEyeFovCache[eyeIndex][component]) {
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        for (u32 component = 0; component < 4; component++) {
+            sVrEyeFovCache[eyeIndex][component] = eyeFov[component];
+            sVrEyeTangents[eyeIndex][component] =
+                tanf(eyeFov[component]);
+        }
+        sVrEyeTangentsValid[eyeIndex] = true;
+    }
+
+    for (u32 component = 0; component < 4; component++) {
+        tangents[component] = sVrEyeTangents[eyeIndex][component];
+    }
+    return true;
+}
+
 static bool vr_get_ui_plane_ndc(
     uint32_t eyeIndex,
     f32 *centerX,
@@ -558,7 +616,7 @@ static bool vr_get_ui_plane_ndc(
     f32 *halfWidth,
     f32 *halfHeight
 ) {
-    float eyeFov[4] = { 0 };
+    float eyeTangents[4] = { 0 };
     float eyeOffset[3] = { 0 };
 
     *centerX = 0.0f;
@@ -567,15 +625,15 @@ static bool vr_get_ui_plane_ndc(
     *halfHeight = 1.0f;
 
     if (eyeIndex >= 2 ||
-        !vr_get_eye_fov(eyeIndex, eyeFov) ||
+        !vr_get_eye_tangents(eyeIndex, eyeTangents) ||
         !vr_get_eye_offset(eyeIndex, eyeOffset)) {
         return false;
     }
 
-    const float tanLeft = tanf(eyeFov[0]);
-    const float tanRight = tanf(eyeFov[1]);
-    const float tanDown = tanf(eyeFov[2]);
-    const float tanUp = tanf(eyeFov[3]);
+    const float tanLeft = eyeTangents[0];
+    const float tanRight = eyeTangents[1];
+    const float tanDown = eyeTangents[2];
+    const float tanUp = eyeTangents[3];
     const float tanWidth = tanRight - tanLeft;
     const float tanHeight = tanUp - tanDown;
 
@@ -677,6 +735,8 @@ static void patch_mtx_vr_billboards(uint32_t eyeIndex) {
         eyeIndex < 2 &&
         vr_build_head_rotation_matrix(headRotation);
     Vec3f cylindricalBackward = { 0.0f, 0.0f, 1.0f };
+    Mat4 inverseFullFacingRotation;
+    Mat4 inverseCylindricalFacingRotation;
 
     if (useHeadRotation) {
         cylindricalBackward[0] = headRotation[0][2];
@@ -685,6 +745,41 @@ static void patch_mtx_vr_billboards(uint32_t eyeIndex) {
         vr_adjust_first_person_camera_direction(
             cylindricalBackward
         );
+
+        mtxf_identity(inverseFullFacingRotation);
+        for (s32 row = 0; row < 3; row++) {
+            for (s32 column = 0; column < 3; column++) {
+                inverseFullFacingRotation[row][column] =
+                    headRotation[column][row];
+            }
+        }
+
+        Mat4 cylindricalFacingRotation;
+        mtxf_identity(cylindricalFacingRotation);
+        const f32 backwardX = cylindricalBackward[0];
+        const f32 backwardZ = cylindricalBackward[2];
+        const f32 horizontalLength = sqrtf(
+            backwardX * backwardX +
+            backwardZ * backwardZ
+        );
+
+        if (horizontalLength > 0.000001f) {
+            const f32 normalizedX = backwardX / horizontalLength;
+            const f32 normalizedZ = backwardZ / horizontalLength;
+
+            cylindricalFacingRotation[0][0] = normalizedZ;
+            cylindricalFacingRotation[0][2] = normalizedX;
+            cylindricalFacingRotation[2][0] = -normalizedX;
+            cylindricalFacingRotation[2][2] = normalizedZ;
+        }
+
+        mtxf_identity(inverseCylindricalFacingRotation);
+        for (s32 row = 0; row < 3; row++) {
+            for (s32 column = 0; column < 3; column++) {
+                inverseCylindricalFacingRotation[row][column] =
+                    cylindricalFacingRotation[column][row];
+            }
+        }
     }
 
     for (u32 i = 0; i < sMtxTbl->count; i++) {
@@ -700,44 +795,20 @@ static void patch_mtx_vr_billboards(uint32_t eyeIndex) {
             continue;
         }
 
-        Mat4 facingRotation;
-        mtxf_copy(facingRotation, headRotation);
-
-        if (interp->billboard == VR_BILLBOARD_CYLINDRICAL) {
-            const f32 backwardX = cylindricalBackward[0];
-            const f32 backwardZ = cylindricalBackward[2];
-            const f32 horizontalLength = sqrtf(
-                backwardX * backwardX +
-                backwardZ * backwardZ
-            );
-
-            mtxf_identity(facingRotation);
-            if (horizontalLength > 0.000001f) {
-                const f32 normalizedX = backwardX / horizontalLength;
-                const f32 normalizedZ = backwardZ / horizontalLength;
-
-                facingRotation[0][0] = normalizedZ;
-                facingRotation[0][2] = normalizedX;
-                facingRotation[2][0] = -normalizedX;
-                facingRotation[2][2] = normalizedZ;
-            }
-        }
-
-        Mat4 inverseFacingRotation;
-        mtxf_identity(inverseFacingRotation);
-        for (s32 row = 0; row < 3; row++) {
-            for (s32 column = 0; column < 3; column++) {
-                inverseFacingRotation[row][column] =
-                    facingRotation[column][row];
-            }
-        }
-
         Mat4 adjusted;
-        mtxf_mul(
-            adjusted,
-            interp->vrBase.m,
-            inverseFacingRotation
-        );
+        if (interp->billboard == VR_BILLBOARD_CYLINDRICAL) {
+            mtxf_mul(
+                adjusted,
+                interp->vrBase.m,
+                inverseCylindricalFacingRotation
+            );
+        } else {
+            mtxf_mul(
+                adjusted,
+                interp->vrBase.m,
+                inverseFullFacingRotation
+            );
+        }
 
         // The inverse rotation is for the billboard's axes only. Its center
         // must still receive the normal headset view transform.
@@ -868,7 +939,8 @@ static void patch_mtx_vr_ui(uint32_t eyeIndex) {
 
 static void patch_mtx_perspective(
     f32 delta,
-    uint32_t eyeIndex
+    uint32_t eyeIndex,
+    bool patchBillboards
 ) {
     if (sPerspectiveNode == NULL) {
         return;
@@ -878,12 +950,6 @@ static void patch_mtx_perspective(
         sPerspectiveNode->prevFov = sPerspectiveNode->fov;
     }
 
-    u16 perspNorm;
-    f32 fovInterpolated = delta_interpolate_f32(
-        sPerspectiveNode->prevFov,
-        sPerspectiveNode->fov,
-        delta
-    );
     f32 near = get_first_person_enabled()
         ? 1.f
         : replace_value_if_not_zero(
@@ -903,32 +969,22 @@ static void patch_mtx_perspective(
         far = max(far, MAX_FAR_PLANE_DIST);
     }
 
-    f32 aspect = sPerspectiveAspect;
-    vr_get_render_target_aspect(&aspect);
-    guPerspective(
-        sPerspectiveMtx,
-        &perspNorm,
-        fovInterpolated,
-        aspect,
-        near,
-        far,
-        1.0f
-    );
+    float eyeTangents[4] = { 0 };
+    bool runtimeProjection = false;
 
-    float eyeFov[4] = { 0 };
-
-    if (vr_get_eye_fov(eyeIndex, eyeFov)) {
+    if (vr_get_eye_tangents(eyeIndex, eyeTangents)) {
         const float fovScale =
             (float)clamp(configVrFov, 70U, 120U) / 100.0f;
-        const float tanLeft = tanf(eyeFov[0]) * fovScale;
-        const float tanRight = tanf(eyeFov[1]) * fovScale;
-        const float tanDown = tanf(eyeFov[2]) * fovScale;
-        const float tanUp = tanf(eyeFov[3]) * fovScale;
+        const float tanLeft = eyeTangents[0] * fovScale;
+        const float tanRight = eyeTangents[1] * fovScale;
+        const float tanDown = eyeTangents[2] * fovScale;
+        const float tanUp = eyeTangents[3] * fovScale;
         const float tanWidth = tanRight - tanLeft;
         const float tanHeight = tanUp - tanDown;
 
         if (tanWidth > 0.000001f &&
             tanHeight > 0.000001f) {
+            runtimeProjection = true;
             guMtxIdentF(sPerspectiveMtx->m);
             sPerspectiveMtx->m[0][0] =
                 2.0f / tanWidth;
@@ -945,6 +1001,26 @@ static void patch_mtx_perspective(
                 2.0f * near * far / (near - far);
             sPerspectiveMtx->m[3][3] = 0.0f;
         }
+    }
+
+    if (!runtimeProjection) {
+        u16 perspNorm;
+        const f32 fovInterpolated = delta_interpolate_f32(
+            sPerspectiveNode->prevFov,
+            sPerspectiveNode->fov,
+            delta
+        );
+        f32 aspect = sPerspectiveAspect;
+        vr_get_render_target_aspect(&aspect);
+        guPerspective(
+            sPerspectiveMtx,
+            &perspNorm,
+            fovInterpolated,
+            aspect,
+            near,
+            far,
+            1.0f
+        );
     }
 
     Mat4 baseProjection;
@@ -984,14 +1060,16 @@ static void patch_mtx_perspective(
         mtxf_copy(sPerspectiveMtx->m, viewProjection);
     }
 
-    patch_mtx_vr_billboards(eyeIndex);
+    if (patchBillboards) {
+        patch_mtx_vr_billboards(eyeIndex);
+    }
 }
 
 void patch_mtx_vr_projection(
     f32 delta,
     uint32_t eyeIndex
 ) {
-    patch_mtx_perspective(delta, eyeIndex);
+    patch_mtx_perspective(delta, eyeIndex, true);
 }
 
 void patch_mtx_vr_ui_projection(uint32_t eyeIndex) {
@@ -999,7 +1077,10 @@ void patch_mtx_vr_ui_projection(uint32_t eyeIndex) {
 }
 
 void patch_mtx_interpolated(f32 delta) {
-    patch_mtx_perspective(delta, 2);
+    // Matrix interpolation below immediately replaces every model matrix.
+    // Avoid walking all billboards here; eye-specific patching happens after
+    // the interpolation pass and before each actual eye render.
+    patch_mtx_perspective(delta, 2, false);
 
     if (sViewportClipPos != NULL) {
         delta_interpolate_vec3s(sViewportInterp.vp.vtrans, sViewportPrev.vp.vtrans, sViewport->vp.vtrans, delta);
@@ -2230,23 +2311,23 @@ static bool vr_update_object_culling_context(void) {
             f32 maxVerticalTangent = 0.0f;
 
             for (uint32_t eye = 0; eye < 2; eye++) {
-                float eyeFov[4] = { 0 };
-                if (!vr_get_eye_fov(eye, eyeFov)) {
+                float eyeTangents[4] = { 0 };
+                if (!vr_get_eye_tangents(eye, eyeTangents)) {
                     continue;
                 }
 
                 maxHorizontalTangent = MAX(
                     maxHorizontalTangent,
                     MAX(
-                        fabsf(tanf(eyeFov[0])),
-                        fabsf(tanf(eyeFov[1]))
+                        fabsf(eyeTangents[0]),
+                        fabsf(eyeTangents[1])
                     )
                 );
                 maxVerticalTangent = MAX(
                     maxVerticalTangent,
                     MAX(
-                        fabsf(tanf(eyeFov[2])),
-                        fabsf(tanf(eyeFov[3]))
+                        fabsf(eyeTangents[2]),
+                        fabsf(eyeTangents[3])
                     )
                 );
             }

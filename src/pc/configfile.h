@@ -72,6 +72,7 @@ extern unsigned int configVrCameraHeight;
 extern unsigned int configVrMovementCalibration;
 extern unsigned int configVrFov;
 extern unsigned int configVrRenderScale;
+extern bool         configVrDesktopMirror;
 extern unsigned int configVrDesktopMirrorFps;
 extern unsigned int configVrHudOpacity;
 extern bool         configVrExperimentalFlipTurn;

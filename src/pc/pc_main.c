@@ -345,8 +345,11 @@ void produce_interpolation_frames_and_delay(void) {
             gRenderingDelta = delta;
         }
 
-        bool presentDesktopFrame = true;
-        if (vrFramePaced && vr_is_active()) {
+        bool presentDesktopFrame =
+            !vrFramePaced || configVrDesktopMirror;
+        if (vrFramePaced &&
+            vr_is_active() &&
+            configVrDesktopMirror) {
             const f64 mirrorInterval = 1.0 /
                 (f64)clamp(
                     configVrDesktopMirrorFps,
@@ -433,21 +436,21 @@ void produce_interpolation_frames_and_delay(void) {
 
         gfx_current_dimensions = desktopDimensions;
 
-        if (!renderedVrEye) {
+        if (!renderedVrEye &&
+            (!vrFramePaced || configVrDesktopMirror)) {
             presentDesktopFrame = true;
-        }
-
-        if (renderedVrEye &&
-            !gSkipInterpolationTitleScreen) {
-            patch_mtx_vr_projection(delta, 2);
-        }
-        if (renderedVrEye) {
-            patch_mtx_vr_ui_projection(2);
         }
 
         // If mirroring was unavailable, retain the old independent desktop
         // render as a fallback instead of presenting an empty window.
         if (presentDesktopFrame && !mirroredVrEye) {
+            if (renderedVrEye &&
+                !gSkipInterpolationTitleScreen) {
+                patch_mtx_vr_projection(delta, 2);
+            }
+            if (renderedVrEye) {
+                patch_mtx_vr_ui_projection(2);
+            }
             send_display_list(gGfxSPTask);
             gfx_end_frame_render();
         }

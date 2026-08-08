@@ -135,6 +135,13 @@ static void djui_panel_vr_performance_create(struct DjuiBase* caller) {
             NULL
         );
 
+        djui_checkbox_create(
+            body,
+            "Desktop View",
+            &configVrDesktopMirror,
+            NULL
+        );
+
         djui_slider_create(
             body,
             "Desktop Mirror FPS",

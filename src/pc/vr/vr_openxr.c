@@ -123,6 +123,10 @@ static bool sFrameTimingLogged = false;
 static XrQuaternionf sHeadOrientationReference = { 0 };
 static XrVector3f sHeadPositionReference = { 0 };
 static bool sHeadOrientationReferenceValid = false;
+static bool sCachedTrackingValid = false;
+static float sCachedEyeOffsets[2][3] = { 0 };
+static float sCachedHeadRotation[4] = { 0 };
+static float sCachedHeadTranslation[3] = { 0 };
 static struct VrOpenXrFunctions sXr = { 0 };
 
 static const char* vr_openxr_result_name(XrResult result) {
@@ -1267,6 +1271,129 @@ static bool vr_openxr_locate_views(XrTime displayTime) {
     return true;
 }
 
+static void vr_openxr_rotate_vector(
+    const XrQuaternionf* rotation,
+    const XrVector3f* vector,
+    float result[3]
+) {
+    const float twiceCrossX = 2.0f * (
+        rotation->y * vector->z -
+        rotation->z * vector->y
+    );
+    const float twiceCrossY = 2.0f * (
+        rotation->z * vector->x -
+        rotation->x * vector->z
+    );
+    const float twiceCrossZ = 2.0f * (
+        rotation->x * vector->y -
+        rotation->y * vector->x
+    );
+
+    result[0] = vector->x +
+        rotation->w * twiceCrossX +
+        rotation->y * twiceCrossZ -
+        rotation->z * twiceCrossY;
+    result[1] = vector->y +
+        rotation->w * twiceCrossY +
+        rotation->z * twiceCrossX -
+        rotation->x * twiceCrossZ;
+    result[2] = vector->z +
+        rotation->w * twiceCrossZ +
+        rotation->x * twiceCrossY -
+        rotation->y * twiceCrossX;
+}
+
+static void vr_openxr_update_cached_tracking(void) {
+    sCachedTrackingValid = false;
+
+    if (!sFrameViewsLocated ||
+        !sViewPoseValid ||
+        !sHeadOrientationReferenceValid) {
+        return;
+    }
+
+    const XrVector3f center = {
+        (sViews[0].pose.position.x +
+         sViews[1].pose.position.x) * 0.5f,
+        (sViews[0].pose.position.y +
+         sViews[1].pose.position.y) * 0.5f,
+        (sViews[0].pose.position.z +
+         sViews[1].pose.position.z) * 0.5f
+    };
+    const XrQuaternionf viewOrientationInverse = {
+        -sViews[0].pose.orientation.x,
+        -sViews[0].pose.orientation.y,
+        -sViews[0].pose.orientation.z,
+        sViews[0].pose.orientation.w
+    };
+
+    for (uint32_t eye = 0; eye < 2; eye++) {
+        const XrVector3f eyeDelta = {
+            sViews[eye].pose.position.x - center.x,
+            sViews[eye].pose.position.y - center.y,
+            sViews[eye].pose.position.z - center.z
+        };
+        vr_openxr_rotate_vector(
+            &viewOrientationInverse,
+            &eyeDelta,
+            sCachedEyeOffsets[eye]
+        );
+    }
+
+    const XrQuaternionf referenceInverse = {
+        -sHeadOrientationReference.x,
+        -sHeadOrientationReference.y,
+        -sHeadOrientationReference.z,
+        sHeadOrientationReference.w
+    };
+    const XrQuaternionf current = sViews[0].pose.orientation;
+    const XrQuaternionf relative = {
+        referenceInverse.w * current.x +
+            referenceInverse.x * current.w +
+            referenceInverse.y * current.z -
+            referenceInverse.z * current.y,
+        referenceInverse.w * current.y -
+            referenceInverse.x * current.z +
+            referenceInverse.y * current.w +
+            referenceInverse.z * current.x,
+        referenceInverse.w * current.z +
+            referenceInverse.x * current.y -
+            referenceInverse.y * current.x +
+            referenceInverse.z * current.w,
+        referenceInverse.w * current.w -
+            referenceInverse.x * current.x -
+            referenceInverse.y * current.y -
+            referenceInverse.z * current.z
+    };
+    const float rotationLength = sqrtf(
+        relative.x * relative.x +
+        relative.y * relative.y +
+        relative.z * relative.z +
+        relative.w * relative.w
+    );
+
+    if (rotationLength <= 0.000001f) {
+        return;
+    }
+
+    sCachedHeadRotation[0] = relative.x / rotationLength;
+    sCachedHeadRotation[1] = relative.y / rotationLength;
+    sCachedHeadRotation[2] = relative.z / rotationLength;
+    sCachedHeadRotation[3] = relative.w / rotationLength;
+
+    const XrVector3f headDelta = {
+        center.x - sHeadPositionReference.x,
+        center.y - sHeadPositionReference.y,
+        center.z - sHeadPositionReference.z
+    };
+    vr_openxr_rotate_vector(
+        &referenceInverse,
+        &headDelta,
+        sCachedHeadTranslation
+    );
+    sCachedTrackingValid = true;
+}
+
 static void vr_openxr_blit_game_frame(
     const struct VrOpenXrSwapchain* swapchain,
     const GLint sourceViewport[4]
@@ -2271,6 +2398,8 @@ bool vr_openxr_begin_frame(void) {
         );
     }
 
+    vr_openxr_update_cached_tracking();
+
     if (!sFrameTimingLogged &&
         sFrameViewsLocated &&
         sViewPoseValid) {
@@ -2383,54 +2512,14 @@ bool vr_openxr_get_eye_offset(
     if (eyeIndex >= 2 ||
         offset == NULL ||
         !sFrameViewsLocated ||
-        !sViewPoseValid) {
+        !sViewPoseValid ||
+        !sCachedTrackingValid) {
         return false;
     }
 
-    const XrVector3f center = {
-        (sViews[0].pose.position.x +
-         sViews[1].pose.position.x) * 0.5f,
-        (sViews[0].pose.position.y +
-         sViews[1].pose.position.y) * 0.5f,
-        (sViews[0].pose.position.z +
-         sViews[1].pose.position.z) * 0.5f
-    };
-    const XrVector3f delta = {
-        sViews[eyeIndex].pose.position.x - center.x,
-        sViews[eyeIndex].pose.position.y - center.y,
-        sViews[eyeIndex].pose.position.z - center.z
-    };
-    const XrQuaternionf orientationInverse = {
-        -sViews[0].pose.orientation.x,
-        -sViews[0].pose.orientation.y,
-        -sViews[0].pose.orientation.z,
-        sViews[0].pose.orientation.w
-    };
-    const float twiceCrossX = 2.0f * (
-        orientationInverse.y * delta.z -
-        orientationInverse.z * delta.y
-    );
-    const float twiceCrossY = 2.0f * (
-        orientationInverse.z * delta.x -
-        orientationInverse.x * delta.z
-    );
-    const float twiceCrossZ = 2.0f * (
-        orientationInverse.x * delta.y -
-        orientationInverse.y * delta.x
-    );
-
-    offset[0] = delta.x +
-        orientationInverse.w * twiceCrossX +
-        orientationInverse.y * twiceCrossZ -
-        orientationInverse.z * twiceCrossY;
-    offset[1] = delta.y +
-        orientationInverse.w * twiceCrossY +
-        orientationInverse.z * twiceCrossX -
-        orientationInverse.x * twiceCrossZ;
-    offset[2] = delta.z +
-        orientationInverse.w * twiceCrossZ +
-        orientationInverse.x * twiceCrossY -
-        orientationInverse.y * twiceCrossX;
+    offset[0] = sCachedEyeOffsets[eyeIndex][0];
+    offset[1] = sCachedEyeOffsets[eyeIndex][1];
+    offset[2] = sCachedEyeOffsets[eyeIndex][2];
 
     if (eyeIndex == 1 && !sStereoEyeOffsetsLogged) {
         const float eyeDistanceX =
@@ -2465,7 +2554,6 @@ bool vr_openxr_get_eye_fov(
 ) {
     if (eyeIndex >= 2 ||
         fov == NULL ||
-        !sFrameViewsLocated ||
         !sViewPoseValid) {
         return false;
     }
@@ -2487,105 +2575,29 @@ bool vr_openxr_get_eye_fov(
 bool vr_openxr_get_head_rotation(float rotation[4]) {
     if (rotation == NULL ||
         !sHeadOrientationReferenceValid ||
-        !sViewPoseValid) {
+        !sViewPoseValid ||
+        !sCachedTrackingValid) {
         return false;
     }
 
-    const XrQuaternionf referenceInverse = {
-        -sHeadOrientationReference.x,
-        -sHeadOrientationReference.y,
-        -sHeadOrientationReference.z,
-        sHeadOrientationReference.w
-    };
-    const XrQuaternionf current =
-        sViews[0].pose.orientation;
-    XrQuaternionf relative = {
-        referenceInverse.w * current.x +
-            referenceInverse.x * current.w +
-            referenceInverse.y * current.z -
-            referenceInverse.z * current.y,
-        referenceInverse.w * current.y -
-            referenceInverse.x * current.z +
-            referenceInverse.y * current.w +
-            referenceInverse.z * current.x,
-        referenceInverse.w * current.z +
-            referenceInverse.x * current.y -
-            referenceInverse.y * current.x +
-            referenceInverse.z * current.w,
-        referenceInverse.w * current.w -
-            referenceInverse.x * current.x -
-            referenceInverse.y * current.y -
-            referenceInverse.z * current.z
-    };
-    const float length = sqrtf(
-        relative.x * relative.x +
-        relative.y * relative.y +
-        relative.z * relative.z +
-        relative.w * relative.w
-    );
-
-    if (length <= 0.000001f) {
-        return false;
-    }
-
-    rotation[0] = relative.x / length;
-    rotation[1] = relative.y / length;
-    rotation[2] = relative.z / length;
-    rotation[3] = relative.w / length;
+    rotation[0] = sCachedHeadRotation[0];
+    rotation[1] = sCachedHeadRotation[1];
+    rotation[2] = sCachedHeadRotation[2];
+    rotation[3] = sCachedHeadRotation[3];
     return true;
 }
 
 bool vr_openxr_get_head_translation(float translation[3]) {
     if (translation == NULL ||
         !sHeadOrientationReferenceValid ||
-        !sViewPoseValid) {
+        !sViewPoseValid ||
+        !sCachedTrackingValid) {
         return false;
     }
 
-    const XrVector3f currentCenter = {
-        (sViews[0].pose.position.x +
-         sViews[1].pose.position.x) * 0.5f,
-        (sViews[0].pose.position.y +
-         sViews[1].pose.position.y) * 0.5f,
-        (sViews[0].pose.position.z +
-         sViews[1].pose.position.z) * 0.5f
-    };
-    const XrVector3f delta = {
-        currentCenter.x - sHeadPositionReference.x,
-        currentCenter.y - sHeadPositionReference.y,
-        currentCenter.z - sHeadPositionReference.z
-    };
-    const XrQuaternionf referenceInverse = {
-        -sHeadOrientationReference.x,
-        -sHeadOrientationReference.y,
-        -sHeadOrientationReference.z,
-        sHeadOrientationReference.w
-    };
-    const float twiceCrossX = 2.0f * (
-        referenceInverse.y * delta.z -
-        referenceInverse.z * delta.y
-    );
-    const float twiceCrossY = 2.0f * (
-        referenceInverse.z * delta.x -
-        referenceInverse.x * delta.z
-    );
-    const float twiceCrossZ = 2.0f * (
-        referenceInverse.x * delta.y -
-        referenceInverse.y * delta.x
-    );
-
-    translation[0] = delta.x +
-        referenceInverse.w * twiceCrossX +
-        referenceInverse.y * twiceCrossZ -
-        referenceInverse.z * twiceCrossY;
-    translation[1] = delta.y +
-        referenceInverse.w * twiceCrossY +
-        referenceInverse.z * twiceCrossX -
-        referenceInverse.x * twiceCrossZ;
-    translation[2] = delta.z +
-        referenceInverse.w * twiceCrossZ +
-        referenceInverse.x * twiceCrossY -
-        referenceInverse.y * twiceCrossX;
+    translation[0] = sCachedHeadTranslation[0];
+    translation[1] = sCachedHeadTranslation[1];
+    translation[2] = sCachedHeadTranslation[2];
     return true;
 }
 
@@ -2658,6 +2670,10 @@ void vr_openxr_shutdown(void) {
         sizeof(sHeadPositionReference)
     );
     sHeadOrientationReferenceValid = false;
+    sCachedTrackingValid = false;
+    memset(sCachedEyeOffsets, 0, sizeof(sCachedEyeOffsets));
+    memset(sCachedHeadRotation, 0, sizeof(sCachedHeadRotation));
+    memset(sCachedHeadTranslation, 0, sizeof(sCachedHeadTranslation));
 
     if (sSession != XR_NULL_HANDLE &&
         sXr.xrDestroySession != NULL) {
