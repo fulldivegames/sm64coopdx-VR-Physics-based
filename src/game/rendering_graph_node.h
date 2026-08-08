@@ -46,6 +46,11 @@ void geo_process_root(struct GraphNodeRoot *node, Vp *b, Vp *c, s32 clearColor);
 void register_mtx_vr_ui(Mtx *matrix);
 void vr_adjust_first_person_camera_direction(Vec3f direction);
 s16 vr_get_first_person_action_turn_yaw(void);
+bool vr_get_controller_world_fist(
+    u32 handIndex,
+    Vec3f worldPosition,
+    Vec3f worldVelocity
+);
 
 struct GraphNodeInterpData {
     Vec3s translation;

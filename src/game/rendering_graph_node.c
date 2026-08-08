@@ -701,6 +701,126 @@ static void vr_build_game_camera_matrix(
     mtxf_lookat(matrix, cameraPosition, cameraFocus, roll);
 }
 
+bool vr_get_controller_world_fist(
+    u32 handIndex,
+    Vec3f worldPosition,
+    Vec3f worldVelocity
+) {
+    const float worldUnitsPerMeter = 100.0f;
+
+    if (!vr_is_active() ||
+        handIndex >= VR_CONTROLLER_COUNT ||
+        worldPosition == NULL ||
+        sCameraNode == NULL) {
+        return false;
+    }
+
+    struct VrControllerState state;
+    if (!vr_get_controller_state(handIndex, &state) ||
+        (!state.gripPoseValid && !state.aimPoseValid)) {
+        return false;
+    }
+
+    const float* position = state.gripPoseValid
+        ? state.gripPosition
+        : state.aimPosition;
+    const float* rotation = state.aimPoseValid
+        ? state.aimRotation
+        : state.gripRotation;
+    Vec3f right = { 1.0f, 0.0f, 0.0f };
+    Vec3f up = { 0.0f, 1.0f, 0.0f };
+    Vec3f backward = { 0.0f, 0.0f, 1.0f };
+    vr_rotate_pose_vector(rotation, right, right);
+    vr_rotate_pose_vector(rotation, up, up);
+    vr_rotate_pose_vector(rotation, backward, backward);
+
+    const unsigned int* positionValues;
+    unsigned int leftPositionValues[3] = {
+        configVrLeftGlovePositionX,
+        configVrLeftGlovePositionY,
+        configVrLeftGlovePositionZ
+    };
+    unsigned int rightPositionValues[3] = {
+        configVrRightGlovePositionX,
+        configVrRightGlovePositionY,
+        configVrRightGlovePositionZ
+    };
+    positionValues = handIndex == VR_CONTROLLER_LEFT
+        ? leftPositionValues
+        : rightPositionValues;
+
+    const float positionOffsetX =
+        ((float)clamp(positionValues[0], 0U, 200U) - 100.0f) *
+            0.5f;
+    const float positionOffsetY =
+        ((float)clamp(positionValues[1], 0U, 200U) - 100.0f) *
+            0.5f;
+    const float positionOffsetZ =
+        ((float)clamp(positionValues[2], 0U, 200U) - 100.0f) *
+            0.5f;
+    const float gloveScale =
+        (float)clamp(configVrGloveSize, 25U, 250U) / 70.0f;
+    const float knuckleOffset = 6.0f * gloveScale;
+
+    // Build the point in the same camera-local coordinate system used by the
+    // floating glove renderer. The small -Z/aim offset places the collider at
+    // the knuckles rather than inside the controller grip.
+    Vec3f localPosition = {
+        position[0] * worldUnitsPerMeter +
+            right[0] * positionOffsetX +
+            up[0] * positionOffsetY +
+            backward[0] * positionOffsetZ -
+            backward[0] * knuckleOffset,
+        position[1] * worldUnitsPerMeter +
+            right[1] * positionOffsetX +
+            up[1] * positionOffsetY +
+            backward[1] * positionOffsetZ -
+            backward[1] * knuckleOffset,
+        position[2] * worldUnitsPerMeter +
+            right[2] * positionOffsetX +
+            up[2] * positionOffsetY +
+            backward[2] * positionOffsetZ -
+            backward[2] * knuckleOffset
+    };
+
+    Mat4 cameraMatrix;
+    Mat4 inverseCameraMatrix;
+    vr_build_game_camera_matrix(
+        cameraMatrix,
+        sCameraNode->pos,
+        sCameraNode->focus,
+        sCameraNode->roll
+    );
+    mtxf_inverse(inverseCameraMatrix, cameraMatrix);
+
+    for (u32 axis = 0; axis < 3; axis++) {
+        worldPosition[axis] =
+            localPosition[0] * inverseCameraMatrix[0][axis] +
+            localPosition[1] * inverseCameraMatrix[1][axis] +
+            localPosition[2] * inverseCameraMatrix[2][axis] +
+            inverseCameraMatrix[3][axis];
+    }
+
+    if (worldVelocity != NULL) {
+        vec3f_set(worldVelocity, 0.0f, 0.0f, 0.0f);
+        if (state.gripLinearVelocityValid) {
+            Vec3f localVelocity = {
+                state.gripLinearVelocity[0] * worldUnitsPerMeter,
+                state.gripLinearVelocity[1] * worldUnitsPerMeter,
+                state.gripLinearVelocity[2] * worldUnitsPerMeter
+            };
+            for (u32 axis = 0; axis < 3; axis++) {
+                worldVelocity[axis] =
+                    localVelocity[0] * inverseCameraMatrix[0][axis] +
+                    localVelocity[1] * inverseCameraMatrix[1][axis] +
+                    localVelocity[2] * inverseCameraMatrix[2][axis];
+            }
+        }
+    }
+
+    return true;
+}
+
 static bool vr_is_menu_scene(void) {
     return gCurrentArea != NULL &&
         (const Collision *)gCurrentArea->terrainData ==

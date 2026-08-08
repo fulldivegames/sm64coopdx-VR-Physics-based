@@ -61,6 +61,8 @@ bool vr_apply_haptic(
     float durationSeconds,
     float frequency
 );
+void vr_queue_physical_punch(uint32_t handIndex);
+bool vr_consume_physical_punch(uint32_t handIndex);
 void vr_shutdown(void);
 
 void vr_on_graphics_ready(void);

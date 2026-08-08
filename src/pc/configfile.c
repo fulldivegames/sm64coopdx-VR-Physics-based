@@ -98,9 +98,12 @@ unsigned int configVrHudOpacity                   = 100;
 bool         configVrMotionControllerInput        = true;
 bool         configVrPunchButton                  = false;
 bool         configVrPhysicalPunching             = true;
+bool         configVrMarioPunchSound              = true;
+bool         configVrMotionControlledDive         = true;
 unsigned int configVrPunchSpeed                   = 150;
 unsigned int configVrPunchDistance                = 20;
 unsigned int configVrPunchGripThreshold           = 35;
+unsigned int configVrPunchColliderLength          = 150;
 unsigned int configVrGloveSize                    = 70;
 unsigned int configVrLeftGloveRotationX           = 180;
 unsigned int configVrLeftGloveRotationY           = 0;
@@ -304,9 +307,12 @@ static const struct ConfigOption options[] = {
     {.name = "vr_motion_controller_input",     .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControllerInput},
     {.name = "vr_punch_button",                .type = CONFIG_TYPE_BOOL, .boolValue = &configVrPunchButton},
     {.name = "vr_physical_punching",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrPhysicalPunching},
+    {.name = "vr_mario_punch_sound",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMarioPunchSound},
+    {.name = "vr_motion_controlled_dive",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControlledDive},
     {.name = "vr_punch_speed",                 .type = CONFIG_TYPE_UINT, .uintValue = &configVrPunchSpeed},
     {.name = "vr_punch_distance",              .type = CONFIG_TYPE_UINT, .uintValue = &configVrPunchDistance},
     {.name = "vr_punch_grip_threshold",        .type = CONFIG_TYPE_UINT, .uintValue = &configVrPunchGripThreshold},
+    {.name = "vr_punch_collider_length",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrPunchColliderLength},
     {.name = "vr_glove_size",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrGloveSize},
     {.name = "vr_left_glove_rotation_x",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrLeftGloveRotationX},
     {.name = "vr_left_glove_rotation_y",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrLeftGloveRotationY},

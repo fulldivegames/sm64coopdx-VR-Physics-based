@@ -269,25 +269,25 @@ static void controller_vr_read(OSContPad* pad) {
         controller_vr_reset_physical_punch(VR_CONTROLLER_RIGHT);
     }
 
-    bool physicalPunch = false;
     if (configVrPhysicalPunching) {
         if (leftAvailable) {
-            physicalPunch |= controller_vr_update_physical_punch(
-                VR_CONTROLLER_LEFT,
-                &left
-            );
+            if (controller_vr_update_physical_punch(
+                    VR_CONTROLLER_LEFT,
+                    &left
+                )) {
+                vr_queue_physical_punch(VR_CONTROLLER_LEFT);
+            }
         }
         if (rightAvailable) {
-            physicalPunch |= controller_vr_update_physical_punch(
-                VR_CONTROLLER_RIGHT,
-                &right
-            );
+            if (controller_vr_update_physical_punch(
+                    VR_CONTROLLER_RIGHT,
+                    &right
+                )) {
+                vr_queue_physical_punch(VR_CONTROLLER_RIGHT);
+            }
         }
     } else {
         controller_vr_reset_physical_punches();
-    }
-    if (physicalPunch) {
-        pad->button |= B_BUTTON;
     }
 
     if (leftAvailable) {

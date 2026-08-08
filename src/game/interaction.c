@@ -27,6 +27,7 @@
 #include "rumble_init.h"
 #include "object_collision.h"
 #include "object_list_processor.h"
+#include "vr_hand_interaction.h"
 #include "hardcoded.h"
 
 #include "pc/configfile.h"
@@ -2413,6 +2414,10 @@ void mario_process_interactions(struct MarioState *m) {
     if (!m) { return; }
     sDelayInvincTimer = FALSE;
     gInteractionInvulnerable = (m->action & ACT_FLAG_INVULNERABLE) || m->invincTimer != 0;
+
+    // VR motion punches use the tracked fist position rather than Mario's
+    // hidden body hitbox or punch animation.
+    vr_hand_interaction_update(m);
 
     if (m->skipWarpInteractionsTimer) {
         m->skipWarpInteractionsTimer--;

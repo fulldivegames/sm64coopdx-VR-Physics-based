@@ -260,6 +260,11 @@ static void djui_panel_vr_motion_control_settings_create(
         10U,
         100U
     );
+    configVrPunchColliderLength = djui_panel_vr_clamp_uint(
+        configVrPunchColliderLength,
+        50U,
+        300U
+    );
 
     struct DjuiThreePanel* panel =
         djui_panel_menu_create(
@@ -275,6 +280,20 @@ static void djui_panel_vr_motion_control_settings_create(
             body,
             "Enable Physical Punches",
             &configVrPhysicalPunching,
+            NULL
+        );
+
+        djui_checkbox_create(
+            body,
+            "Enable Mario Punch Sound Effect",
+            &configVrMarioPunchSound,
+            NULL
+        );
+
+        djui_checkbox_create(
+            body,
+            "Enable Motion Controlled Dive",
+            &configVrMotionControlledDive,
             NULL
         );
 
@@ -302,6 +321,15 @@ static void djui_panel_vr_motion_control_settings_create(
             &configVrPunchGripThreshold,
             10,
             100,
+            NULL
+        );
+
+        djui_slider_create(
+            body,
+            "Punch Collider Length (%)",
+            &configVrPunchColliderLength,
+            50,
+            300,
             NULL
         );
 

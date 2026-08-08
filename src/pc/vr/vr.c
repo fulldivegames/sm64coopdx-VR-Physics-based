@@ -7,6 +7,18 @@
 static bool sVrActive = false;
 static bool sGraphicsReady = false;
 static float sRenderTargetAspect = 0.0f;
+static bool sPhysicalPunchPending[VR_CONTROLLER_COUNT] = {
+    false,
+    false
+};
+
+static void vr_clear_physical_punches(void) {
+    for (uint32_t hand = 0;
+         hand < VR_CONTROLLER_COUNT;
+         hand++) {
+        sPhysicalPunchPending[hand] = false;
+    }
+}
 
 void vr_init(void) {
     printf("[VR] VR subsystem initialized.\n");
@@ -74,6 +86,11 @@ static void vr_handle_openxr_failure(void) {
 }
 
 void vr_begin_frame(void) {
+    // A motion gesture is consumed during the following game update. Never
+    // carry one across unrelated render/game frames (for example, from a
+    // menu into a level).
+    vr_clear_physical_punches();
+
     if (!sVrActive) {
         return;
     }
@@ -206,9 +223,26 @@ bool vr_apply_haptic(
     );
 }
 
+void vr_queue_physical_punch(uint32_t handIndex) {
+    if (sVrActive && handIndex < VR_CONTROLLER_COUNT) {
+        sPhysicalPunchPending[handIndex] = true;
+    }
+}
+
+bool vr_consume_physical_punch(uint32_t handIndex) {
+    if (!sVrActive || handIndex >= VR_CONTROLLER_COUNT) {
+        return false;
+    }
+
+    const bool pending = sPhysicalPunchPending[handIndex];
+    sPhysicalPunchPending[handIndex] = false;
+    return pending;
+}
+
 void vr_shutdown(void) {
     vr_openxr_shutdown();
 
+    vr_clear_physical_punches();
     sGraphicsReady = false;
     sRenderTargetAspect = 0.0f;
     sVrActive = false;
@@ -224,6 +258,7 @@ bool vr_set_active(bool active) {
     if (!active) {
         vr_openxr_shutdown();
 
+        vr_clear_physical_punches();
         sRenderTargetAspect = 0.0f;
         sVrActive = false;
 
