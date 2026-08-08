@@ -41,7 +41,7 @@ The current development build has been tested with a Meta Quest 3 using Virtual 
 ### To build from source
 
 - The normal [SM64 Co-Op DX build prerequisites](https://github.com/coop-deluxe/sm64coopdx)
-- A legally obtained Super Mario 64 US ROM named `baserom.us.z64` in the repository root
+- A legally obtained Super Mario 64 US ROM
 - A Windows/MSYS2 MinGW64 build environment
 - Git and GNU Make
 
