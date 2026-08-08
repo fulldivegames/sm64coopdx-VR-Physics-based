@@ -2209,25 +2209,23 @@ static void geo_process_shadow(struct GraphNodeShadow *node) {
  *
  * Since (0,0,0) is unaffected by rotation, columns 0, 1 and 2 are ignored.
  */
-static bool vr_get_object_culling_context(
-    Mat4 headRotation,
-    f32 *horizontalTangent,
-    f32 *verticalTangent
-) {
-    static u32 sTimestamp = UINT32_MAX;
-    static bool sValid = false;
-    static Mat4 sHeadRotation;
-    static f32 sHorizontalTangent = 0.0f;
-    static f32 sVerticalTangent = 0.0f;
+static u32 sVrObjectCullingTimestamp = UINT32_MAX;
+static bool sVrObjectCullingValid = false;
+static Mat4 sVrObjectCullingHeadRotation;
+static f32 sVrObjectCullingHorizontalTangent = 0.0f;
+static f32 sVrObjectCullingVerticalTangent = 0.0f;
 
-    if (sTimestamp != gGlobalTimer) {
-        sTimestamp = gGlobalTimer;
-        sValid = false;
+static bool vr_update_object_culling_context(void) {
+    if (sVrObjectCullingTimestamp != gGlobalTimer) {
+        sVrObjectCullingTimestamp = gGlobalTimer;
+        sVrObjectCullingValid = false;
 
         // Menu models are deliberately head locked, so ordinary headset
         // direction culling must not be applied to them.
         if (!vr_is_menu_scene() &&
-            vr_build_head_rotation_matrix(sHeadRotation)) {
+            vr_build_head_rotation_matrix(
+                sVrObjectCullingHeadRotation
+            )) {
             f32 maxHorizontalTangent = 0.0f;
             f32 maxVerticalTangent = 0.0f;
 
@@ -2260,27 +2258,20 @@ static bool vr_get_object_culling_context(
                 // rejecting distant objects far outside both eyes.
                 const f32 padding = 0.34906585f;
                 const f32 maxHalfAngle = 1.48352986f;
-                sHorizontalTangent = tanf(MIN(
+                sVrObjectCullingHorizontalTangent = tanf(MIN(
                     atanf(maxHorizontalTangent) + padding,
                     maxHalfAngle
                 ));
-                sVerticalTangent = tanf(MIN(
+                sVrObjectCullingVerticalTangent = tanf(MIN(
                     atanf(maxVerticalTangent) + padding,
                     maxHalfAngle
                 ));
-                sValid = true;
+                sVrObjectCullingValid = true;
             }
         }
     }
 
-    if (!sValid) {
-        return false;
-    }
-
-    mtxf_copy(headRotation, sHeadRotation);
-    *horizontalTangent = sHorizontalTangent;
-    *verticalTangent = sVerticalTangent;
-    return true;
+    return sVrObjectCullingValid;
 }
 
 static s32 obj_is_in_view(struct GraphNodeObject *node, Mat4 matrix) {
@@ -2318,31 +2309,23 @@ static s32 obj_is_in_view(struct GraphNodeObject *node, Mat4 matrix) {
             return TRUE;
         }
 
-        Mat4 headRotation;
-        f32 horizontalTangent = 0.0f;
-        f32 verticalTangent = 0.0f;
-
-        if (!vr_get_object_culling_context(
-                headRotation,
-                &horizontalTangent,
-                &verticalTangent
-            )) {
+        if (!vr_update_object_culling_context()) {
             return TRUE;
         }
 
         // Apply the same HMD view rotation used later by the eye projection.
         const f32 viewX =
-            x * headRotation[0][0] +
-            y * headRotation[1][0] +
-            z * headRotation[2][0];
+            x * sVrObjectCullingHeadRotation[0][0] +
+            y * sVrObjectCullingHeadRotation[1][0] +
+            z * sVrObjectCullingHeadRotation[2][0];
         const f32 viewY =
-            x * headRotation[0][1] +
-            y * headRotation[1][1] +
-            z * headRotation[2][1];
+            x * sVrObjectCullingHeadRotation[0][1] +
+            y * sVrObjectCullingHeadRotation[1][1] +
+            z * sVrObjectCullingHeadRotation[2][1];
         const f32 viewZ =
-            x * headRotation[0][2] +
-            y * headRotation[1][2] +
-            z * headRotation[2][2];
+            x * sVrObjectCullingHeadRotation[0][2] +
+            y * sVrObjectCullingHeadRotation[1][2] +
+            z * sVrObjectCullingHeadRotation[2][2];
         const f32 depth = -viewZ;
 
         if (depth + cullingRadius <= 0.0f) {
@@ -2351,11 +2334,13 @@ static s32 obj_is_in_view(struct GraphNodeObject *node, Mat4 matrix) {
 
         const f32 positiveDepth = MAX(depth, 0.0f);
         if (fabsf(viewX) >
-            positiveDepth * horizontalTangent + cullingRadius) {
+            positiveDepth * sVrObjectCullingHorizontalTangent +
+                cullingRadius) {
             return FALSE;
         }
         if (fabsf(viewY) >
-            positiveDepth * verticalTangent + cullingRadius) {
+            positiveDepth * sVrObjectCullingVerticalTangent +
+                cullingRadius) {
             return FALSE;
         }
         return TRUE;

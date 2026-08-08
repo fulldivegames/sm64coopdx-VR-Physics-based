@@ -11,6 +11,7 @@
 #include "dialog_ids.h"
 #include "engine/math_util.h"
 #include "engine/surface_collision.h"
+#include "first_person_cam.h"
 #include "game_init.h"
 #include "interaction.h"
 #include "level_update.h"
@@ -33,6 +34,7 @@
 #include "pc/network/lag_compensation.h"
 #include "pc/lua/smlua_hooks.h"
 #include "pc/lua/utils/smlua_obj_utils.h"
+#include "pc/vr/vr.h"
 
 u8 sDelayInvincTimer;
 s16 gInteractionInvulnerable;
@@ -329,11 +331,49 @@ void mario_grab_used_object(struct MarioState *m) {
     }
 }
 
+static s16 update_first_person_held_object_origin(
+    struct MarioState *m
+) {
+    if (m == NULL) {
+        return 0;
+    }
+
+    const bool vrFirstPerson =
+        vr_is_active() &&
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON;
+    const s16 releaseYaw = vrFirstPerson
+        ? vr_get_first_person_view_yaw()
+        : m->faceAngle[1];
+
+    if (m->heldObj == NULL ||
+        m->marioBodyState == NULL ||
+        (!vrFirstPerson && !get_first_person_enabled())) {
+        return releaseYaw;
+    }
+
+    // The local Mario geo tree is intentionally hidden in first-person modes.
+    // That also skips the hand-bone callback which normally refreshes this
+    // position, so provide a stable virtual hold point before a drop/throw.
+    // Without it, carried objects can be moved to a stale position and seem
+    // to disappear even though their behavior (such as a Bob-omb fuse) runs.
+    const f32 forwardDistance = 100.0f;
+    m->marioBodyState->heldObjLastPosition[0] =
+        m->pos[0] + forwardDistance * sins(releaseYaw);
+    m->marioBodyState->heldObjLastPosition[1] =
+        m->pos[1] + 80.0f;
+    m->marioBodyState->heldObjLastPosition[2] =
+        m->pos[2] + forwardDistance * coss(releaseYaw);
+    return releaseYaw;
+}
+
 void mario_drop_held_object(struct MarioState *m) {
     if (!m) { return; }
     if (m->playerIndex != 0) { return; }
 
     if (m->heldObj != NULL) {
+        const s16 releaseYaw =
+            update_first_person_held_object_origin(m);
+
         if (m->heldObj->behavior == segmented_to_virtual(smlua_override_behavior(bhvKoopaShellUnderwater))) {
             stop_shell_music();
         }
@@ -349,7 +389,7 @@ void mario_drop_held_object(struct MarioState *m) {
             m->heldObj->oPosZ = m->marioBodyState->heldObjLastPosition[2];
         }
 
-        m->heldObj->oMoveAngleYaw = m->faceAngle[1];
+        m->heldObj->oMoveAngleYaw = releaseYaw;
 
         if (m->heldObj->oSyncID != 0) {
             network_send_object(m->heldObj);
@@ -364,6 +404,9 @@ void mario_throw_held_object(struct MarioState *m) {
     if (m->playerIndex != 0) { return; }
 
     if (m->heldObj != NULL) {
+        const s16 releaseYaw =
+            update_first_person_held_object_origin(m);
+
         if (m->heldObj->behavior == segmented_to_virtual(smlua_override_behavior(bhvKoopaShellUnderwater))) {
             if (m->playerIndex == 0) { stop_shell_music(); }
         }
@@ -371,12 +414,12 @@ void mario_throw_held_object(struct MarioState *m) {
         obj_set_held_state(m->heldObj, bhvCarrySomething5);
 
         if (m->marioBodyState) {
-            m->heldObj->oPosX = m->marioBodyState->heldObjLastPosition[0] + 32.0f * sins(m->faceAngle[1]);
+            m->heldObj->oPosX = m->marioBodyState->heldObjLastPosition[0] + 32.0f * sins(releaseYaw);
             m->heldObj->oPosY = m->marioBodyState->heldObjLastPosition[1];
-            m->heldObj->oPosZ = m->marioBodyState->heldObjLastPosition[2] + 32.0f * coss(m->faceAngle[1]);
+            m->heldObj->oPosZ = m->marioBodyState->heldObjLastPosition[2] + 32.0f * coss(releaseYaw);
         }
 
-        m->heldObj->oMoveAngleYaw = m->faceAngle[1];
+        m->heldObj->oMoveAngleYaw = releaseYaw;
 
         if (m->heldObj->oSyncID != 0) {
             network_send_object(m->heldObj);

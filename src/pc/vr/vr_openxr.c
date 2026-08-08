@@ -1959,9 +1959,11 @@ bool vr_openxr_end_eye(uint32_t eyeIndex) {
     if (sActiveEyeUsesScaledTarget) {
         const struct VrOpenXrSwapchain* swapchain =
             &sColorSwapchains[eyeIndex];
-        const GLboolean scissorWasEnabled =
-            glIsEnabled(GL_SCISSOR_TEST);
 
+        // The OpenGL renderer enables scissoring at the start of every scene
+        // render and never disables it while processing the display list.
+        // Restore that known state directly instead of synchronously querying
+        // the driver for every scaled eye.
         glDisable(GL_SCISSOR_TEST);
 
         glBindFramebuffer(
@@ -1987,9 +1989,7 @@ bool vr_openxr_end_eye(uint32_t eyeIndex) {
             GL_LINEAR
         );
 
-        if (scissorWasEnabled) {
-            glEnable(GL_SCISSOR_TEST);
-        }
+        glEnable(GL_SCISSOR_TEST);
     }
 
     glFlush();
@@ -2061,9 +2061,6 @@ bool vr_openxr_mirror_eye(
         return false;
     }
 
-    const GLboolean scissorWasEnabled =
-        glIsEnabled(GL_SCISSOR_TEST);
-
     GLint sourceX = 0;
     GLint sourceY = 0;
     GLint sourceWidth = (GLint)
@@ -2131,11 +2128,8 @@ bool vr_openxr_mirror_eye(
     );
     glReadBuffer(GL_COLOR_ATTACHMENT0);
 
-    if (scissorWasEnabled) {
-        glEnable(GL_SCISSOR_TEST);
-    } else {
-        glDisable(GL_SCISSOR_TEST);
-    }
+    // gfx_opengl_start_frame() establishes this state before every eye.
+    glEnable(GL_SCISSOR_TEST);
 
     if (!sDesktopMirrorLogged) {
         printf(

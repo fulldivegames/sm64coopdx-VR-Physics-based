@@ -91,6 +91,22 @@ static s16 vr_first_person_compress_stick_yaw(s16 stickYaw) {
     return (s16)(relativeYaw + 0x8000);
 }
 
+s16 vr_get_first_person_view_yaw(void) {
+    const s32 calibration =
+        (s32)MIN(configVrMovementCalibration, 100U) - 50;
+
+    // This is the same world-space direction produced by holding the stick
+    // straight forward in First Person Mode: Free Camera yaw establishes the
+    // body-independent base, then the HMD, action turn, and calibration are
+    // applied on top of it.
+    return (s16)(
+        -gNewCamera.yaw - 0x4000 +
+        vr_first_person_head_yaw_offset() +
+        vr_get_first_person_action_turn_yaw() +
+        calibration * 0x10000 / 720
+    );
+}
+
 u32 unused80339F10;
 s8 filler80339F1C[20];
 u16 gLocalBubbleCounter = 0;
