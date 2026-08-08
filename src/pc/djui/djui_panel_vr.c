@@ -67,6 +67,38 @@ static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
     djui_panel_add(caller, panel, NULL);
 }
 
+static void djui_panel_vr_hud_settings_create(struct DjuiBase* caller) {
+    if (configVrHudOpacity > 100) {
+        configVrHudOpacity = 100;
+    }
+
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create("HUD Settings", false);
+
+    struct DjuiBase* body =
+        djui_three_panel_get_body(panel);
+
+    {
+        djui_slider_create(
+            body,
+            "HUD Opacity (%)",
+            &configVrHudOpacity,
+            0,
+            100,
+            NULL
+        );
+
+        djui_button_create(
+            body,
+            DLANG(MENU, BACK),
+            DJUI_BUTTON_STYLE_BACK,
+            djui_panel_menu_back
+        );
+    }
+
+    djui_panel_add(caller, panel, NULL);
+}
+
 void djui_panel_vr_create(struct DjuiBase* caller) {
     // Make the checkbox match the actual VR state whenever
     // the panel is opened.
@@ -98,6 +130,13 @@ void djui_panel_vr_create(struct DjuiBase* caller) {
             "Camera Settings",
             DJUI_BUTTON_STYLE_NORMAL,
             djui_panel_vr_camera_settings_create
+        );
+
+        djui_button_create(
+            body,
+            "HUD Settings",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_vr_hud_settings_create
         );
 
         djui_button_create(

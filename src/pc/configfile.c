@@ -88,6 +88,7 @@ bool         configShowFPS                        = false;
 bool         configVrAutoStart                    = false;
 unsigned int configVrCameraMode                   = VR_CAMERA_MODE_THIRD_PERSON;
 unsigned int configVrCameraDistance               = 100;
+unsigned int configVrHudOpacity                   = 100;
 bool         configShowPing                       = false;
 enum RefreshRateMode configFramerateMode          = RRM_AUTO;
 unsigned int configFrameLimit                     = 60;
@@ -265,6 +266,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_auto_start",                  .type = CONFIG_TYPE_BOOL, .boolValue = &configVrAutoStart},
     {.name = "vr_camera_mode",                 .type = CONFIG_TYPE_UINT, .uintValue = &configVrCameraMode},
     {.name = "vr_camera_distance",             .type = CONFIG_TYPE_UINT, .uintValue = &configVrCameraDistance},
+    {.name = "vr_hud_opacity",                 .type = CONFIG_TYPE_UINT, .uintValue = &configVrHudOpacity},
     {.name = "show_ping",                      .type = CONFIG_TYPE_BOOL, .boolValue = &configShowPing},
     {.name = "framerate_mode",                 .type = CONFIG_TYPE_UINT, .uintValue = &configFramerateMode},
     {.name = "frame_limit",                    .type = CONFIG_TYPE_UINT, .uintValue = &configFrameLimit},

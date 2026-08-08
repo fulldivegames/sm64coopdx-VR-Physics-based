@@ -67,6 +67,7 @@ extern bool         configShowFPS;
 extern bool         configVrAutoStart;
 extern unsigned int configVrCameraMode;
 extern unsigned int configVrCameraDistance;
+extern unsigned int configVrHudOpacity;
 extern bool         configShowPing;
 extern enum RefreshRateMode configFramerateMode;
 extern unsigned int configFrameLimit;

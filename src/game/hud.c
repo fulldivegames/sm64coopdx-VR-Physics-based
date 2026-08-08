@@ -20,6 +20,7 @@
 #include "hardcoded.h"
 #include "bettercamera.h"
 #include "pc/configfile.h"
+#include "pc/vr/vr.h"
 #include "pc/network/network.h"
 #include "pc/utils/misc.h"
 #include "pc/lua/smlua.h"
@@ -76,6 +77,16 @@ static u32 sPowerMeterPrevTimestamp;
 static f32 sPowerMeterPrevY;
 static Gfx *sPowerMeterDisplayListPos = NULL;
 static Mtx *sPowerMeterMtx = NULL;
+
+u8 get_hud_opacity_alpha(u8 alpha) {
+    if (!vr_is_active()) {
+        return alpha;
+    }
+
+    const unsigned int opacity =
+        configVrHudOpacity > 100 ? 100 : configVrHudOpacity;
+    return (u8)((alpha * opacity + 50) / 100);
+}
 
 void patch_hud_before(void) {
     if (sPowerMeterDisplayListPos != NULL) {
@@ -159,6 +170,8 @@ void render_dl_power_meter(s16 numHealthWedges) {
 
     gSPMatrix(gDisplayListHead++, VIRTUAL_TO_PHYSICAL(mtx++),
               G_MTX_MODELVIEW | G_MTX_MUL | G_MTX_PUSH);
+    gDPSetEnvColor(gDisplayListHead++, 0xFF, 0xFF, 0xFF,
+                   get_hud_opacity_alpha(0xFF));
     gSPDisplayList(gDisplayListHead++, &dl_power_meter_base);
 
     if (numHealthWedges != 0) {
@@ -334,7 +347,8 @@ void render_hud_icon(Vtx *vtx, const Texture *texture, u32 fmt, u32 siz, s32 tex
  * Renders the amount of lives Mario has.
  */
 void render_hud_mario_lives(void) {
-    gDPSetEnvColor(gDisplayListHead++, 0xFF, 0xFF, 0xFF, 0xFF);
+    gDPSetEnvColor(gDisplayListHead++, 0xFF, 0xFF, 0xFF,
+                   get_hud_opacity_alpha(0xFF));
     render_hud_icon(NULL, gMarioState->character->hudHeadTexture.texture, G_IM_FMT_RGBA, G_IM_SIZ_16b, 16, 16, GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(22), HUD_TOP_Y + 16, 16, 16, 0, 0, 16, 16);
     print_text(GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(38), HUD_TOP_Y, "*"); // 'X' glyph
     print_text_fmt_int(GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(54), HUD_TOP_Y, "%d", gHudDisplay.lives);
@@ -360,7 +374,8 @@ void render_hud_cap_timer(void) {
         if (capTimer > 0) {
             s32 capSeconds = (capTimer + 29) / 30;
             const u8 **capIcons = sHudCapIcons[capFlags];
-            gDPSetEnvColor(gDisplayListHead++, 0xFF, 0xFF, 0xFF, 0xFF);
+            gDPSetEnvColor(gDisplayListHead++, 0xFF, 0xFF, 0xFF,
+                           get_hud_opacity_alpha(0xFF));
             render_hud_icon(NULL, capIcons[0], G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32, GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(22), HUD_TOP_Y - 4, 5, 16,  0, 0, 10, 32);
             render_hud_icon(NULL, capIcons[1], G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32, GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(27), HUD_TOP_Y - 4, 3, 16, 10, 0,  6, 32);
             render_hud_icon(NULL, capIcons[2], G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32, GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(30), HUD_TOP_Y - 4, 3, 16, 16, 0,  6, 32);
@@ -374,7 +389,8 @@ void render_hud_cap_timer(void) {
 static void render_hud_radar(struct MarioState *m, struct Object *target, const u8 *iconTexture, u32 fmt, u32 siz, s32 texW, s32 texH, s32 x, s32 y, s32 tileX, s32 tileY, s32 tileW, s32 tileH, u8 r, u8 g, u8 b) {
 
     // Icon
-    gDPSetEnvColor(gDisplayListHead++, r, g, b, 0xFF);
+    gDPSetEnvColor(gDisplayListHead++, r, g, b,
+                   get_hud_opacity_alpha(0xFF));
     render_hud_icon(NULL, iconTexture, fmt, siz, texW, texH, x, y + 2, 12, 12, tileX, tileY, tileW, tileH);
 
     // Direction
@@ -397,7 +413,8 @@ static void render_hud_radar(struct MarioState *m, struct Object *target, const 
             256 * (((i + 2) / 2) % 2), // 256, 256, 0, 0
         }, { 0xFF, 0xFF, 0xFF, 0xFF } } };
     }
-    gDPSetEnvColor(gDisplayListHead++, 0xFF, 0xFF, 0xFF, 0xFF);
+    gDPSetEnvColor(gDisplayListHead++, 0xFF, 0xFF, 0xFF,
+                   get_hud_opacity_alpha(0xFF));
     render_hud_icon(vtx, texture_hud_char_arrow_up, G_IM_FMT_RGBA, G_IM_SIZ_16b, 8, 8, 0, 0, 8, 8, 0, 0, 8, 8);
 
     // Distance
@@ -624,6 +641,9 @@ void render_hud(void) {
 #endif
 
         bool showHud = (!gDjuiInMainMenu && !gOverrideHideHud);
+
+        gDPSetEnvColor(gDisplayListHead++, 0xFF, 0xFF, 0xFF,
+                       get_hud_opacity_alpha(0xFF));
 
         if (gCurrentArea != NULL && gCurrentArea->camera != NULL && gCurrentArea->camera->mode == CAMERA_MODE_INSIDE_CANNON) {
             render_hud_cannon_reticle();

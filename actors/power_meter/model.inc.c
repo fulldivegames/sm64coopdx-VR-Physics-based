@@ -52,8 +52,8 @@ ROM_ASSET_LOAD_VTX(vertex_power_meter_base, 0x00201410, 96653, 0x00029400, 128);
 const Gfx dl_power_meter_base[] = {
     gsDPPipeSync(),
     gsSPClearGeometryMode(G_LIGHTING),
-    gsDPSetCombineMode(G_CC_DECALRGBA, G_CC_DECALRGBA),
-    gsDPSetRenderMode(G_RM_TEX_EDGE, G_RM_TEX_EDGE2),
+    gsDPSetCombineMode(G_CC_FADEA, G_CC_FADEA),
+    gsDPSetRenderMode(G_RM_XLU_SURF, G_RM_XLU_SURF2),
     gsDPSetTextureFilter(G_TF_POINT),
     gsSPTexture(0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, G_ON),
     gsSPVertexNonGlobal(vertex_power_meter_base, 8, 0),

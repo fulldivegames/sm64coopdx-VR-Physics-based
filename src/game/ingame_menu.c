@@ -328,6 +328,7 @@ void render_screen_texture_rectangle(s16 x, s16 y, s16 width, s16 height,
     gDPPipeSync(gDisplayListHead++);
     gDPSetCycleType(gDisplayListHead++, G_CYC_1CYCLE);
     gDPSetTexturePersp(gDisplayListHead++, G_TP_NONE);
+    gDPSetAlphaCompare(gDisplayListHead++, G_AC_NONE);
     gDPSetCombineMode(gDisplayListHead++, G_CC_FADEA, G_CC_FADEA);
     gDPSetRenderMode(gDisplayListHead++, G_RM_XLU_SURF, G_RM_XLU_SURF2);
     gDPSetTextureFilter(gDisplayListHead++, G_TF_POINT);
@@ -2285,7 +2286,8 @@ void print_peach_letter_message(void) {
 void render_hud_cannon_reticle(void) {
     create_dl_translation_matrix(MENU_MTX_PUSH, 160.0f, 120.0f, 0);
 
-    gDPSetEnvColor(gDisplayListHead++, 50, 50, 50, 180);
+    gDPSetEnvColor(gDisplayListHead++, 50, 50, 50,
+                   get_hud_opacity_alpha(180));
     create_dl_translation_matrix(MENU_MTX_PUSH, -20.0f, -8.0f, 0);
     gSPDisplayList(gDisplayListHead++, dl_draw_triangle);
     gSPPopMatrix(gDisplayListHead++, G_MTX_MODELVIEW);
