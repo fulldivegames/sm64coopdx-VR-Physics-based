@@ -2,12 +2,13 @@
 
 An experimental vibe coded OpenXR VR fork of [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx).
 
-The current playable milestone provides **third-person and experimental first-person VR modes designed for a standard gamepad**. It keeps Mario's original movement and gameplay while rendering the game in stereoscopic 6DoF VR. Third Person Mode supports both the default camera and SM64 Co-Op DX's free camera; First Person Mode (Experimental) adds head-directed movement and smooth horizontal turning.
+The current version is **third-person and experimental first-person VR modes with gamepad**. It keeps Mario's original movement and gameplay while rendering the game in stereoscopic 6DoF VR. Third Person Mode supports both the default camera and SM64 Co-Op DX's free camera; First Person Mode (Experimental) adds head-directed movement and smooth horizontal turning, with many settings.
 
 > [!IMPORTANT]
 > This is an early development fork, not a finished release. The current VR mode targets Windows and OpenGL. First Person Mode is an initial experimental implementation and motion-controller gameplay is still planned.
 > Coop is currently untested, solo hosting is tested and works.
 > I recommend adjusting camera distance to your liking in the VR menu, as well as testing if you prefer default or free camera.
+> Mods untested but Rom Hacks seem to work. Only have tested Star Road
 
 ## Current features
 
