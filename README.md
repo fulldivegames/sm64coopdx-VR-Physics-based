@@ -8,7 +8,8 @@ The current version is **third-person and experimental first-person VR modes wit
 > This is an early development fork, not a finished release. The current VR mode targets Windows and OpenGL. First Person Mode is an initial experimental implementation and motion-controller gameplay is still planned.
 > Coop is currently untested, solo hosting is tested and works.
 > I recommend adjusting camera distance to your liking in the VR menu, as well as testing if you prefer default or free camera.
-> Mods untested but Rom Hacks seem to work. Only have tested Star Road
+> Mods untested but Rom Hacks seem to work. Only have tested Star Road.
+> You might get a windows firewall warning, just hit run anyways
 
 ## Current features
 
