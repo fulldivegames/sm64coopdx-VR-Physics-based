@@ -95,6 +95,20 @@ unsigned int configVrRenderScale                  = 100;
 bool         configVrDesktopMirror                = true;
 unsigned int configVrDesktopMirrorFps             = 60;
 unsigned int configVrHudOpacity                   = 100;
+bool         configVrMotionControllerInput        = true;
+unsigned int configVrGloveSize                    = 70;
+unsigned int configVrLeftGloveRotationX           = 180;
+unsigned int configVrLeftGloveRotationY           = 0;
+unsigned int configVrLeftGloveRotationZ           = 0;
+unsigned int configVrLeftGlovePositionX           = 100;
+unsigned int configVrLeftGlovePositionY           = 100;
+unsigned int configVrLeftGlovePositionZ           = 100;
+unsigned int configVrRightGloveRotationX          = 180;
+unsigned int configVrRightGloveRotationY          = 0;
+unsigned int configVrRightGloveRotationZ          = 0;
+unsigned int configVrRightGlovePositionX          = 100;
+unsigned int configVrRightGlovePositionY          = 100;
+unsigned int configVrRightGlovePositionZ          = 100;
 bool         configVrExperimentalFlipTurn         = true;
 bool         configVrExperimentalFlatFirstPerson  = false;
 bool         configShowPing                       = false;
@@ -281,6 +295,20 @@ static const struct ConfigOption options[] = {
     {.name = "vr_desktop_mirror",              .type = CONFIG_TYPE_BOOL, .boolValue = &configVrDesktopMirror},
     {.name = "vr_desktop_mirror_fps",          .type = CONFIG_TYPE_UINT, .uintValue = &configVrDesktopMirrorFps},
     {.name = "vr_hud_opacity",                 .type = CONFIG_TYPE_UINT, .uintValue = &configVrHudOpacity},
+    {.name = "vr_motion_controller_input",     .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControllerInput},
+    {.name = "vr_glove_size",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrGloveSize},
+    {.name = "vr_left_glove_rotation_x",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrLeftGloveRotationX},
+    {.name = "vr_left_glove_rotation_y",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrLeftGloveRotationY},
+    {.name = "vr_left_glove_rotation_z",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrLeftGloveRotationZ},
+    {.name = "vr_left_glove_position_x",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrLeftGlovePositionX},
+    {.name = "vr_left_glove_position_y",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrLeftGlovePositionY},
+    {.name = "vr_left_glove_position_z",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrLeftGlovePositionZ},
+    {.name = "vr_right_glove_rotation_x",      .type = CONFIG_TYPE_UINT, .uintValue = &configVrRightGloveRotationX},
+    {.name = "vr_right_glove_rotation_y",      .type = CONFIG_TYPE_UINT, .uintValue = &configVrRightGloveRotationY},
+    {.name = "vr_right_glove_rotation_z",      .type = CONFIG_TYPE_UINT, .uintValue = &configVrRightGloveRotationZ},
+    {.name = "vr_right_glove_position_x",      .type = CONFIG_TYPE_UINT, .uintValue = &configVrRightGlovePositionX},
+    {.name = "vr_right_glove_position_y",      .type = CONFIG_TYPE_UINT, .uintValue = &configVrRightGlovePositionY},
+    {.name = "vr_right_glove_position_z",      .type = CONFIG_TYPE_UINT, .uintValue = &configVrRightGlovePositionZ},
     {.name = "vr_experimental_flip_turn",      .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalFlipTurn},
     {.name = "vr_experimental_flat_first_person", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalFlatFirstPerson},
     {.name = "show_ping",                      .type = CONFIG_TYPE_BOOL, .boolValue = &configShowPing},

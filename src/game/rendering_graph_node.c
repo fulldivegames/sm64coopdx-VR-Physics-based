@@ -26,6 +26,7 @@
 #include "mario.h"
 #include "hardcoded.h"
 #include "levels/menu/header.h"
+#include "actors/mario/geo_header.h"
 
 /**
  * This file contains the code that processes the scene graph for rendering.
@@ -228,6 +229,8 @@ static f32 sPerspectiveAspect = 0;
 #define VR_UI_MATRIX_COUNT_MAX 64
 static Mtx* sVrUiMatrices[VR_UI_MATRIX_COUNT_MAX] = { 0 };
 static u32 sVrUiMatrixCount = 0;
+static Mtx* sVrControllerHandMatrices[VR_CONTROLLER_COUNT] = { 0 };
+static bool sVrControllerHandClosed[VR_CONTROLLER_COUNT] = { false };
 
 static Vp*  sViewport        = NULL;
 static Gfx* sViewportPos     = NULL;
@@ -241,6 +244,7 @@ Mtx* gBackgroundSkyboxMtx = NULL;
 static struct GraphNodeBackground* sBackgroundNode = NULL;
 static struct GraphNodeRoot* sBackgroundNodeRoot = NULL;
 static struct GraphNodeCamera* sCameraNode = NULL;
+static struct GraphNodeMasterList* sVrControllerHandMasterList = NULL;
 
 static struct GrowingArray* sShadowInterp = NULL;
 struct ShadowInterp* gShadowInterpCurrent = NULL;
@@ -422,7 +426,7 @@ static bool vr_get_first_person_anchor(Vec3f anchor) {
     return true;
 }
 
-static void vr_rotate_head_vector(
+static void vr_rotate_pose_vector(
     const float rotation[4],
     Vec3f vector,
     Vec3f result
@@ -474,9 +478,9 @@ static bool vr_build_head_rotation_matrix(Mat4 matrix) {
     Vec3f up = { 0.0f, 1.0f, 0.0f };
     Vec3f backward = { 0.0f, 0.0f, 1.0f };
 
-    vr_rotate_head_vector(headRotation, right, right);
-    vr_rotate_head_vector(headRotation, up, up);
-    vr_rotate_head_vector(headRotation, backward, backward);
+    vr_rotate_pose_vector(headRotation, right, right);
+    vr_rotate_pose_vector(headRotation, up, up);
+    vr_rotate_pose_vector(headRotation, backward, backward);
 
     for (int axis = 0; axis < 3; axis++) {
         matrix[axis][0] = right[axis];
@@ -496,6 +500,138 @@ static bool vr_build_head_rotation_matrix(Mat4 matrix) {
     sVrHeadRotationMatrixValid = true;
 
     return true;
+}
+
+static void vr_hide_controller_hand_matrix(Mtx* fixedMatrix) {
+    Mat4 matrix;
+    mtxf_identity(matrix);
+
+    // A degenerate mesh far behind the player is harmless if tracking drops
+    // between the two eye submissions of a frame.
+    matrix[0][0] = 0.0f;
+    matrix[1][1] = 0.0f;
+    matrix[2][2] = 0.0f;
+    matrix[3][2] = 1000000.0f;
+    mtxf_to_mtx(fixedMatrix, matrix);
+}
+
+static void vr_patch_controller_hand_matrices(uint32_t eyeIndex) {
+    const float worldUnitsPerMeter = 100.0f;
+    const float handModelScale = 0.20f *
+        (float)clamp(configVrGloveSize, 25U, 250U) / 100.0f;
+    const float wristToGripOffset = 25.0f * handModelScale;
+
+    for (uint32_t hand = 0;
+         hand < VR_CONTROLLER_COUNT;
+         hand++) {
+        Mtx* fixedMatrix = sVrControllerHandMatrices[hand];
+        if (fixedMatrix == NULL) {
+            continue;
+        }
+
+        struct VrControllerState state;
+        if (eyeIndex >= 2 ||
+            !vr_get_controller_state(hand, &state) ||
+            (!state.gripPoseValid && !state.aimPoseValid)) {
+            vr_hide_controller_hand_matrix(fixedMatrix);
+            continue;
+        }
+
+        const float* position = state.gripPoseValid
+            ? state.gripPosition
+            : state.aimPosition;
+        const float* rotation = state.aimPoseValid
+            ? state.aimRotation
+            : state.gripRotation;
+        Vec3f right = { 1.0f, 0.0f, 0.0f };
+        Vec3f up = { 0.0f, 1.0f, 0.0f };
+        Vec3f backward = { 0.0f, 0.0f, 1.0f };
+
+        vr_rotate_pose_vector(rotation, right, right);
+        vr_rotate_pose_vector(rotation, up, up);
+        vr_rotate_pose_vector(rotation, backward, backward);
+
+        unsigned int rotationDegrees[3];
+        unsigned int positionValues[3];
+        if (hand == VR_CONTROLLER_LEFT) {
+            rotationDegrees[0] = configVrLeftGloveRotationX;
+            rotationDegrees[1] = configVrLeftGloveRotationY;
+            rotationDegrees[2] = configVrLeftGloveRotationZ;
+            positionValues[0] = configVrLeftGlovePositionX;
+            positionValues[1] = configVrLeftGlovePositionY;
+            positionValues[2] = configVrLeftGlovePositionZ;
+        } else {
+            rotationDegrees[0] = configVrRightGloveRotationX;
+            rotationDegrees[1] = configVrRightGloveRotationY;
+            rotationDegrees[2] = configVrRightGloveRotationZ;
+            positionValues[0] = configVrRightGlovePositionX;
+            positionValues[1] = configVrRightGlovePositionY;
+            positionValues[2] = configVrRightGlovePositionZ;
+        }
+
+        Vec3s calibrationRotation;
+        for (int axis = 0; axis < 3; axis++) {
+            calibrationRotation[axis] = (s16)(
+                (rotationDegrees[axis] % 360U) * 0x10000U / 360U
+            );
+        }
+
+        Vec3f zeroTranslation = { 0.0f, 0.0f, 0.0f };
+        Mat4 calibrationMatrix;
+        mtxf_rotate_zxy_and_translate(
+            calibrationMatrix,
+            zeroTranslation,
+            calibrationRotation
+        );
+
+        Mat4 matrix;
+        for (int modelAxis = 0; modelAxis < 3; modelAxis++) {
+            // Mario's open gloves extend from the wrist along local +X. Aim
+            // space uses -Z as its pointing direction, so this calibration
+            // makes the fingers follow the controller tip while retaining the
+            // glove's native up and palm axes. The mirrored glove geometry
+            // supplies the correct left/right handedness.
+            for (int worldAxis = 0; worldAxis < 3; worldAxis++) {
+                matrix[modelAxis][worldAxis] = (
+                    calibrationMatrix[modelAxis][0] *
+                        -backward[worldAxis] +
+                    calibrationMatrix[modelAxis][1] *
+                        up[worldAxis] +
+                    calibrationMatrix[modelAxis][2] *
+                        right[worldAxis]
+                ) * handModelScale;
+            }
+            matrix[modelAxis][3] = 0.0f;
+        }
+
+        const float positionOffsetX =
+            ((float)clamp(positionValues[0], 0U, 200U) - 100.0f) *
+                0.5f;
+        const float positionOffsetY =
+            ((float)clamp(positionValues[1], 0U, 200U) - 100.0f) *
+                0.5f;
+        const float positionOffsetZ =
+            ((float)clamp(positionValues[2], 0U, 200U) - 100.0f) *
+                0.5f;
+
+        // The glove model begins at the wrist, while OpenXR's grip position
+        // sits inside the palm. Pull the wrist slightly behind the tracked
+        // point so the palm, rather than the cuff, follows the controller.
+        matrix[3][0] = position[0] * worldUnitsPerMeter +
+            right[0] * positionOffsetX +
+            up[0] * positionOffsetY +
+            backward[0] * (wristToGripOffset + positionOffsetZ);
+        matrix[3][1] = position[1] * worldUnitsPerMeter +
+            right[1] * positionOffsetX +
+            up[1] * positionOffsetY +
+            backward[1] * (wristToGripOffset + positionOffsetZ);
+        matrix[3][2] = position[2] * worldUnitsPerMeter +
+            right[2] * positionOffsetX +
+            up[2] * positionOffsetY +
+            backward[2] * (wristToGripOffset + positionOffsetZ);
+        matrix[3][3] = 1.0f;
+        mtxf_to_mtx(fixedMatrix, matrix);
+    }
 }
 
 static void vr_build_game_camera_matrix(
@@ -1070,6 +1206,7 @@ void patch_mtx_vr_projection(
     uint32_t eyeIndex
 ) {
     patch_mtx_perspective(delta, eyeIndex, true);
+    vr_patch_controller_hand_matrices(eyeIndex);
 }
 
 void patch_mtx_vr_ui_projection(uint32_t eyeIndex) {
@@ -1316,6 +1453,88 @@ static u8 increment_mat_stack(void) {
     return TRUE;
 }
 
+static void vr_append_controller_hands(
+    s32 enableZBuffer,
+    struct RenderModeContainer* modeList,
+    struct RenderModeContainer* mode2List
+) {
+    if (!vr_is_active() ||
+        !enableZBuffer ||
+        gCurGraphNodeMasterList != sVrControllerHandMasterList ||
+        sPerspectiveNode == NULL ||
+        sCameraNode == NULL ||
+        gMarioStates[0].marioObj == NULL ||
+        vr_is_menu_scene()) {
+        return;
+    }
+
+    for (uint32_t hand = 0;
+         hand < VR_CONTROLLER_COUNT;
+         hand++) {
+        sVrControllerHandMatrices[hand] =
+            alloc_display_list(sizeof(Mtx));
+        if (sVrControllerHandMatrices[hand] == NULL) {
+            return;
+        }
+        vr_hide_controller_hand_matrix(
+            sVrControllerHandMatrices[hand]
+        );
+    }
+
+    gDPPipeSync(gDisplayListHead++);
+    gDPSetRenderMode(
+        gDisplayListHead++,
+        modeList->modes[LAYER_OPAQUE],
+        mode2List->modes[LAYER_OPAQUE]
+    );
+    gSPDisplayList(gDisplayListHead++, obj_sanitize_gfx);
+
+    for (uint32_t hand = 0;
+         hand < VR_CONTROLLER_COUNT;
+         hand++) {
+        struct VrControllerState state;
+        if (vr_get_controller_state(hand, &state)) {
+            const float grabAmount = fmaxf(
+                state.squeeze,
+                state.trigger
+            );
+
+            // Separate close/open thresholds prevent noisy analog input from
+            // rapidly switching the glove pose near the midpoint.
+            if (grabAmount >= 0.55f) {
+                sVrControllerHandClosed[hand] = true;
+            } else if (grabAmount <= 0.35f) {
+                sVrControllerHandClosed[hand] = false;
+            }
+        } else {
+            sVrControllerHandClosed[hand] = false;
+        }
+
+        const Gfx* handDisplayList;
+        if (hand == VR_CONTROLLER_LEFT) {
+            handDisplayList = sVrControllerHandClosed[hand]
+                ? mario_left_hand_closed
+                : mario_left_hand_open;
+        } else {
+            handDisplayList = sVrControllerHandClosed[hand]
+                ? mario_right_hand_closed
+                : mario_right_hand_open;
+        }
+
+        gSPMatrix(
+            gDisplayListHead++,
+            VIRTUAL_TO_PHYSICAL(sVrControllerHandMatrices[hand]),
+            G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_NOPUSH
+        );
+        gSPDisplayList(
+            gDisplayListHead++,
+            handDisplayList
+        );
+    }
+
+    gSPDisplayList(gDisplayListHead++, obj_sanitize_gfx);
+}
+
 /**
  * Process a master list node.
  */
@@ -1362,6 +1581,11 @@ static void geo_process_master_list_sub(struct GraphNodeMasterList *node) {
             }
         }
     }
+    vr_append_controller_hands(
+        enableZBuffer,
+        modeList,
+        mode2List
+    );
     if (enableZBuffer != 0) {
         gDPPipeSync(gDisplayListHead++);
         gSPClearGeometryMode(gDisplayListHead++, G_ZBUFFER);
@@ -1606,6 +1830,7 @@ static void geo_process_camera(struct GraphNodeCamera *node) {
     }
     node->prevTimestamp = gGlobalTimer;
     sCameraNode = node;
+    sVrControllerHandMasterList = gCurGraphNodeMasterList;
 
     // Increment the matrix stack, If we fail to do so. Just return.
     if (!increment_mat_stack()) { return; }
@@ -3037,6 +3262,12 @@ static void geo_clear_interp_variables(void) {
     sMtxTbl->count = 0;
     sUsingBillboard = FALSE;
     sCameraNode = NULL;
+    sVrControllerHandMasterList = NULL;
+    memset(
+        sVrControllerHandMatrices,
+        0,
+        sizeof(sVrControllerHandMatrices)
+    );
     gCurGraphNodeProcessingObject = NULL;
     gCurGraphNodeMarioState = NULL;
 }
