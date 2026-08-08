@@ -51,6 +51,11 @@ enum GraphicsBackend {
     GAPI_MAX
 };
 
+enum VrCameraMode {
+    VR_CAMERA_MODE_THIRD_PERSON,
+    VR_CAMERA_MODE_COUNT
+};
+
 extern char configSaveNames[4][MAX_SAVE_NAME_STRING];
 
 // display settings
@@ -60,6 +65,8 @@ extern enum GraphicsBackend configGraphicsBackend;
 extern unsigned int configFiltering;
 extern bool         configShowFPS;
 extern bool         configVrAutoStart;
+extern unsigned int configVrCameraMode;
+extern unsigned int configVrCameraDistance;
 extern bool         configShowPing;
 extern enum RefreshRateMode configFramerateMode;
 extern unsigned int configFrameLimit;

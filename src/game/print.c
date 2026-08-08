@@ -6,6 +6,7 @@
 #include "memory.h"
 #include "print.h"
 #include "segment2.h"
+#include "game/ingame_menu.h"
 #include "game/rendering_graph_node.h"
 
 /**
@@ -413,8 +414,7 @@ void render_textrect(s32 x, s32 y, s32 pos) {
 
     rectX = rectBaseX;
     rectY = rectBaseY;
-    gSPTextureRectangle(gDisplayListHead++, rectX << 2, rectY << 2, (rectX + 15) << 2,
-                        (rectY + 15) << 2, G_TX_RENDERTILE, 0, 0, 4 << 10, 1 << 10);
+    render_screen_texture_rectangle(rectX, rectY, 16, 16, 16, 16);
 }
 
 /**
@@ -439,6 +439,7 @@ void render_text_labels(void) {
     }
 
     guOrtho(mtx, 0.0f, SCREEN_WIDTH, 0.0f, SCREEN_HEIGHT, -10.0f, 10.0f, 1.0f);
+    register_mtx_vr_ui(mtx);
     gSPPerspNormalize((Gfx *) (gDisplayListHead++), 0xFFFF);
     gSPMatrix(gDisplayListHead++, VIRTUAL_TO_PHYSICAL(mtx), G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
     gSPDisplayList(gDisplayListHead++, dl_hud_img_begin);

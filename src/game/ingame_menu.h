@@ -142,6 +142,9 @@ void create_dl_identity_matrix(void);
 void create_dl_translation_matrix(s8 pushOp, f32 x, f32 y, f32 z);
 void create_dl_rotation_matrix(s8 pushOp, f32 a, f32 x, f32 y, f32 z);
 void create_dl_ortho_matrix(void);
+void create_dl_vr_ui_matrix(void);
+void render_screen_texture_rectangle(s16 x, s16 y, s16 width, s16 height,
+                                     s16 textureWidth, s16 textureHeight);
 void render_generic_char(u8 c);
 f32 get_generic_dialog_width(u8* dialog);
 f32 get_generic_ascii_string_width(const char* ascii);

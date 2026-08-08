@@ -43,6 +43,7 @@ extern f32 gOverrideFar;
 
 void geo_process_node_and_siblings(struct GraphNode *firstNode);
 void geo_process_root(struct GraphNodeRoot *node, Vp *b, Vp *c, s32 clearColor);
+void register_mtx_vr_ui(Mtx *matrix);
 
 struct GraphNodeInterpData {
     Vec3s translation;

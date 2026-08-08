@@ -16,6 +16,7 @@
 #include "sm64.h"
 #include "game/level_update.h"
 #include "pc/lua/smlua_hooks.h"
+#include "pc/configfile.h"
 #include "pc/vr/vr.h"
 #include "pc/utils/misc.h"
 #include "pc/debuglog.h"
@@ -25,6 +26,7 @@
 #include "skybox.h"
 #include "mario.h"
 #include "hardcoded.h"
+#include "levels/menu/header.h"
 
 /**
  * This file contains the code that processes the scene graph for rendering.
@@ -221,6 +223,10 @@ static struct GraphNodePerspective *sPerspectiveNode = NULL;
 static Mtx* sPerspectiveMtx   = NULL;
 static f32 sPerspectiveAspect = 0;
 
+#define VR_UI_MATRIX_COUNT_MAX 64
+static Mtx* sVrUiMatrices[VR_UI_MATRIX_COUNT_MAX] = { 0 };
+static u32 sVrUiMatrixCount = 0;
+
 static Vp*  sViewport        = NULL;
 static Gfx* sViewportPos     = NULL;
 static Gfx* sViewportClipPos = NULL;
@@ -243,8 +249,16 @@ struct MtxInterp {
     Mtx *mtxPrev;
     void *displayList;
     Mtx interp;
+    Mtx vrBase;
     u8 usingCamSpace;
     u8 billboard;
+    u8 vrBaseReady;
+};
+
+enum VrBillboardType {
+    VR_BILLBOARD_NONE,
+    VR_BILLBOARD_FULL,
+    VR_BILLBOARD_CYLINDRICAL
 };
 
 static struct GrowingArray* sMtxTbl = NULL;
@@ -254,185 +268,46 @@ static void vr_rotate_head_vector(
     Vec3f vector,
     Vec3f result
 ) {
+    // Input and output are often the same vector, so preserve the source
+    // components before writing any results.
+    const float vectorX = vector[0];
+    const float vectorY = vector[1];
+    const float vectorZ = vector[2];
     const float twiceCrossX = 2.0f *
-        (rotation[1] * vector[2] - rotation[2] * vector[1]);
+        (rotation[1] * vectorZ - rotation[2] * vectorY);
     const float twiceCrossY = 2.0f *
-        (rotation[2] * vector[0] - rotation[0] * vector[2]);
+        (rotation[2] * vectorX - rotation[0] * vectorZ);
     const float twiceCrossZ = 2.0f *
-        (rotation[0] * vector[1] - rotation[1] * vector[0]);
+        (rotation[0] * vectorY - rotation[1] * vectorX);
 
-    result[0] = vector[0] +
+    result[0] = vectorX +
         rotation[3] * twiceCrossX +
         rotation[1] * twiceCrossZ -
         rotation[2] * twiceCrossY;
-    result[1] = vector[1] +
+    result[1] = vectorY +
         rotation[3] * twiceCrossY +
         rotation[2] * twiceCrossX -
         rotation[0] * twiceCrossZ;
-    result[2] = vector[2] +
+    result[2] = vectorZ +
         rotation[3] * twiceCrossZ +
         rotation[0] * twiceCrossY -
         rotation[1] * twiceCrossX;
 }
 
-static bool vr_get_rotated_camera_basis(
-    Vec3f position,
-    Vec3f focus,
-    s16 roll,
-    Vec3f right,
-    Vec3f up,
-    Vec3f backward
-) {
+static bool vr_build_head_rotation_matrix(Mat4 matrix) {
     float headRotation[4] = { 0 };
 
     if (!vr_get_head_rotation(headRotation)) {
         return false;
     }
 
-    Mat4 baseCamera;
-    mtxf_lookat(baseCamera, position, focus, roll);
+    Vec3f right = { 1.0f, 0.0f, 0.0f };
+    Vec3f up = { 0.0f, 1.0f, 0.0f };
+    Vec3f backward = { 0.0f, 0.0f, 1.0f };
 
-    Vec3f baseRight = {
-        baseCamera[0][0],
-        baseCamera[1][0],
-        baseCamera[2][0]
-    };
-    Vec3f baseUp = {
-        baseCamera[0][1],
-        baseCamera[1][1],
-        baseCamera[2][1]
-    };
-    Vec3f baseBackward = {
-        baseCamera[0][2],
-        baseCamera[1][2],
-        baseCamera[2][2]
-    };
-    Vec3f headsetForward = { 0.0f, 0.0f, -1.0f };
-    Vec3f headsetUp = { 0.0f, 1.0f, 0.0f };
-
-    vr_rotate_head_vector(
-        headRotation,
-        headsetForward,
-        headsetForward
-    );
-    vr_rotate_head_vector(
-        headRotation,
-        headsetUp,
-        headsetUp
-    );
-
-    Vec3f worldForward;
-    Vec3f worldUp;
-
-    for (int axis = 0; axis < 3; axis++) {
-        worldForward[axis] =
-            baseRight[axis] * headsetForward[0] +
-            baseUp[axis] * headsetForward[1] +
-            baseBackward[axis] * headsetForward[2];
-        worldUp[axis] =
-            baseRight[axis] * headsetUp[0] +
-            baseUp[axis] * headsetUp[1] +
-            baseBackward[axis] * headsetUp[2];
-        backward[axis] = -worldForward[axis];
-    }
-
-    vec3f_normalize(backward);
-    vec3f_cross(right, worldUp, backward);
-
-    if (vec3f_length(right) <= 0.000001f) {
-        return false;
-    }
-
-    vec3f_normalize(right);
-    vec3f_cross(up, backward, right);
-    vec3f_normalize(up);
-    return true;
-}
-
-static void vr_offset_camera_position(
-    Vec3f position,
-    Vec3f focus,
-    s16 roll,
-    Vec3f trackedPosition
-) {
-    const float worldUnitsPerMeter = 100.0f;
-    float headTranslation[3] = { 0 };
-    vec3f_copy(trackedPosition, position);
-
-    if (!vr_get_head_translation(headTranslation)) {
-        return;
-    }
-
-    Mat4 baseCamera;
-    mtxf_lookat(baseCamera, position, focus, roll);
-
-    for (int axis = 0; axis < 3; axis++) {
-        trackedPosition[axis] += worldUnitsPerMeter * (
-            baseCamera[axis][0] * headTranslation[0] +
-            baseCamera[axis][1] * headTranslation[1] +
-            baseCamera[axis][2] * headTranslation[2]
-        );
-    }
-}
-
-static bool vr_rotate_camera_focus(
-    Vec3f position,
-    Vec3f focus,
-    s16 roll
-) {
-    Vec3f right;
-    Vec3f up;
-    Vec3f backward;
-
-    if (!vr_get_rotated_camera_basis(
-            position,
-            focus,
-            roll,
-            right,
-            up,
-            backward
-        )) {
-        return false;
-    }
-
-    const float focusDistance = vec3f_dist(position, focus);
-
-    for (int axis = 0; axis < 3; axis++) {
-        focus[axis] =
-            position[axis] - backward[axis] * focusDistance;
-    }
-
-    return true;
-}
-
-static bool vr_build_head_tracked_camera_matrix(
-    Mat4 matrix,
-    Vec3f position,
-    Vec3f focus,
-    s16 roll
-) {
-    Vec3f right;
-    Vec3f up;
-    Vec3f backward;
-
-    if (!vr_get_rotated_camera_basis(
-            position,
-            focus,
-            roll,
-            right,
-            up,
-            backward
-        )) {
-        return false;
-    }
-
-    Vec3f trackedPosition;
-    vr_offset_camera_position(
-        position,
-        focus,
-        roll,
-        trackedPosition
-    );
+    vr_rotate_head_vector(headRotation, right, right);
+    vr_rotate_head_vector(headRotation, up, up);
+    vr_rotate_head_vector(headRotation, backward, backward);
 
     for (int axis = 0; axis < 3; axis++) {
         matrix[axis][0] = right[axis];
@@ -440,12 +315,173 @@ static bool vr_build_head_tracked_camera_matrix(
         matrix[axis][2] = backward[axis];
         matrix[axis][3] = 0.0f;
     }
+    matrix[3][0] = 0.0f;
+    matrix[3][1] = 0.0f;
+    matrix[3][2] = 0.0f;
+    matrix[3][3] = 1.0f;
 
+    return true;
+}
+
+static void vr_build_game_camera_matrix(
+    Mat4 matrix,
+    Vec3f position,
+    Vec3f focus,
+    s16 roll
+) {
+    Vec3f cameraPosition;
+    vec3f_copy(cameraPosition, position);
+
+    if (configVrCameraMode == VR_CAMERA_MODE_THIRD_PERSON) {
+        const float distanceScale =
+            (float)clamp(configVrCameraDistance, 50U, 250U) / 100.0f;
+
+        for (int axis = 0; axis < 3; axis++) {
+            cameraPosition[axis] = focus[axis] +
+                (position[axis] - focus[axis]) * distanceScale;
+        }
+    }
+
+    // Keep the game's camera transform independent from the headset. The
+    // HMD pose is applied later in the projection path so world-space
+    // lighting, billboards, and other camera-sensitive effects do not turn
+    // with the player's head.
+    mtxf_lookat(matrix, cameraPosition, focus, roll);
+}
+
+static bool vr_build_head_view_matrix(
+    uint32_t eyeIndex,
+    Mat4 matrix
+) {
+    const bool menuScene =
+        gCurrentArea != NULL &&
+        (const Collision *)gCurrentArea->terrainData ==
+            main_menu_seg7_collision;
+    const float worldUnitsPerMeter = menuScene ? 850.0f : 100.0f;
+    float headTranslation[3] = { 0 };
+
+    if (eyeIndex >= 2) {
+        return false;
+    }
+
+    if (menuScene) {
+        // Legacy file-select and star-select models use a camera roughly 1300
+        // game units away. Keep that scene head-locked and give it stereo eye
+        // separation that places it near the same 1.5 m depth as the 2D UI.
+        mtxf_identity(matrix);
+    } else if (!vr_build_head_rotation_matrix(matrix) ||
+               !vr_get_head_translation(headTranslation)) {
+        return false;
+    }
+
+    Vec3f right = {
+        matrix[0][0],
+        matrix[1][0],
+        matrix[2][0]
+    };
+    Vec3f up = {
+        matrix[0][1],
+        matrix[1][1],
+        matrix[2][1]
+    };
+    Vec3f backward = {
+        matrix[0][2],
+        matrix[1][2],
+        matrix[2][2]
+    };
+
+    Vec3f trackedPosition = {
+        headTranslation[0] * worldUnitsPerMeter,
+        headTranslation[1] * worldUnitsPerMeter,
+        headTranslation[2] * worldUnitsPerMeter
+    };
     matrix[3][0] = -vec3f_dot(trackedPosition, right);
     matrix[3][1] = -vec3f_dot(trackedPosition, up);
     matrix[3][2] = -vec3f_dot(trackedPosition, backward);
     matrix[3][3] = 1.0f;
+
+    // Eye offsets are already expressed in the headset's local coordinate
+    // system, so append them after the center-head view transform.
+    float eyeOffset[3] = { 0 };
+    if (vr_get_eye_offset(eyeIndex, eyeOffset)) {
+        matrix[3][0] -= eyeOffset[0] * worldUnitsPerMeter;
+        matrix[3][1] -= eyeOffset[1] * worldUnitsPerMeter;
+        matrix[3][2] -= eyeOffset[2] * worldUnitsPerMeter;
+    }
+
     return true;
+}
+
+static void patch_mtx_vr_billboards(uint32_t eyeIndex) {
+    if (sMtxTbl == NULL) {
+        return;
+    }
+
+    Mat4 headRotation;
+    const bool useHeadRotation =
+        vr_is_active() &&
+        eyeIndex < 2 &&
+        vr_build_head_rotation_matrix(headRotation);
+
+    for (u32 i = 0; i < sMtxTbl->count; i++) {
+        struct MtxInterp *interp = sMtxTbl->buffer[i];
+
+        if (interp->billboard == VR_BILLBOARD_NONE ||
+            !interp->vrBaseReady) {
+            continue;
+        }
+
+        if (!useHeadRotation) {
+            mtxf_copy(interp->interp.m, interp->vrBase.m);
+            continue;
+        }
+
+        Mat4 facingRotation;
+        mtxf_copy(facingRotation, headRotation);
+
+        if (interp->billboard == VR_BILLBOARD_CYLINDRICAL) {
+            const f32 backwardX = headRotation[0][2];
+            const f32 backwardZ = headRotation[2][2];
+            const f32 horizontalLength = sqrtf(
+                backwardX * backwardX +
+                backwardZ * backwardZ
+            );
+
+            mtxf_identity(facingRotation);
+            if (horizontalLength > 0.000001f) {
+                const f32 normalizedX = backwardX / horizontalLength;
+                const f32 normalizedZ = backwardZ / horizontalLength;
+
+                facingRotation[0][0] = normalizedZ;
+                facingRotation[0][2] = normalizedX;
+                facingRotation[2][0] = -normalizedX;
+                facingRotation[2][2] = normalizedZ;
+            }
+        }
+
+        Mat4 inverseFacingRotation;
+        mtxf_identity(inverseFacingRotation);
+        for (s32 row = 0; row < 3; row++) {
+            for (s32 column = 0; column < 3; column++) {
+                inverseFacingRotation[row][column] =
+                    facingRotation[column][row];
+            }
+        }
+
+        Mat4 adjusted;
+        mtxf_mul(
+            adjusted,
+            interp->vrBase.m,
+            inverseFacingRotation
+        );
+
+        // The inverse rotation is for the billboard's axes only. Its center
+        // must still receive the normal headset view transform.
+        for (s32 column = 0; column < 4; column++) {
+            adjusted[3][column] = interp->vrBase.m[3][column];
+        }
+        mtxf_copy(interp->interp.m, adjusted);
+    }
 }
 
 struct Object* gCurGraphNodeProcessingObject = NULL;
@@ -485,6 +521,7 @@ static void reset_mtx(void) {
 
 void patch_mtx_before(void) {
     init_mtx();
+    sVrUiMatrixCount = 0;
 
     if (sPerspectiveNode != NULL) {
         sPerspectiveNode->prevFov = sPerspectiveNode->fov;
@@ -504,6 +541,94 @@ void patch_mtx_before(void) {
         sBackgroundNode->prevCameraTimestamp = gGlobalTimer;
         sBackgroundNode = NULL;
         gBackgroundSkyboxGfx = NULL;
+    }
+}
+
+void register_mtx_vr_ui(Mtx *matrix) {
+    if (matrix == NULL ||
+        sVrUiMatrixCount >= VR_UI_MATRIX_COUNT_MAX) {
+        return;
+    }
+
+    sVrUiMatrices[sVrUiMatrixCount++] = matrix;
+}
+
+static void patch_mtx_vr_ui(uint32_t eyeIndex) {
+    float left = 0.0f;
+    float right = SCREEN_WIDTH;
+    float bottom = 0.0f;
+    float top = SCREEN_HEIGHT;
+
+    float eyeFov[4] = { 0 };
+    float eyeOffset[3] = { 0 };
+
+    if (eyeIndex < 2 &&
+        vr_get_eye_fov(eyeIndex, eyeFov) &&
+        vr_get_eye_offset(eyeIndex, eyeOffset)) {
+        const float tanLeft = tanf(eyeFov[0]);
+        const float tanRight = tanf(eyeFov[1]);
+        const float tanDown = tanf(eyeFov[2]);
+        const float tanUp = tanf(eyeFov[3]);
+        const float tanWidth = tanRight - tanLeft;
+        const float tanHeight = tanUp - tanDown;
+
+        if (tanWidth > 0.000001f &&
+            tanHeight > 0.000001f) {
+            // Render DJUI as a head-locked plane about 1.5 meters away.
+            // Its roughly 49-degree vertical size is comfortable while still
+            // leaving enough room for full menu panels.
+            const float uiDistance = 1.5f;
+            const float uiHalfHeight = uiDistance * 0.45f;
+            const float uiHalfWidth = uiHalfHeight *
+                ((float)SCREEN_WIDTH / (float)SCREEN_HEIGHT);
+            const float eyeDepth = uiDistance + eyeOffset[2];
+            const float projectionScaleX = 2.0f / tanWidth;
+            const float projectionScaleY = 2.0f / tanHeight;
+            const float projectionOffsetX =
+                (tanRight + tanLeft) / tanWidth;
+            const float projectionOffsetY =
+                (tanUp + tanDown) / tanHeight;
+            const float centerNdcX = -projectionOffsetX -
+                projectionScaleX * eyeOffset[0] / eyeDepth;
+            const float centerNdcY = -projectionOffsetY -
+                projectionScaleY * eyeOffset[1] / eyeDepth;
+            const float halfNdcX =
+                projectionScaleX * uiHalfWidth / eyeDepth;
+            const float halfNdcY =
+                projectionScaleY * uiHalfHeight / eyeDepth;
+
+            if (halfNdcX > 0.000001f &&
+                halfNdcY > 0.000001f) {
+                const float boundsWidth =
+                    (float)SCREEN_WIDTH / halfNdcX;
+                const float boundsHeight =
+                    (float)SCREEN_HEIGHT / halfNdcY;
+                const float boundsCenterX =
+                    (float)SCREEN_WIDTH * 0.5f -
+                    centerNdcX * boundsWidth * 0.5f;
+                const float boundsCenterY =
+                    (float)SCREEN_HEIGHT * 0.5f -
+                    centerNdcY * boundsHeight * 0.5f;
+
+                left = boundsCenterX - boundsWidth * 0.5f;
+                right = boundsCenterX + boundsWidth * 0.5f;
+                bottom = boundsCenterY - boundsHeight * 0.5f;
+                top = boundsCenterY + boundsHeight * 0.5f;
+            }
+        }
+    }
+
+    for (u32 i = 0; i < sVrUiMatrixCount; i++) {
+        guOrtho(
+            sVrUiMatrices[i],
+            left,
+            right,
+            bottom,
+            top,
+            -10.0f,
+            10.0f,
+            1.0f
+        );
     }
 }
 
@@ -586,32 +711,44 @@ static void patch_mtx_perspective(
         }
     }
 
-    const float worldUnitsPerMeter = 100.0f;
-    float eyeOffset[3] = { 0 };
+    Mat4 baseProjection;
+    mtxf_copy(baseProjection, sPerspectiveMtx->m);
 
-    if (vr_get_eye_offset(eyeIndex, eyeOffset)) {
-        Mat4 centerProjection;
-        mtxf_copy(
-            centerProjection,
-            sPerspectiveMtx->m
-        );
-        const float eyeTranslation[3] = {
-            -eyeOffset[0] * worldUnitsPerMeter,
-            -eyeOffset[1] * worldUnitsPerMeter,
-            -eyeOffset[2] * worldUnitsPerMeter
-        };
+    if (gVrSkyProjectionMtx != NULL) {
+        Mat4 headRotation;
 
-        for (int column = 0; column < 4; column++) {
-            sPerspectiveMtx->m[3][column] =
-                eyeTranslation[0] *
-                    centerProjection[0][column] +
-                eyeTranslation[1] *
-                    centerProjection[1][column] +
-                eyeTranslation[2] *
-                    centerProjection[2][column] +
-                centerProjection[3][column];
+        if (eyeIndex < 2 &&
+            vr_build_head_rotation_matrix(headRotation)) {
+            Mat4 skyViewProjection;
+            mtxf_mul(
+                skyViewProjection,
+                headRotation,
+                baseProjection
+            );
+            mtxf_copy(
+                gVrSkyProjectionMtx->m,
+                skyViewProjection
+            );
+        } else {
+            mtxf_copy(
+                gVrSkyProjectionMtx->m,
+                baseProjection
+            );
         }
     }
+
+    Mat4 headView;
+    if (vr_build_head_view_matrix(eyeIndex, headView)) {
+        Mat4 viewProjection;
+        mtxf_mul(
+            viewProjection,
+            headView,
+            baseProjection
+        );
+        mtxf_copy(sPerspectiveMtx->m, viewProjection);
+    }
+
+    patch_mtx_vr_billboards(eyeIndex);
 }
 
 void patch_mtx_vr_projection(
@@ -619,6 +756,10 @@ void patch_mtx_vr_projection(
     uint32_t eyeIndex
 ) {
     patch_mtx_perspective(delta, eyeIndex);
+}
+
+void patch_mtx_vr_ui_projection(uint32_t eyeIndex) {
+    patch_mtx_vr_ui(eyeIndex);
 }
 
 void patch_mtx_interpolated(f32 delta) {
@@ -648,13 +789,6 @@ void patch_mtx_interpolated(f32 delta) {
         if (gGlobalTimer != gLakituState.skipCameraInterpolationTimestamp) {
             delta_interpolate_vec3f(gLakituState.pos, sBackgroundNode->prevCameraPos, posCopy, delta);
             delta_interpolate_vec3f(gLakituState.focus, sBackgroundNode->prevCameraFocus, focusCopy, delta);
-        }
-        if (sCameraNode != NULL) {
-            vr_rotate_camera_focus(
-                gLakituState.pos,
-                gLakituState.focus,
-                sCameraNode->roll
-            );
         }
         sBackgroundNode->fnNode.func(GEO_CONTEXT_RENDER, &sBackgroundNode->fnNode.node, NULL);
 
@@ -693,19 +827,12 @@ void patch_mtx_interpolated(f32 delta) {
         Vec3f posInterp, focusInterp;
         delta_interpolate_vec3f(posInterp, sCameraNode->prevPos, sCameraNode->pos, delta);
         delta_interpolate_vec3f(focusInterp, sCameraNode->prevFocus, sCameraNode->focus, delta);
-        if (!vr_build_head_tracked_camera_matrix(
-                camInterp.m,
-                posInterp,
-                focusInterp,
-                sCameraNode->roll
-            )) {
-            mtxf_lookat(
-                camInterp.m,
-                posInterp,
-                focusInterp,
-                sCameraNode->roll
-            );
-        }
+        vr_build_game_camera_matrix(
+            camInterp.m,
+            posInterp,
+            focusInterp,
+            sCameraNode->roll
+        );
         mtxf_to_mtx(&camInterp, camInterp.m);
     }
 
@@ -719,9 +846,9 @@ void patch_mtx_interpolated(f32 delta) {
             interp->usingCamSpace &&
             translateCamSpace &&
             vr_is_active()) {
-            // A billboard's orientation is already camera-relative. Preserve
-            // that orientation, but recalculate its camera-space position from
-            // the world so it follows the HMD view instead of the flat camera.
+            // Reconstruct the billboard in world space before applying the
+            // HMD camera. Keeping its old camera-space orientation would make
+            // trees and other sprites bend or roll with the headset.
             Mtx worldMtx;
             Mtx worldMtxPrev;
             Mtx worldInterp;
@@ -747,18 +874,10 @@ void patch_mtx_interpolated(f32 delta) {
                 camInterp.m
             );
 
-            delta_interpolate_mtx(
-                &interp->interp,
-                srcMtxPrev,
-                srcMtx,
-                delta
+            mtxf_copy(
+                interp->interp.m,
+                cameraSpaceInterp.m
             );
-            interp->interp.m[3][0] =
-                cameraSpaceInterp.m[3][0];
-            interp->interp.m[3][1] =
-                cameraSpaceInterp.m[3][1];
-            interp->interp.m[3][2] =
-                cameraSpaceInterp.m[3][2];
         } else {
             if (interp->usingCamSpace && translateCamSpace) {
                 // transform out of camera space so the matrix can interp in world space
@@ -773,9 +892,11 @@ void patch_mtx_interpolated(f32 delta) {
             delta_interpolate_mtx(&interp->interp, srcMtxPrev, srcMtx, delta);
             if (interp->usingCamSpace) {
                 // transform back to camera space, respecting camera interpolation
-                mtxf_mul(interp->interp.m, interp->interp.m, camInterp.m);
+            mtxf_mul(interp->interp.m, interp->interp.m, camInterp.m);
             }
         }
+        mtxf_copy(interp->vrBase.m, interp->interp.m);
+        interp->vrBaseReady = TRUE;
         gSPMatrix(pos++, VIRTUAL_TO_PHYSICAL(&interp->interp),
                   G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_NOPUSH);
     }
@@ -913,6 +1034,7 @@ static void geo_process_master_list_sub(struct GraphNodeMasterList *node) {
                 interp->displayList = currList->displayList;
                 interp->usingCamSpace = currList->usingCamSpace;
                 interp->billboard = currList->billboard;
+                interp->vrBaseReady = FALSE;
 
                 gSPMatrix(gDisplayListHead++, VIRTUAL_TO_PHYSICAL(currList->transformPrev),
                           G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_NOPUSH);
@@ -947,12 +1069,15 @@ static void geo_append_display_list(void *displayList, s16 layer) {
         listNode->displayList = displayList;
         listNode->next = 0;
         listNode->usingCamSpace = sUsingCamSpace;
-        listNode->billboard =
-            sUsingBillboard ||
+        listNode->billboard = VR_BILLBOARD_NONE;
+        if (sUsingBillboard ||
             (gCurGraphNodeObject != NULL &&
-             (gCurGraphNodeObject->node.flags &
-              (GRAPH_RENDER_BILLBOARD |
-               GRAPH_RENDER_CYLBOARD)));
+             (gCurGraphNodeObject->node.flags & GRAPH_RENDER_BILLBOARD))) {
+            listNode->billboard = VR_BILLBOARD_FULL;
+        } else if (gCurGraphNodeObject != NULL &&
+                   (gCurGraphNodeObject->node.flags & GRAPH_RENDER_CYLBOARD)) {
+            listNode->billboard = VR_BILLBOARD_CYLINDRICAL;
+        }
         if (gCurGraphNodeMasterList->listHeads[layer] == 0) {
             gCurGraphNodeMasterList->listHeads[layer] = listNode;
         } else {
@@ -1044,6 +1169,29 @@ static void geo_process_perspective(struct GraphNodePerspective *node) {
 
     gSPPerspNormalize(gDisplayListHead++, perspNorm);
     gSPMatrix(gDisplayListHead++, VIRTUAL_TO_PHYSICAL(mtx), G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
+
+    if (vr_is_active() &&
+        gVrSkyDomeGfx != NULL &&
+        gVrSkyProjectionMtx != NULL &&
+        gVrSkyDomeFrame == gGlobalTimer) {
+        // The original skybox is a flat panorama. Draw the VR replacement as
+        // real spherical geometry under a rotation-only headset projection,
+        // then restore the normal eye projection for the level itself.
+        gSPDisplayList(
+            gDisplayListHead++,
+            VIRTUAL_TO_PHYSICAL(gVrSkyDomeGfx)
+        );
+        gSPMatrix(
+            gDisplayListHead++,
+            VIRTUAL_TO_PHYSICAL(mtx),
+            G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH
+        );
+        gSPMatrix(
+            gDisplayListHead++,
+            VIRTUAL_TO_PHYSICAL(gMatStackFixed[gMatStackIndex]),
+            G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_NOPUSH
+        );
+    }
 
     gCurGraphNodeCamFrustum = node;
     geo_process_node_and_siblings(node->fnNode.node.children);
@@ -1463,7 +1611,16 @@ static void geo_process_background(struct GraphNodeBackground *node) {
         vec3f_copy(gLakituState.focus, focusCopy);
     }
 
-    if (list != NULL) {
+    const bool vrSkyDomeReady =
+        vr_is_active() &&
+        gVrSkyDomeGfx != NULL &&
+        gVrSkyDomeFrame == gGlobalTimer;
+
+    if (vrSkyDomeReady) {
+        // The perspective node draws the world-locked 3D dome. Suppress the
+        // legacy orthographic panorama so it cannot follow the headset or
+        // distort across the wide eye projection.
+    } else if (list != NULL) {
         geo_append_display_list((void *) VIRTUAL_TO_PHYSICAL(list), node->fnNode.node.flags >> 8);
     } else if (gCurGraphNodeMasterList != NULL) {
 #ifndef F3DEX_GBI_2E

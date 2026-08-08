@@ -147,6 +147,7 @@ extern void patch_mtx_vr_projection(
     f32 delta,
     uint32_t eyeIndex
 );
+extern void patch_mtx_vr_ui_projection(uint32_t eyeIndex);
 extern void patch_screen_transition_interpolated(f32 delta);
 extern void patch_title_screen_interpolated(f32 delta);
 extern void patch_dialog_interpolated(f32 delta);
@@ -321,14 +322,17 @@ void produce_interpolation_frames_and_delay(void) {
             gfx_current_dimensions.height = eyeHeight;
             gfx_current_dimensions.aspect_ratio =
                 (float)eyeWidth / (float)eyeHeight;
-            gfx_current_dimensions.x_adjust_ratio =
-                (4.0f / 3.0f) /
-                gfx_current_dimensions.aspect_ratio;
+            // The OpenXR eye projection already contains the runtime's exact
+            // horizontal and vertical field of view. Applying the engine's
+            // normal widescreen correction on top of it squeezes clip-space
+            // X and makes the world appear to warp while the headset moves.
+            gfx_current_dimensions.x_adjust_ratio = 1.0f;
             gfx_current_dimensions.x_adjust_4by3 = 0;
 
             if (!gSkipInterpolationTitleScreen) {
                 patch_mtx_vr_projection(delta, eye);
             }
+            patch_mtx_vr_ui_projection(eye);
 
             send_display_list(gGfxSPTask);
             gfx_end_frame_render();
@@ -340,6 +344,9 @@ void produce_interpolation_frames_and_delay(void) {
         if (renderedVrEye &&
             !gSkipInterpolationTitleScreen) {
             patch_mtx_vr_projection(delta, 2);
+        }
+        if (renderedVrEye) {
+            patch_mtx_vr_ui_projection(2);
         }
 
         send_display_list(gGfxSPTask);

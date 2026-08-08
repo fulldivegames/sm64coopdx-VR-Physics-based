@@ -8,6 +8,7 @@
 #include "level_update.h"
 #include "camera.h"
 #include "print.h"
+#include "rendering_graph_node.h"
 #include "engine/math_util.h"
 #include "engine/surface_load.h"
 #include "ingame_menu.h"
@@ -102,8 +103,7 @@ void render_hud_tex_lut(s32 x, s32 y, u8 *texture) {
     gDPPipeSync(gDisplayListHead++);
     gDPSetTextureImage(gDisplayListHead++, G_IM_FMT_RGBA, G_IM_SIZ_16b, 1, texture);
     gSPDisplayList(gDisplayListHead++, &dl_hud_img_load_tex_block);
-    gSPTextureRectangle(gDisplayListHead++, x << 2, y << 2, (x + 15) << 2, (y + 15) << 2,
-                        G_TX_RENDERTILE, 0, 0, 4 << 10, 1 << 10);
+    render_screen_texture_rectangle(x, y, 16, 16, 16, 16);
 }
 
 /**
@@ -120,8 +120,7 @@ void render_hud_small_tex_lut(s32 x, s32 y, u8 *texture) {
     gDPSetTextureImage(gDisplayListHead++, G_IM_FMT_RGBA, G_IM_SIZ_16b, 1, texture);
     gDPLoadSync(gDisplayListHead++);
     gDPLoadBlock(gDisplayListHead++, G_TX_LOADTILE, 0, 0, 8 * 8 - 1, CALC_DXT(8, G_IM_SIZ_16b_BYTES));
-    gSPTextureRectangle(gDisplayListHead++, x << 2, y << 2, (x + 7) << 2, (y + 7) << 2, G_TX_RENDERTILE,
-                        0, 0, 4 << 10, 1 << 10);
+    render_screen_texture_rectangle(x, y, 8, 8, 8, 8);
 }
 
 /**
@@ -616,6 +615,7 @@ void render_hud(void) {
         }
         create_dl_identity_matrix();
         guOrtho(mtx, -16.0f, SCREEN_WIDTH + 16, 0, SCREEN_HEIGHT, -10.0f, 10.0f, 1.0f);
+        register_mtx_vr_ui(mtx);
         gSPPerspNormalize(gDisplayListHead++, 0xFFFF);
         gSPMatrix(gDisplayListHead++, VIRTUAL_TO_PHYSICAL(mtx),
                 G_MTX_PROJECTION | G_MTX_MUL | G_MTX_NOPUSH);

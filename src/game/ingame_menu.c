@@ -18,6 +18,7 @@
 #include "memory.h"
 #include "object_helpers.h"
 #include "print.h"
+#include "rendering_graph_node.h"
 #include "save_file.h"
 #include "segment2.h"
 #include "segment7.h"
@@ -39,6 +40,7 @@
 #include "pc/lua/utils/smlua_text_utils.h"
 #include "menu/ingame_text.h"
 #include "pc/dialog_table.h"
+#include "pc/vr/vr.h"
 
 u16 gDialogColorFadeTimer;
 s8 gLastDialogLineNum;
@@ -275,7 +277,7 @@ void create_dl_scale_matrix(s8 pushOp, f32 x, f32 y, f32 z) {
         gSPMatrix(gDisplayListHead++, VIRTUAL_TO_PHYSICAL(matrix), G_MTX_MODELVIEW | G_MTX_MUL | G_MTX_NOPUSH);
 }
 
-void create_dl_ortho_matrix(void) {
+static void create_dl_ortho_matrix_internal(bool vrUi) {
     Mtx *matrix = (Mtx *) alloc_display_list(sizeof(Mtx));
 
     if (matrix == NULL) {
@@ -286,10 +288,54 @@ void create_dl_ortho_matrix(void) {
 
     guOrtho(matrix, 0.0f, SCREEN_WIDTH, 0.0f, SCREEN_HEIGHT, -10.0f, 10.0f, 1.0f);
 
+    if (vrUi) {
+        register_mtx_vr_ui(matrix);
+    }
+
     // Should produce G_RDPHALF_1 in Fast3D
     gSPPerspNormalize(gDisplayListHead++, 0xFFFF);
 
     gSPMatrix(gDisplayListHead++, VIRTUAL_TO_PHYSICAL(matrix), G_MTX_PROJECTION | G_MTX_MUL | G_MTX_NOPUSH)
+}
+
+void create_dl_ortho_matrix(void) {
+    create_dl_ortho_matrix_internal(vr_is_active());
+}
+
+void create_dl_vr_ui_matrix(void) {
+    create_dl_ortho_matrix_internal(true);
+}
+
+void render_screen_texture_rectangle(s16 x, s16 y, s16 width, s16 height,
+                                     s16 textureWidth, s16 textureHeight) {
+    Vtx *vertices = alloc_display_list(4 * sizeof(Vtx));
+    if (vertices == NULL) {
+        return;
+    }
+
+    const s16 left = x;
+    const s16 right = x + width;
+    const s16 top = SCREEN_HEIGHT - y;
+    const s16 bottom = top - height;
+
+    vertices[0] = (Vtx) {{{ left,  bottom, 0 }, 0, { 0,                 textureHeight << 5 }, { 255, 255, 255, 255 }}};
+    vertices[1] = (Vtx) {{{ right, bottom, 0 }, 0, { textureWidth << 5, textureHeight << 5 }, { 255, 255, 255, 255 }}};
+    vertices[2] = (Vtx) {{{ right, top,    0 }, 0, { textureWidth << 5, 0                  }, { 255, 255, 255, 255 }}};
+    vertices[3] = (Vtx) {{{ left,  top,    0 }, 0, { 0,                 0                  }, { 255, 255, 255, 255 }}};
+
+    // The original HUD paths use RDP texture rectangles in copy-cycle mode.
+    // These vertices need the regular textured-triangle pipeline instead.
+    gDPPipeSync(gDisplayListHead++);
+    gDPSetCycleType(gDisplayListHead++, G_CYC_1CYCLE);
+    gDPSetTexturePersp(gDisplayListHead++, G_TP_NONE);
+    gDPSetCombineMode(gDisplayListHead++, G_CC_FADEA, G_CC_FADEA);
+    gDPSetRenderMode(gDisplayListHead++, G_RM_XLU_SURF, G_RM_XLU_SURF2);
+    gDPSetTextureFilter(gDisplayListHead++, G_TF_POINT);
+    gSPClearGeometryMode(gDisplayListHead++, G_LIGHTING);
+    gSPTexture(gDisplayListHead++, 0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, G_ON);
+    gSPVertex(gDisplayListHead++, VIRTUAL_TO_PHYSICAL(vertices), 4, 0);
+    gSP2Triangles(gDisplayListHead++, 0, 1, 2, 0, 0, 2, 3, 0);
+    gSPTexture(gDisplayListHead++, 0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, G_OFF);
 }
 
 #if defined(VERSION_JP) || defined(VERSION_SH)
@@ -731,8 +777,7 @@ void print_hud_lut_string(s8 hudLUT, s16 x, s16 y, const u8 *str) {
                 }
 
                 gSPDisplayList(gDisplayListHead++, dl_rgba16_load_tex_block);
-                gSPTextureRectangle(gDisplayListHead++, curX << 2, curY << 2, (curX + 16) << 2,
-                                    (curY + 16) << 2, G_TX_RENDERTILE, 0, 0, 1 << 10, 1 << 10);
+                render_screen_texture_rectangle(curX, curY, 16, 16, 16, 16);
 
                 curX += xStride;
 #ifndef VERSION_JP
@@ -795,16 +840,14 @@ void print_menu_generic_string(s16 x, s16 y, const u8 *str) {
                 gDPSetTextureImage(gDisplayListHead++, G_IM_FMT_IA, G_IM_SIZ_8b, 1, fontLUT[str[strPos]]);
                 gDPLoadSync(gDisplayListHead++);
                 gDPLoadBlock(gDisplayListHead++, G_TX_LOADTILE, 0, 0, 8 * 8 - 1, CALC_DXT(8, G_IM_SIZ_8b_BYTES));
-                gSPTextureRectangle(gDisplayListHead++, curX << 2, curY << 2, (curX + 8) << 2,
-                                    (curY + 8) << 2, G_TX_RENDERTILE, 0, 0, 1 << 10, 1 << 10);
+                render_screen_texture_rectangle(curX, curY, 8, 8, 8, 8);
 
 #ifndef VERSION_EU
                 if (mark != DIALOG_MARK_NONE) {
                     gDPSetTextureImage(gDisplayListHead++, G_IM_FMT_IA, G_IM_SIZ_8b, 1, fontLUT[mark + 0xEF]);
                     gDPLoadSync(gDisplayListHead++);
                     gDPLoadBlock(gDisplayListHead++, G_TX_LOADTILE, 0, 0, 8 * 8 - 1, CALC_DXT(8, G_IM_SIZ_8b_BYTES));
-                    gSPTextureRectangle(gDisplayListHead++, (curX + 6) << 2, (curY - 7) << 2,
-                                        (curX + 6 + 8) << 2, (curY - 7 + 8) << 2, G_TX_RENDERTILE, 0, 0, 1 << 10, 1 << 10);
+                    render_screen_texture_rectangle(curX + 6, curY - 7, 8, 8, 8, 8);
 
                     mark = DIALOG_MARK_NONE;
                 }
@@ -842,8 +885,7 @@ void print_credits_string(s16 x, s16 y, const u8 *str) {
                 gDPSetTextureImage(gDisplayListHead++, G_IM_FMT_RGBA, G_IM_SIZ_16b, 1, fontLUT[str[strPos]]);
                 gDPLoadSync(gDisplayListHead++);
                 gDPLoadBlock(gDisplayListHead++, G_TX_LOADTILE, 0, 0, 8 * 8 - 1, CALC_DXT(8, G_IM_SIZ_16b_BYTES));
-                gSPTextureRectangle(gDisplayListHead++, curX << 2, curY << 2, (curX + 8) << 2,
-                                    (curY + 8) << 2, G_TX_RENDERTILE, 0, 0, 1 << 10, 1 << 10);
+                render_screen_texture_rectangle(curX, curY, 8, 8, 8, 8);
                 curX += 7;
                 break;
         }
@@ -2797,7 +2839,7 @@ static void render_pause_castle_course_name(const u8 *courseName, s16 x, s16 y) 
 
 static void render_pause_castle_flag_icon(const u8 *texture, s16 texW, s16 texH, s16 x, s16 y, s16 w, s16 h) {
     gDPLoadTextureBlock(gDisplayListHead++, texture, G_IM_FMT_RGBA, G_IM_SIZ_16b, texW, texH, 0, G_TX_CLAMP, G_TX_CLAMP, 0, 0, 0, 0);
-    gSPTextureRectangle(gDisplayListHead++, (x) << 2, (SCREEN_HEIGHT - h - y) << 2, (x + w) << 2, (SCREEN_HEIGHT - y) << 2, G_TX_RENDERTILE, 0, 0, ((0x400 * texW) / w), ((0x400 * texH) / h));
+    render_screen_texture_rectangle(x, SCREEN_HEIGHT - h - y, w, h, texW, texH);
 }
 
 static void render_pause_castle_flag(s16 x, s16 y, u32 flag) {
@@ -3420,7 +3462,12 @@ s16 render_course_complete_screen(void) {
 s16 render_menus_and_dialogs(void) {
     s16 mode = 0;
 
-    create_dl_ortho_matrix();
+    if (vr_is_active() &&
+        (gMenuMode == 0 || gMenuMode == RENDER_PAUSE_SCREEN)) {
+        create_dl_vr_ui_matrix();
+    } else {
+        create_dl_ortho_matrix();
+    }
 
     if (gMenuMode != -1) {
         gPrevMenuMode = gMenuMode;

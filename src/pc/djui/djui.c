@@ -196,7 +196,7 @@ void djui_render(void) {
     gDjuiHudUtilsZ = 0;
     djui_reset_hud_params();
 
-    create_dl_ortho_matrix();
+    create_dl_vr_ui_matrix();
     djui_gfx_displaylist_begin();
 
     if (sDjuiRootBehind != NULL && (sCurrPlayMode == PLAY_MODE_PAUSED) && !gDjuiPanelPauseCreated) {

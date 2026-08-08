@@ -31,6 +31,7 @@
 #include "pc/lua/smlua_hooks.h"
 #include "pc/lua/utils/smlua_camera_utils.h"
 #include "pc/lua/utils/smlua_model_utils.h"
+#include "pc/vr/vr.h"
 #include "first_person_cam.h"
 
 u8 (*gContinueDialogFunction)(void) = NULL;
@@ -2064,7 +2065,7 @@ void obj_set_cylboard(struct Object *obj) {
 /* |description|Chooses the appropriate billboard type for the current object based on camera mode|descriptionEnd| */
 void cur_obj_set_billboard_if_vanilla_cam(void) {
     if (!o) { return; }
-    if (camera_config_is_free_cam_enabled() || get_first_person_enabled()) {
+    if (vr_is_active() || camera_config_is_free_cam_enabled() || get_first_person_enabled()) {
         o->header.gfx.node.flags &= ~GRAPH_RENDER_BILLBOARD;
         o->header.gfx.node.flags |= GRAPH_RENDER_CYLBOARD;
     } else {

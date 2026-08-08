@@ -13,6 +13,7 @@
 #include "geo_commands.h"
 #include "hardcoded.h"
 #include "skybox.h"
+#include "pc/vr/vr.h"
 
 /**
  * @file skybox.c
@@ -135,6 +136,234 @@ static u16 sSkyboxTileNumX = 5;
 static const u16 sSkyboxTileNumY = 3; // Shouldn't need to change this
 
 struct GrowingArray *gBackgroundSkyboxVerts = NULL;
+
+Gfx *gVrSkyDomeGfx = NULL;
+Mtx *gVrSkyProjectionMtx = NULL;
+Mtx *gVrSkyCameraMtx = NULL;
+u32 gVrSkyDomeFrame = 0;
+
+static Gfx *build_vr_sky_dome(
+    s8 background,
+    s8 colorIndex
+) {
+    enum {
+        VR_SKY_LONGITUDE_SEGMENTS = 24,
+        VR_SKY_SLICES_PER_TEXTURE_ROW = 2,
+        VR_SKY_TEXTURE_COLUMNS = 8,
+        VR_SKY_TEXTURE_ROWS = 8
+    };
+
+    const s32 slices =
+        VR_SKY_TEXTURE_ROWS * VR_SKY_SLICES_PER_TEXTURE_ROW;
+    const s32 quadCount =
+        slices * VR_SKY_LONGITUDE_SEGMENTS;
+    const f32 radius = 1000.0f;
+
+    // Leave generous room for the texture-loading macro expansion associated
+    // with every independently textured quad.
+    Gfx *displayList = alloc_display_list(
+        (32 + quadCount * 12) * sizeof(Gfx)
+    );
+    Mtx *projection = alloc_display_list(sizeof(Mtx));
+    Mtx *camera = alloc_display_list(sizeof(Mtx));
+
+    if (displayList == NULL || projection == NULL || camera == NULL) {
+        return NULL;
+    }
+
+    guMtxIdent(projection);
+    guMtxIdent(camera);
+    gVrSkyProjectionMtx = projection;
+    gVrSkyCameraMtx = camera;
+
+    Gfx *gfx = displayList;
+    gDPPipeSync(gfx++);
+    gSPClearGeometryMode(
+        gfx++,
+        G_ZBUFFER | G_LIGHTING | G_CULL_FRONT | G_CULL_BACK
+    );
+    gDPSetCycleType(gfx++, G_CYC_1CYCLE);
+    gDPSetRenderMode(gfx++, G_RM_OPA_SURF, G_RM_OPA_SURF2);
+    gDPSetCombineMode(gfx++, G_CC_FADEA, G_CC_FADEA);
+    gSPPerspNormalize(gfx++, 0xFFFF);
+    gSPMatrix(
+        gfx++,
+        VIRTUAL_TO_PHYSICAL(projection),
+        G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH
+    );
+    gSPDisplayList(gfx++, dl_skybox_tile_tex_settings);
+    gSPMatrix(
+        gfx++,
+        VIRTUAL_TO_PHYSICAL(camera),
+        G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_NOPUSH
+    );
+
+    const s32 longitudeSlicesPerTexture =
+        VR_SKY_LONGITUDE_SEGMENTS / VR_SKY_TEXTURE_COLUMNS;
+
+    for (s32 slice = 0; slice < slices; slice++) {
+        const s32 textureRow =
+            slice / VR_SKY_SLICES_PER_TEXTURE_ROW;
+        const s32 textureSubSlice =
+            slice % VR_SKY_SLICES_PER_TEXTURE_ROW;
+        const f32 latitudeTop =
+            M_PI * 0.5f - M_PI * (f32)slice / (f32)slices;
+        const f32 latitudeBottom =
+            M_PI * 0.5f - M_PI * (f32)(slice + 1) / (f32)slices;
+        const s32 textureTop =
+            textureSubSlice * (31 << 5) /
+            VR_SKY_SLICES_PER_TEXTURE_ROW;
+        const s32 textureBottom =
+            (textureSubSlice + 1) * (31 << 5) /
+            VR_SKY_SLICES_PER_TEXTURE_ROW;
+
+        for (s32 segment = 0;
+             segment < VR_SKY_LONGITUDE_SEGMENTS;
+             segment++) {
+            const s32 textureColumn =
+                segment / longitudeSlicesPerTexture;
+            const s32 textureSubSlice =
+                segment % longitudeSlicesPerTexture;
+            const s32 textureLeft =
+                textureSubSlice * (31 << 5) /
+                longitudeSlicesPerTexture;
+            const s32 textureRight =
+                (textureSubSlice + 1) * (31 << 5) /
+                longitudeSlicesPerTexture;
+            const s32 textureIndex =
+                textureRow * SKYBOX_COLS + textureColumn;
+            const Texture *texture =
+                (background < 0 || background >= 10)
+                    ? gCustomSkyboxPtrList[textureIndex]
+                    : (*(SkyboxTexture *)segmented_to_virtual(
+                        sSkyboxTextures[background]
+                    ))[textureIndex];
+            const f32 longitudeLeft =
+                2.0f * M_PI * (f32)segment /
+                    (f32)VR_SKY_LONGITUDE_SEGMENTS;
+            const f32 longitudeRight =
+                2.0f * M_PI * (f32)(segment + 1) /
+                    (f32)VR_SKY_LONGITUDE_SEGMENTS;
+            const f32 longitudes[2] = {
+                longitudeLeft,
+                longitudeRight
+            };
+            const f32 latitudes[2] = {
+                latitudeTop,
+                latitudeBottom
+            };
+            Vtx *vertices = alloc_display_list(4 * sizeof(Vtx));
+
+            if (vertices == NULL || texture == NULL) {
+                continue;
+            }
+
+            const s32 longitudeIndices[4] = { 0, 0, 1, 1 };
+            const s32 latitudeIndices[4] = { 0, 1, 1, 0 };
+            const s32 textureU[4] = {
+                textureLeft,
+                textureLeft,
+                textureRight,
+                textureRight
+            };
+            const s32 textureV[4] = {
+                textureTop,
+                textureBottom,
+                textureBottom,
+                textureTop
+            };
+
+            for (s32 vertex = 0; vertex < 4; vertex++) {
+                const f32 longitude =
+                    longitudes[longitudeIndices[vertex]];
+                const f32 latitude =
+                    latitudes[latitudeIndices[vertex]];
+                const f32 horizontalRadius =
+                    radius * cosf(latitude);
+                const f32 x =
+                    horizontalRadius * sinf(longitude);
+                const f32 y = radius * sinf(latitude);
+                const f32 z =
+                    -horizontalRadius * cosf(longitude);
+
+                make_vertex(
+                    vertices,
+                    vertex,
+                    (s16)x,
+                    (s16)y,
+                    (s16)z,
+                    textureU[vertex],
+                    textureV[vertex],
+                    255,
+                    255,
+                    255,
+                    255
+                );
+            }
+
+            const f32 red = gSkyboxColor[0] / 255.0f;
+            const f32 green = gSkyboxColor[1] / 255.0f;
+            const f32 blue = gSkyboxColor[2] / 255.0f;
+            u8 *color = sSkyboxColors[colorIndex];
+
+            gDPSetEnvColor(
+                gfx++,
+                color[0] * red,
+                color[1] * green,
+                color[2] * blue,
+                255
+            );
+            gLoadBlockTexture(
+                gfx++,
+                32,
+                32,
+                G_IM_FMT_RGBA,
+                texture
+            );
+            gSPVertex(
+                gfx++,
+                VIRTUAL_TO_PHYSICAL(vertices),
+                4,
+                0
+            );
+            gSPDisplayList(gfx++, dl_draw_quad_verts_0123);
+        }
+    }
+
+    gSPDisplayList(gfx++, dl_skybox_end);
+    gSPSetGeometryMode(gfx++, G_CULL_BACK | G_LIGHTING);
+    gSPEndDisplayList(gfx++);
+    return displayList;
+}
+
+static void update_vr_sky_camera_matrix(f32 cameraYaw, f32 cameraPitch) {
+    if (gVrSkyCameraMtx == NULL) {
+        return;
+    }
+
+    const f32 yawSin = sinf(cameraYaw);
+    const f32 yawCos = cosf(cameraYaw);
+    const f32 pitchSin = sinf(cameraPitch);
+    const f32 pitchCos = cosf(cameraPitch);
+    Mat4 yawRotation;
+    Mat4 pitchRotation;
+    Mat4 cameraRotation;
+
+    guMtxIdentF(yawRotation);
+    yawRotation[0][0] = yawCos;
+    yawRotation[0][2] = yawSin;
+    yawRotation[2][0] = -yawSin;
+    yawRotation[2][2] = yawCos;
+
+    guMtxIdentF(pitchRotation);
+    pitchRotation[1][1] = pitchCos;
+    pitchRotation[1][2] = -pitchSin;
+    pitchRotation[2][1] = pitchSin;
+    pitchRotation[2][2] = pitchCos;
+
+    mtxf_mul(cameraRotation, yawRotation, pitchRotation);
+    guMtxF2L(cameraRotation, gVrSkyCameraMtx);
+}
 
 /**
  * Convert the camera's yaw into an x position into the scaled skybox image.
@@ -372,6 +601,24 @@ Gfx *create_skybox_facing_camera(s8 player, s8 background, f32 fov,
 
     sSkyBoxInfo[player].scaledX = calculate_skybox_scaled_x(player, fov);
     sSkyBoxInfo[player].scaledY = calculate_skybox_scaled_y(player, fov);
+
+    if (vr_is_active() && !gRenderingInterpolated) {
+        extern u32 gGlobalTimer;
+        gVrSkyProjectionMtx = NULL;
+        gVrSkyCameraMtx = NULL;
+        gVrSkyDomeGfx = build_vr_sky_dome(
+            background,
+            colorIndex
+        );
+        gVrSkyDomeFrame = gGlobalTimer;
+    }
+
+    if (vr_is_active()) {
+        update_vr_sky_camera_matrix(
+            sSkyBoxInfo[player].yaw,
+            sSkyBoxInfo[player].pitch
+        );
+    }
 
     return init_skybox_display_list(player, background, colorIndex);
 }
