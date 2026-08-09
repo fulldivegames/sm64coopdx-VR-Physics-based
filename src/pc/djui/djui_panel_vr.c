@@ -44,7 +44,7 @@ static void djui_panel_vr_camera_defaults(struct DjuiBase* caller) {
          character < CT_MAX;
          character++) {
         *config_vr_camera_height_for_character(character) =
-            VR_CAMERA_HEIGHT_CENTER;
+            config_vr_camera_default_height_for_character(character);
     }
 }
 
@@ -171,7 +171,7 @@ static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
 
         djui_slider_create(
             body,
-            "First Person Height (500 = Center)",
+            "First Person Height",
             cameraHeight,
             0,
             VR_CAMERA_HEIGHT_MAX,

@@ -2907,44 +2907,184 @@ static bool vr_get_stabilized_arm_target(
         sVrArmTargetSampleValid[handIndex] = true;
     }
 
-    vec3f_copy(
-        targetPosition,
-        previousFrame
-            ? sVrArmTargetSamplePrev[handIndex]
-            : sVrArmTargetSample[handIndex]
-    );
+    // Both interpolation endpoints use the latest controller sample. The
+    // floating glove is patched from that same pose immediately before each
+    // eye draw; interpolating the arm toward last frame's controller pose made
+    // the cuff visibly detach during fast hand motion and vertical actions.
+    (void)previousFrame;
+    vec3f_copy(targetPosition, sVrArmTargetSample[handIndex]);
     return true;
 }
 
-static void vr_lock_local_mario_arm_to_controller(
-    Mat4 matrix,
-    Mat4 cameraMatrix,
-    bool previousFrame
+static void vr_get_arm_model_lengths(
+    f32* upperArmLength,
+    f32* forearmLength
 ) {
-    if (!configVrExperimentalArmsMode ||
-        gCurMarioBodyState == NULL) {
-        return;
+    u8 characterIndex = gNetworkPlayers[0].overrideModelIndex;
+    if (characterIndex >= CT_MAX) {
+        characterIndex = CT_MARIO;
     }
 
-    const u32 animPart = gCurMarioBodyState->currAnimPart;
-    const bool leftArm = vr_is_left_arm_part(animPart);
-    const bool rightArm = vr_is_right_arm_part(animPart);
-    if (!leftArm && !rightArm) {
-        return;
+    switch (characterIndex) {
+        case CT_LUIGI:
+            *upperArmLength = 70.0f;
+            *forearmLength = 65.0f;
+            break;
+        case CT_TOAD:
+            *upperArmLength = 20.0f;
+            *forearmLength = 26.0f;
+            break;
+        case CT_WALUIGI:
+            *upperArmLength = 140.0f;
+            *forearmLength = 114.0f;
+            break;
+        case CT_WARIO:
+            *upperArmLength = 101.0f;
+            *forearmLength = 82.0f;
+            break;
+        default:
+            *upperArmLength = 65.0f;
+            *forearmLength = 60.0f;
+            break;
     }
+}
 
-    const u32 handIndex = leftArm
-        ? VR_CONTROLLER_LEFT
-        : VR_CONTROLLER_RIGHT;
-    Vec3f targetPosition;
-    if (!vr_get_stabilized_arm_target(
-            handIndex,
-            targetPosition,
+static f32 vr_get_matrix_transverse_scale(Mat4 matrix) {
+    const f32 yScale = sqrtf(
+        matrix[1][0] * matrix[1][0] +
+        matrix[1][1] * matrix[1][1] +
+        matrix[1][2] * matrix[1][2]
+    );
+    const f32 zScale = sqrtf(
+        matrix[2][0] * matrix[2][0] +
+        matrix[2][1] * matrix[2][1] +
+        matrix[2][2] * matrix[2][2]
+    );
+    return MAX((yScale + zScale) * 0.5f, 0.001f);
+}
+
+static bool vr_calculate_basic_arm_ik_elbow(
+    u32 handIndex,
+    Vec3f shoulderPosition,
+    Vec3f handPosition,
+    f32 upperArmLength,
+    f32 forearmLength,
+    f32 modelScale,
+    bool previousFrame,
+    Vec3f elbowPosition
+) {
+    Vec3f shoulderToHand = {
+        handPosition[0] - shoulderPosition[0],
+        handPosition[1] - shoulderPosition[1],
+        handPosition[2] - shoulderPosition[2]
+    };
+    const f32 handDistance = sqrtf(
+        shoulderToHand[0] * shoulderToHand[0] +
+        shoulderToHand[1] * shoulderToHand[1] +
+        shoulderToHand[2] * shoulderToHand[2]
+    );
+    if (handDistance <= 0.001f || !isfinite(handDistance)) {
+        return false;
+    }
+    vec3f_mul(shoulderToHand, 1.0f / handDistance);
+
+    f32 upperLength = upperArmLength * modelScale;
+    f32 lowerLength = forearmLength * modelScale;
+    const f32 naturalReach = upperLength + lowerLength;
+    // Preserve the character's normal proportions inside their natural reach.
+    // Beyond it, extend both segments uniformly while retaining a small elbow
+    // bend. This keeps the cuff attached without producing one infinitely long
+    // forearm.
+    const f32 reachScale = clamp(
+        handDistance / MAX(naturalReach * 0.98f, 0.001f),
+        1.0f,
+        3.0f
+    );
+    upperLength *= reachScale;
+    lowerLength *= reachScale;
+
+    const f32 solveDistance = clamp(
+        handDistance,
+        fabsf(upperLength - lowerLength) + 0.001f,
+        upperLength + lowerLength - 0.001f
+    );
+    const f32 alongDistance =
+        (upperLength * upperLength - lowerLength * lowerLength +
+         solveDistance * solveDistance) /
+        (2.0f * solveDistance);
+    const f32 bendDistance = sqrtf(MAX(
+        upperLength * upperLength - alongDistance * alongDistance,
+        0.0f
+    ));
+
+    // Use a downward/outward pole vector. It gives both elbows a stable,
+    // natural bend while still allowing the hands to cross or rise overhead.
+    Vec3f headsetPosition;
+    Vec3f outward = {
+        handIndex == VR_CONTROLLER_LEFT ? -1.0f : 1.0f,
+        0.0f,
+        0.0f
+    };
+    if (vr_get_stabilized_headset_world_position(
+            headsetPosition,
             previousFrame
         )) {
-        return;
+        outward[0] = shoulderPosition[0] - headsetPosition[0];
+        outward[1] = 0.0f;
+        outward[2] = shoulderPosition[2] - headsetPosition[2];
+        const f32 outwardLength = sqrtf(
+            outward[0] * outward[0] +
+            outward[2] * outward[2]
+        );
+        if (outwardLength > 0.001f) {
+            vec3f_mul(outward, 1.0f / outwardLength);
+        }
     }
 
+    Vec3f bendDirection = {
+        outward[0] * 0.35f,
+        -1.0f,
+        outward[2] * 0.35f
+    };
+    const f32 bendAlong =
+        bendDirection[0] * shoulderToHand[0] +
+        bendDirection[1] * shoulderToHand[1] +
+        bendDirection[2] * shoulderToHand[2];
+    bendDirection[0] -= shoulderToHand[0] * bendAlong;
+    bendDirection[1] -= shoulderToHand[1] * bendAlong;
+    bendDirection[2] -= shoulderToHand[2] * bendAlong;
+    f32 bendLength = sqrtf(
+        bendDirection[0] * bendDirection[0] +
+        bendDirection[1] * bendDirection[1] +
+        bendDirection[2] * bendDirection[2]
+    );
+    if (bendLength <= 0.001f) {
+        vec3f_cross(bendDirection, shoulderToHand, outward);
+        bendLength = sqrtf(
+            bendDirection[0] * bendDirection[0] +
+            bendDirection[1] * bendDirection[1] +
+            bendDirection[2] * bendDirection[2]
+        );
+    }
+    if (bendLength <= 0.001f) {
+        return false;
+    }
+    vec3f_mul(bendDirection, 1.0f / bendLength);
+
+    for (u32 axis = 0; axis < 3; axis++) {
+        elbowPosition[axis] = shoulderPosition[axis] +
+            shoulderToHand[axis] * alongDistance +
+            bendDirection[axis] * bendDistance;
+    }
+    return true;
+}
+
+static bool vr_point_arm_segment_at_target(
+    Mat4 matrix,
+    Mat4 cameraMatrix,
+    Vec3f targetPosition,
+    f32 modelLength
+) {
     Vec3f partPosition;
     get_pos_from_transform_mtx(
         partPosition,
@@ -2962,8 +3102,9 @@ static void vr_lock_local_mario_arm_to_controller(
         directionWorld[2] * directionWorld[2]
     );
     if (targetDistance <= 0.001f ||
-        !isfinite(targetDistance)) {
-        return;
+        !isfinite(targetDistance) ||
+        modelLength <= 0.001f) {
+        return false;
     }
 
     Vec3f armAxis = {
@@ -3013,22 +3154,83 @@ static void vr_lock_local_mario_arm_to_controller(
         matrix[2][1] * matrix[2][1] +
         matrix[2][2] * matrix[2][2]
     );
-    const f32 bodyScale = MAX((yScale + zScale) * 0.5f, 0.001f);
-    const f32 remainingModelLength =
-        (animPart == MARIO_ANIM_PART_LEFT_FOREARM ||
-         animPart == MARIO_ANIM_PART_RIGHT_FOREARM)
-            ? 60.0f
-            : 125.0f;
-    const f32 armScale = clamp(
-        targetDistance / remainingModelLength,
-        bodyScale * 0.35f,
-        bodyScale * 3.0f
-    );
+    const f32 armScale = targetDistance / modelLength;
 
     for (u32 axis = 0; axis < 3; axis++) {
         matrix[0][axis] = armAxis[axis] * armScale;
         matrix[1][axis] = upAxis[axis] * yScale;
         matrix[2][axis] = sideAxis[axis] * zScale;
+    }
+    return true;
+}
+
+static void vr_lock_local_mario_arm_to_controller(
+    Mat4 matrix,
+    Mat4 cameraMatrix,
+    bool previousFrame
+) {
+    if (!configVrExperimentalArmsMode ||
+        gCurMarioBodyState == NULL) {
+        return;
+    }
+
+    const u32 animPart = gCurMarioBodyState->currAnimPart;
+    const bool leftArm = vr_is_left_arm_part(animPart);
+    const bool rightArm = vr_is_right_arm_part(animPart);
+    if (!leftArm && !rightArm) {
+        return;
+    }
+
+    const u32 handIndex = leftArm
+        ? VR_CONTROLLER_LEFT
+        : VR_CONTROLLER_RIGHT;
+    Vec3f targetPosition;
+    if (!vr_get_stabilized_arm_target(
+            handIndex,
+            targetPosition,
+            previousFrame
+        )) {
+        return;
+    }
+
+    f32 upperArmLength;
+    f32 forearmLength;
+    vr_get_arm_model_lengths(&upperArmLength, &forearmLength);
+
+    if (animPart == MARIO_ANIM_PART_LEFT_ARM ||
+        animPart == MARIO_ANIM_PART_RIGHT_ARM) {
+        Vec3f shoulderPosition;
+        Vec3f elbowPosition;
+        get_pos_from_transform_mtx(
+            shoulderPosition,
+            matrix,
+            cameraMatrix
+        );
+        if (!vr_calculate_basic_arm_ik_elbow(
+                handIndex,
+                shoulderPosition,
+                targetPosition,
+                upperArmLength,
+                forearmLength,
+                vr_get_matrix_transverse_scale(matrix),
+                previousFrame,
+                elbowPosition
+            )) {
+            return;
+        }
+        vr_point_arm_segment_at_target(
+            matrix,
+            cameraMatrix,
+            elbowPosition,
+            upperArmLength
+        );
+    } else {
+        vr_point_arm_segment_at_target(
+            matrix,
+            cameraMatrix,
+            targetPosition,
+            forearmLength
+        );
     }
 }
 

@@ -21,6 +21,11 @@
 // system. The center represents zero world-space offset.
 #define VR_CAMERA_HEIGHT_CENTER 500U
 #define VR_CAMERA_HEIGHT_MAX   1000U
+#define VR_CAMERA_HEIGHT_DEFAULT_MARIO   665U
+#define VR_CAMERA_HEIGHT_DEFAULT_LUIGI   681U
+#define VR_CAMERA_HEIGHT_DEFAULT_TOAD    593U
+#define VR_CAMERA_HEIGHT_DEFAULT_WALUIGI 718U
+#define VR_CAMERA_HEIGHT_DEFAULT_WARIO   699U
 #define VR_CAMERA_DEPTH_CENTER  200U
 #define VR_CAMERA_DEPTH_MAX     400U
 
@@ -78,6 +83,9 @@ extern unsigned int configVrCameraDistance;
 extern unsigned int configVrCameraHeight;
 extern unsigned int configVrCameraDepth;
 unsigned int* config_vr_camera_height_for_character(
+    unsigned int characterIndex
+);
+unsigned int config_vr_camera_default_height_for_character(
     unsigned int characterIndex
 );
 extern unsigned int configVrMovementCalibration;

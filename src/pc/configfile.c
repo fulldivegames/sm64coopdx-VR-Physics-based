@@ -88,13 +88,13 @@ bool         configShowFPS                        = false;
 bool         configVrAutoStart                    = false;
 unsigned int configVrCameraMode                   = VR_CAMERA_MODE_THIRD_PERSON;
 unsigned int configVrCameraDistance               = 100;
-unsigned int configVrCameraHeight                 = 0;
+unsigned int configVrCameraHeight                 = VR_CAMERA_HEIGHT_DEFAULT_MARIO;
 unsigned int configVrCameraDepth                  = VR_CAMERA_DEPTH_CENTER;
-static unsigned int sConfigVrCameraHeightLuigi    = 0;
-static unsigned int sConfigVrCameraHeightToad     = 0;
-static unsigned int sConfigVrCameraHeightWaluigi  = 0;
-static unsigned int sConfigVrCameraHeightWario    = 0;
-static unsigned int sConfigVrCameraHeightVersion  = 0;
+static unsigned int sConfigVrCameraHeightLuigi    = VR_CAMERA_HEIGHT_DEFAULT_LUIGI;
+static unsigned int sConfigVrCameraHeightToad     = VR_CAMERA_HEIGHT_DEFAULT_TOAD;
+static unsigned int sConfigVrCameraHeightWaluigi  = VR_CAMERA_HEIGHT_DEFAULT_WALUIGI;
+static unsigned int sConfigVrCameraHeightWario    = VR_CAMERA_HEIGHT_DEFAULT_WARIO;
+static unsigned int sConfigVrCameraHeightVersion  = 3;
 unsigned int configVrMovementCalibration          = 50;
 unsigned int configVrFov                          = 100;
 unsigned int configVrRenderScale                  = 100;
@@ -153,6 +153,25 @@ unsigned int* config_vr_camera_height_for_character(
             return &sConfigVrCameraHeightWario;
         default:
             return &configVrCameraHeight;
+    }
+}
+
+unsigned int config_vr_camera_default_height_for_character(
+    unsigned int characterIndex
+) {
+    // Each value is ten world units above the character's head attachment
+    // joint: the upper end of the torso chain in the built-in GeoLayout.
+    switch (characterIndex) {
+        case CT_LUIGI:
+            return VR_CAMERA_HEIGHT_DEFAULT_LUIGI;
+        case CT_TOAD:
+            return VR_CAMERA_HEIGHT_DEFAULT_TOAD;
+        case CT_WALUIGI:
+            return VR_CAMERA_HEIGHT_DEFAULT_WALUIGI;
+        case CT_WARIO:
+            return VR_CAMERA_HEIGHT_DEFAULT_WARIO;
+        default:
+            return VR_CAMERA_HEIGHT_DEFAULT_MARIO;
     }
 }
 
@@ -859,6 +878,23 @@ static void configfile_migrate_vr_camera_height(void) {
             }
         }
         sConfigVrCameraHeightVersion = 2;
+    }
+
+    if (sConfigVrCameraHeightVersion < 3) {
+        // Version 2 used the slider center as the default, which placed the
+        // camera at the character's feet. Repair only that known untouched
+        // value. Any height the player calibrated remains unchanged.
+        for (unsigned int character = 0;
+             character < CT_MAX;
+             character++) {
+            unsigned int* height =
+                config_vr_camera_height_for_character(character);
+            if (*height == VR_CAMERA_HEIGHT_CENTER) {
+                *height =
+                    config_vr_camera_default_height_for_character(character);
+            }
+        }
+        sConfigVrCameraHeightVersion = 3;
     }
 }
 
