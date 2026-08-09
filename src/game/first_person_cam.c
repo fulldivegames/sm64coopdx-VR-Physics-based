@@ -19,6 +19,7 @@
 #include "pc/lua/utils/smlua_camera_utils.h"
 #include "pc/lua/smlua_hooks.h"
 #include "pc/vr/vr.h"
+#include "vr_hand_interaction.h"
 
 struct FirstPersonCamera gFirstPersonCamera = {
     .enabled = false,
@@ -110,6 +111,13 @@ static void first_person_camera_update(void) {
     for (s32 i = 0; i < 6; i++) {
         u32 flag = actions[i];
         if ((m->action & flag) == flag) {
+            if (flag == ACT_HOLDING_BOWSER &&
+                vr_hand_interaction_bowser_spin_active()) {
+                // Physical Bowser controls own Mario's spin. The camera can
+                // still smooth-turn, but must not overwrite the accumulated
+                // face angle while the grip is held.
+                break;
+            }
             if (ABS(m->controller->stickX) > 4) {
                 gFirstPersonCamera.yaw = m->faceAngle[1] + 0x8000;
             } else {

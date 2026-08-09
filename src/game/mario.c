@@ -50,11 +50,14 @@
 
 #define MAX_HANG_PREVENTION 64
 
-static s16 vr_first_person_head_yaw_offset(void) {
+static bool sVrFirstPersonYawCalibrationPending = true;
+static s16 sVrFirstPersonHeadYawCalibration = 0;
+
+static bool vr_get_first_person_raw_head_yaw(s16* yaw) {
     float rotation[4] = { 0 };
 
-    if (!vr_get_head_rotation(rotation)) {
-        return 0;
+    if (yaw == NULL || !vr_get_head_rotation(rotation)) {
+        return false;
     }
 
     // Rotate OpenXR's forward vector (0, 0, -1) by the current HMD
@@ -65,13 +68,35 @@ static s16 vr_first_person_head_yaw_offset(void) {
         (rotation[0] * rotation[0] + rotation[1] * rotation[1]);
 
     if (fabsf(forwardX) < 0.0001f && fabsf(forwardZ) < 0.0001f) {
-        return 0;
+        return false;
     }
 
     // SM64's yaw direction is opposite OpenXR's pose-yaw direction. Measure
     // X against OpenXR's -Z forward axis, then invert it so looking right
     // produces rightward movement and looking left produces leftward movement.
-    return (s16)-atan2s(-forwardZ, forwardX);
+    *yaw = (s16)-atan2s(-forwardZ, forwardX);
+    return true;
+}
+
+void vr_request_first_person_yaw_calibration(void) {
+    // The next valid HMD sample becomes straight ahead. Deferring the sample
+    // is important during level initialization, when OpenXR may not have
+    // published the new frame's pose yet.
+    sVrFirstPersonYawCalibrationPending = true;
+}
+
+static s16 vr_first_person_head_yaw_offset(void) {
+    s16 rawYaw = 0;
+    if (!vr_get_first_person_raw_head_yaw(&rawYaw)) {
+        return 0;
+    }
+
+    if (sVrFirstPersonYawCalibrationPending) {
+        sVrFirstPersonHeadYawCalibration = (s16)-rawYaw;
+        sVrFirstPersonYawCalibrationPending = false;
+    }
+
+    return (s16)(rawYaw + sVrFirstPersonHeadYawCalibration);
 }
 
 static s16 vr_first_person_compress_stick_yaw(s16 stickYaw) {

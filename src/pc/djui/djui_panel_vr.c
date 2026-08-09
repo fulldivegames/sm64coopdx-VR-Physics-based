@@ -31,7 +31,92 @@ static void djui_panel_vr_mode_changed(struct DjuiBase* caller) {
     }
 }
 
+static void djui_panel_vr_camera_defaults(struct DjuiBase* caller) {
+    (void)caller;
+
+    configVrCameraMode = VR_CAMERA_MODE_THIRD_PERSON;
+    configVrCameraDistance = 100;
+    configVrCameraDepth = VR_CAMERA_DEPTH_CENTER;
+    configVrMovementCalibration = 50;
+    configVrFov = 100;
+
+    for (unsigned int character = 0;
+         character < CT_MAX;
+         character++) {
+        *config_vr_camera_height_for_character(character) =
+            VR_CAMERA_HEIGHT_CENTER;
+    }
+}
+
+static void djui_panel_vr_performance_defaults(struct DjuiBase* caller) {
+    (void)caller;
+
+    configVrRenderScale = 100;
+    configVrDesktopMirror = true;
+    configVrDesktopMirrorFps = 60;
+}
+
+static void djui_panel_vr_experimental_defaults(struct DjuiBase* caller) {
+    (void)caller;
+
+    configVrExperimentalFlipTurn = true;
+    configVrExperimentalFlatFirstPerson = false;
+    configVrExperimentalTrueFirstPerson = false;
+    configVrExperimentalArmsMode = false;
+}
+
+static void djui_panel_vr_controls_defaults(struct DjuiBase* caller) {
+    (void)caller;
+
+    configVrMotionControllerInput = true;
+    configVrPunchButton = false;
+}
+
+static void djui_panel_vr_motion_control_defaults(
+    struct DjuiBase* caller
+) {
+    (void)caller;
+
+    configVrPhysicalPunching = true;
+    configVrPhysicalGrabbing = true;
+    configVrMarioPunchSound = true;
+    configVrMotionControlledDive = true;
+    configVrMotionControlledGroundDive = true;
+    configVrPunchSpeed = 150;
+    configVrPunchDistance = 20;
+    configVrPunchGripThreshold = 35;
+    configVrPunchColliderLength = 150;
+    configVrBowserSpinAcceleration = 100;
+    configVrBowserMaxSpinSpeed = 100;
+}
+
+static void djui_panel_vr_model_defaults(struct DjuiBase* caller) {
+    (void)caller;
+
+    configVrFirstPersonBody = true;
+    configVrTorsoHeight = 100;
+    configVrLegHeight = 100;
+    configVrGloveSize = 70;
+    configVrLeftGloveRotationX = 180;
+    configVrLeftGlovePositionX = 100;
+    configVrLeftGlovePositionY = 100;
+    configVrLeftGlovePositionZ = 100;
+    configVrRightGloveRotationX = 180;
+    configVrRightGlovePositionX = 100;
+    configVrRightGlovePositionY = 100;
+    configVrRightGlovePositionZ = 100;
+}
+
+static void djui_panel_vr_hud_defaults(struct DjuiBase* caller) {
+    (void)caller;
+
+    configVrHudOpacity = 100;
+}
+
 static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
+    unsigned int* cameraHeight =
+        config_vr_camera_height_for_character(configPlayerModel);
+
     if (configVrCameraMode >= VR_CAMERA_MODE_COUNT) {
         configVrCameraMode = VR_CAMERA_MODE_THIRD_PERSON;
     }
@@ -40,10 +125,11 @@ static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
     } else if (configVrCameraDistance > 250) {
         configVrCameraDistance = 250;
     }
-    if (configVrCameraHeight < 50) {
-        configVrCameraHeight = 50;
-    } else if (configVrCameraHeight > 140) {
-        configVrCameraHeight = 140;
+    if (*cameraHeight > VR_CAMERA_HEIGHT_MAX) {
+        *cameraHeight = VR_CAMERA_HEIGHT_MAX;
+    }
+    if (configVrCameraDepth > VR_CAMERA_DEPTH_MAX) {
+        configVrCameraDepth = VR_CAMERA_DEPTH_MAX;
     }
     if (configVrMovementCalibration > 100) {
         configVrMovementCalibration = 100;
@@ -85,10 +171,19 @@ static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
 
         djui_slider_create(
             body,
-            "First Person Height",
-            &configVrCameraHeight,
-            50,
-            140,
+            "First Person Height (500 = Center)",
+            cameraHeight,
+            0,
+            VR_CAMERA_HEIGHT_MAX,
+            NULL
+        );
+
+        djui_slider_create(
+            body,
+            "First Person Forward / Back (200 = Center)",
+            &configVrCameraDepth,
+            0,
+            VR_CAMERA_DEPTH_MAX,
             NULL
         );
 
@@ -108,6 +203,13 @@ static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
             70,
             120,
             NULL
+        );
+
+        djui_button_create(
+            body,
+            "Set to Defaults",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_vr_camera_defaults
         );
 
         djui_button_create(
@@ -167,6 +269,13 @@ static void djui_panel_vr_performance_create(struct DjuiBase* caller) {
 
         djui_button_create(
             body,
+            "Set to Defaults",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_vr_performance_defaults
+        );
+
+        djui_button_create(
+            body,
             DLANG(MENU, BACK),
             DJUI_BUTTON_STYLE_BACK,
             djui_panel_menu_back
@@ -196,6 +305,27 @@ static void djui_panel_vr_experimental_create(struct DjuiBase* caller) {
             "Enable First Person in Flat Mode",
             &configVrExperimentalFlatFirstPerson,
             NULL
+        );
+
+        djui_checkbox_create(
+            body,
+            "True First Person (Might Cause Sickness)",
+            &configVrExperimentalTrueFirstPerson,
+            NULL
+        );
+
+        djui_checkbox_create(
+            body,
+            "Arms Mode",
+            &configVrExperimentalArmsMode,
+            NULL
+        );
+
+        djui_button_create(
+            body,
+            "Set to Defaults",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_vr_experimental_defaults
         );
 
         djui_button_create(
@@ -233,6 +363,13 @@ static void djui_panel_vr_controls_create(struct DjuiBase* caller) {
 
         djui_button_create(
             body,
+            "Set to Defaults",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_vr_controls_defaults
+        );
+
+        djui_button_create(
+            body,
             DLANG(MENU, BACK),
             DJUI_BUTTON_STYLE_BACK,
             djui_panel_menu_back
@@ -265,6 +402,18 @@ static void djui_panel_vr_motion_control_settings_create(
         50U,
         300U
     );
+    configVrBowserSpinAcceleration =
+        djui_panel_vr_clamp_uint(
+            configVrBowserSpinAcceleration,
+            25U,
+            200U
+        );
+    configVrBowserMaxSpinSpeed =
+        djui_panel_vr_clamp_uint(
+            configVrBowserMaxSpinSpeed,
+            50U,
+            150U
+        );
 
     struct DjuiThreePanel* panel =
         djui_panel_menu_create(
@@ -285,6 +434,13 @@ static void djui_panel_vr_motion_control_settings_create(
 
         djui_checkbox_create(
             body,
+            "Enable Physical Grabbing",
+            &configVrPhysicalGrabbing,
+            NULL
+        );
+
+        djui_checkbox_create(
+            body,
             "Enable Mario Punch Sound Effect",
             &configVrMarioPunchSound,
             NULL
@@ -292,8 +448,15 @@ static void djui_panel_vr_motion_control_settings_create(
 
         djui_checkbox_create(
             body,
-            "Enable Motion Controlled Dive",
+            "Enable Motion Jump Dive",
             &configVrMotionControlledDive,
+            NULL
+        );
+
+        djui_checkbox_create(
+            body,
+            "Enable Motion Ground Dive",
+            &configVrMotionControlledGroundDive,
             NULL
         );
 
@@ -317,7 +480,7 @@ static void djui_panel_vr_motion_control_settings_create(
 
         djui_slider_create(
             body,
-            "Grip / Trigger Strength Required (%)",
+            "Grip Strength Required (%)",
             &configVrPunchGripThreshold,
             10,
             100,
@@ -331,6 +494,31 @@ static void djui_panel_vr_motion_control_settings_create(
             50,
             300,
             NULL
+        );
+
+        djui_slider_create(
+            body,
+            "Bowser Spin Acceleration (%)",
+            &configVrBowserSpinAcceleration,
+            25,
+            200,
+            NULL
+        );
+
+        djui_slider_create(
+            body,
+            "Bowser Maximum Spin Speed (%)",
+            &configVrBowserMaxSpinSpeed,
+            50,
+            150,
+            NULL
+        );
+
+        djui_button_create(
+            body,
+            "Set to Defaults",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_vr_motion_control_defaults
         );
 
         djui_button_create(
@@ -392,6 +580,16 @@ static void djui_panel_vr_model_settings_create(struct DjuiBase* caller) {
             0U,
             200U
         );
+    configVrTorsoHeight = djui_panel_vr_clamp_uint(
+        configVrTorsoHeight,
+        0U,
+        200U
+    );
+    configVrLegHeight = djui_panel_vr_clamp_uint(
+        configVrLegHeight,
+        0U,
+        200U
+    );
 
     struct DjuiThreePanel* panel =
         djui_panel_menu_create("Model Settings", false);
@@ -400,6 +598,31 @@ static void djui_panel_vr_model_settings_create(struct DjuiBase* caller) {
         djui_three_panel_get_body(panel);
 
     {
+        djui_checkbox_create(
+            body,
+            "Show Torso and Legs in First Person",
+            &configVrFirstPersonBody,
+            NULL
+        );
+
+        djui_slider_create(
+            body,
+            "Torso Height (100 = Center)",
+            &configVrTorsoHeight,
+            0,
+            200,
+            NULL
+        );
+
+        djui_slider_create(
+            body,
+            "Leg Height (100 = Center)",
+            &configVrLegHeight,
+            0,
+            200,
+            NULL
+        );
+
         djui_slider_create(
             body,
             "Glove Size (%)",
@@ -413,22 +636,6 @@ static void djui_panel_vr_model_settings_create(struct DjuiBase* caller) {
             body,
             "Left Rotation X (Degrees)",
             &configVrLeftGloveRotationX,
-            0,
-            359,
-            NULL
-        );
-        djui_slider_create(
-            body,
-            "Left Rotation Y (Degrees)",
-            &configVrLeftGloveRotationY,
-            0,
-            359,
-            NULL
-        );
-        djui_slider_create(
-            body,
-            "Left Rotation Z (Degrees)",
-            &configVrLeftGloveRotationZ,
             0,
             359,
             NULL
@@ -468,22 +675,6 @@ static void djui_panel_vr_model_settings_create(struct DjuiBase* caller) {
         );
         djui_slider_create(
             body,
-            "Right Rotation Y (Degrees)",
-            &configVrRightGloveRotationY,
-            0,
-            359,
-            NULL
-        );
-        djui_slider_create(
-            body,
-            "Right Rotation Z (Degrees)",
-            &configVrRightGloveRotationZ,
-            0,
-            359,
-            NULL
-        );
-        djui_slider_create(
-            body,
             "Right Position X (100 = Center)",
             &configVrRightGlovePositionX,
             0,
@@ -505,6 +696,13 @@ static void djui_panel_vr_model_settings_create(struct DjuiBase* caller) {
             0,
             200,
             NULL
+        );
+
+        djui_button_create(
+            body,
+            "Set to Defaults",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_vr_model_defaults
         );
 
         djui_button_create(
@@ -537,6 +735,13 @@ static void djui_panel_vr_hud_settings_create(struct DjuiBase* caller) {
             0,
             100,
             NULL
+        );
+
+        djui_button_create(
+            body,
+            "Set to Defaults",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_vr_hud_defaults
         );
 
         djui_button_create(

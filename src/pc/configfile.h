@@ -17,6 +17,13 @@
 #define DEFAULT_COOPNET_IP "net.coop64.us"
 #define DEFAULT_COOPNET_PORT 34197
 
+// Camera-height values are stored unsigned for the existing config/slider
+// system. The center represents zero world-space offset.
+#define VR_CAMERA_HEIGHT_CENTER 500U
+#define VR_CAMERA_HEIGHT_MAX   1000U
+#define VR_CAMERA_DEPTH_CENTER  200U
+#define VR_CAMERA_DEPTH_MAX     400U
+
 typedef struct {
     unsigned int x, y, w, h;
     bool vsync;
@@ -69,6 +76,10 @@ extern bool         configVrAutoStart;
 extern unsigned int configVrCameraMode;
 extern unsigned int configVrCameraDistance;
 extern unsigned int configVrCameraHeight;
+extern unsigned int configVrCameraDepth;
+unsigned int* config_vr_camera_height_for_character(
+    unsigned int characterIndex
+);
 extern unsigned int configVrMovementCalibration;
 extern unsigned int configVrFov;
 extern unsigned int configVrRenderScale;
@@ -78,12 +89,16 @@ extern unsigned int configVrHudOpacity;
 extern bool         configVrMotionControllerInput;
 extern bool         configVrPunchButton;
 extern bool         configVrPhysicalPunching;
+extern bool         configVrPhysicalGrabbing;
 extern bool         configVrMarioPunchSound;
 extern bool         configVrMotionControlledDive;
+extern bool         configVrMotionControlledGroundDive;
 extern unsigned int configVrPunchSpeed;
 extern unsigned int configVrPunchDistance;
 extern unsigned int configVrPunchGripThreshold;
 extern unsigned int configVrPunchColliderLength;
+extern unsigned int configVrBowserSpinAcceleration;
+extern unsigned int configVrBowserMaxSpinSpeed;
 extern unsigned int configVrGloveSize;
 extern unsigned int configVrLeftGloveRotationX;
 extern unsigned int configVrLeftGloveRotationY;
@@ -97,8 +112,13 @@ extern unsigned int configVrRightGloveRotationZ;
 extern unsigned int configVrRightGlovePositionX;
 extern unsigned int configVrRightGlovePositionY;
 extern unsigned int configVrRightGlovePositionZ;
+extern bool         configVrFirstPersonBody;
+extern unsigned int configVrTorsoHeight;
+extern unsigned int configVrLegHeight;
 extern bool         configVrExperimentalFlipTurn;
 extern bool         configVrExperimentalFlatFirstPerson;
+extern bool         configVrExperimentalTrueFirstPerson;
+extern bool         configVrExperimentalArmsMode;
 extern bool         configShowPing;
 extern enum RefreshRateMode configFramerateMode;
 extern unsigned int configFrameLimit;

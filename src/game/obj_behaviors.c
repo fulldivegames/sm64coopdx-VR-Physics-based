@@ -28,6 +28,7 @@
 #include "object_helpers.h"
 #include "object_list_processor.h"
 #include "rendering_graph_node.h"
+#include "vr_hand_interaction.h"
 #include "save_file.h"
 #include "spawn_object.h"
 #include "spawn_sound.h"

@@ -10,6 +10,7 @@ extern u16 gLocalBubbleCounter;
 struct WallCollisionData;
 
 s16 vr_get_first_person_view_yaw(void);
+void vr_request_first_person_yaw_calibration(void);
 
 /* |description|
 Checks if Mario's current animation has reached its final frame (i.e., the last valid frame in the animation).

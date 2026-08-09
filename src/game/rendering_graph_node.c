@@ -25,6 +25,7 @@
 #include "course_table.h"
 #include "mario.h"
 #include "mario_misc.h"
+#include "vr_hand_interaction.h"
 #include "hardcoded.h"
 #include "levels/menu/header.h"
 #include "actors/mario/geo_header.h"
@@ -216,6 +217,7 @@ struct GraphNodeCamera *gCurGraphNodeCamera = NULL;
 struct GraphNodeObject *gCurGraphNodeObject = NULL;
 struct GraphNodeHeldObject *gCurGraphNodeHeldObject = NULL;
 struct MarioBodyState *gCurMarioBodyState = NULL;
+static bool sVrFilteringLocalMarioBody = false;
 u16 gAreaUpdateCounter = 0;
 
 #ifdef F3DEX_GBI_2
@@ -281,11 +283,86 @@ static f32 sVrActionTurnStartYaw = 0.0f;
 static f32 sVrActionTurnTargetYaw = 0.0f;
 static f32 sVrActionTurnCurrentYaw = 0.0f;
 static s16 sVrActionTurnYaw = 0;
+static bool sVrDoorYawCompensationActive = false;
+static s16 sVrDoorYawReference = 0;
+static s16 sVrDoorYawStartCompensation = 0;
+static s16 sVrDoorYawCompensation = 0;
+static bool sVrLastCameraYawValid = false;
+static s16 sVrLastCameraYaw = 0;
 static bool sVrHeadRotationMatrixValid = false;
 static float sVrHeadRotationQuaternion[4] = { 0 };
 static Mat4 sVrHeadRotationMatrix;
+static bool sVrBodyAnchorSampleValid = false;
+static u32 sVrBodyAnchorSampleTimestamp = 0;
+static Vec3f sVrBodyAnchorSamplePrev = { 0 };
+static Vec3f sVrBodyAnchorSample = { 0 };
+static bool sVrBodyYawSampleValid = false;
+static u32 sVrBodyYawSampleTimestamp = 0;
+static s16 sVrBodyYawSamplePrev = 0;
+static s16 sVrBodyYawSample = 0;
+static bool sVrArmTargetSampleValid[VR_CONTROLLER_COUNT] = { false };
+static u32 sVrArmTargetSampleTimestamp[VR_CONTROLLER_COUNT] = { 0 };
+static Vec3f sVrArmTargetSamplePrev[VR_CONTROLLER_COUNT] = { 0 };
+static Vec3f sVrArmTargetSample[VR_CONTROLLER_COUNT] = { 0 };
+static bool sVrTrueFirstPersonHeightValid = false;
+static u32 sVrTrueFirstPersonHeightTimestamp = 0;
+static f32 sVrTrueFirstPersonHeightPrev = 0.0f;
+static f32 sVrTrueFirstPersonHeight = 0.0f;
 
-static void vr_update_first_person_action_turn(void) {
+void vr_reset_first_person_calibration(void) {
+    sVrFirstPersonAnchorValid = false;
+    sVrFirstPersonAnchorTimestamp = 0;
+    vec3f_set(sVrFirstPersonAnchorPrev, 0.0f, 0.0f, 0.0f);
+    vec3f_set(sVrFirstPersonAnchor, 0.0f, 0.0f, 0.0f);
+
+    sVrActionTurnInitialized = false;
+    sVrActionTurnActive = false;
+    sVrActionTurnLastMarioAction = 0;
+    sVrActionTurnStartFrame = 0.0f;
+    sVrActionTurnStartYaw = 0.0f;
+    sVrActionTurnTargetYaw = 0.0f;
+    sVrActionTurnCurrentYaw = 0.0f;
+    sVrActionTurnYaw = 0;
+    sVrDoorYawCompensationActive = false;
+    sVrDoorYawReference = 0;
+    sVrDoorYawStartCompensation = 0;
+    sVrDoorYawCompensation = 0;
+    sVrLastCameraYawValid = false;
+    sVrLastCameraYaw = 0;
+
+    sVrHeadRotationMatrixValid = false;
+    sVrBodyAnchorSampleValid = false;
+    sVrBodyAnchorSampleTimestamp = 0;
+    vec3f_set(sVrBodyAnchorSamplePrev, 0.0f, 0.0f, 0.0f);
+    vec3f_set(sVrBodyAnchorSample, 0.0f, 0.0f, 0.0f);
+    sVrBodyYawSampleValid = false;
+    sVrBodyYawSampleTimestamp = 0;
+    sVrBodyYawSamplePrev = 0;
+    sVrBodyYawSample = 0;
+    for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
+        sVrArmTargetSampleValid[hand] = false;
+        sVrArmTargetSampleTimestamp[hand] = 0;
+        vec3f_set(
+            sVrArmTargetSamplePrev[hand],
+            0.0f,
+            0.0f,
+            0.0f
+        );
+        vec3f_set(
+            sVrArmTargetSample[hand],
+            0.0f,
+            0.0f,
+            0.0f
+        );
+    }
+    sVrTrueFirstPersonHeightValid = false;
+    sVrTrueFirstPersonHeightTimestamp = 0;
+    sVrTrueFirstPersonHeightPrev = 0.0f;
+    sVrTrueFirstPersonHeight = 0.0f;
+    vr_request_first_person_yaw_calibration();
+}
+
+static void vr_update_first_person_action_turn(s16 cameraYaw) {
     if (!vr_is_active() ||
         configVrCameraMode != VR_CAMERA_MODE_FIRST_PERSON) {
         sVrActionTurnInitialized = false;
@@ -293,6 +370,9 @@ static void vr_update_first_person_action_turn(void) {
         sVrActionTurnCurrentYaw = 0.0f;
         sVrActionTurnTargetYaw = 0.0f;
         sVrActionTurnYaw = 0;
+        sVrDoorYawCompensationActive = false;
+        sVrDoorYawCompensation = 0;
+        sVrLastCameraYawValid = false;
         return;
     }
 
@@ -303,6 +383,8 @@ static void vr_update_first_person_action_turn(void) {
     if (!sVrActionTurnInitialized) {
         sVrActionTurnInitialized = true;
         sVrActionTurnLastMarioAction = marioAction;
+        sVrLastCameraYaw = cameraYaw;
+        sVrLastCameraYawValid = true;
     }
 
     if (sVrActionTurnActive) {
@@ -329,10 +411,33 @@ static void vr_update_first_person_action_turn(void) {
         }
     }
 
+    if (sVrDoorYawCompensationActive) {
+        sVrDoorYawCompensation = (s16)(
+            sVrDoorYawStartCompensation +
+            (s16)(sVrDoorYawReference - cameraYaw)
+        );
+    }
+
     if (marioAction != sVrActionTurnLastMarioAction) {
         sVrActionTurnLastMarioAction = marioAction;
 
-        if (configVrExperimentalFlipTurn &&
+        if (marioAction == ACT_ENTERING_STAR_DOOR) {
+            // Star/Bowser-door cutscenes can rotate the hidden free-camera
+            // basis by half a turn. Capture the basis from the preceding
+            // frame and continuously apply its inverse change; an instant
+            // 180-degree snap and a gradual cutscene turn are both cancelled.
+            sVrActionTurnActive = false;
+            sVrDoorYawCompensationActive = true;
+            sVrDoorYawReference = sVrLastCameraYawValid
+                ? sVrLastCameraYaw
+                : cameraYaw;
+            sVrDoorYawStartCompensation =
+                sVrDoorYawCompensation;
+            sVrDoorYawCompensation = (s16)(
+                sVrDoorYawStartCompensation +
+                (s16)(sVrDoorYawReference - cameraYaw)
+            );
+        } else if (configVrExperimentalFlipTurn &&
             (marioAction == ACT_BACKFLIP ||
              marioAction == ACT_SIDE_FLIP)) {
             sVrActionTurnStartFrame = renderFrame;
@@ -341,10 +446,18 @@ static void vr_update_first_person_action_turn(void) {
                 sVrActionTurnCurrentYaw + 0x8000;
             sVrActionTurnActive = true;
         }
+
+        if (marioAction != ACT_ENTERING_STAR_DOOR) {
+            sVrDoorYawCompensationActive = false;
+        }
     }
 
-    sVrActionTurnYaw =
-        (s16)((s32)roundf(sVrActionTurnCurrentYaw));
+    sVrActionTurnYaw = (s16)(
+        (s16)((s32)roundf(sVrActionTurnCurrentYaw)) +
+        sVrDoorYawCompensation
+    );
+    sVrLastCameraYaw = cameraYaw;
+    sVrLastCameraYawValid = true;
 }
 
 s16 vr_get_first_person_action_turn_yaw(void) {
@@ -357,7 +470,6 @@ void vr_adjust_first_person_camera_direction(Vec3f direction) {
         return;
     }
 
-    vr_update_first_person_action_turn();
     direction[1] = 0.0f;
 
     const f32 horizontalLength = sqrtf(
@@ -424,6 +536,37 @@ static bool vr_get_first_person_anchor(Vec3f anchor) {
         vec3f_copy(anchor, sVrFirstPersonAnchor);
     }
 
+    return true;
+}
+
+static bool vr_move_world_sample_to_current_gameplay_anchor(
+    Vec3f worldPosition
+) {
+    Vec3f interpolatedAnchor;
+    if (worldPosition == NULL ||
+        !vr_get_first_person_anchor(interpolatedAnchor)) {
+        return false;
+    }
+
+    // Tracked world points are initially built against the render-time camera
+    // anchor. The object's current/previous matrices will be interpolated
+    // later, so storing that already-interpolated point would apply Mario's
+    // movement twice and make the body trail forward motion (or lead reverse
+    // motion). Convert the current endpoint back to the raw gameplay sample.
+    worldPosition[0] +=
+        sVrFirstPersonAnchor[0] - interpolatedAnchor[0];
+    worldPosition[2] +=
+        sVrFirstPersonAnchor[2] - interpolatedAnchor[2];
+
+    // The camera pose used to construct tracked world points is one gameplay
+    // sample behind the simulation endpoint used by Mario's model. Advance
+    // the shared body/arm anchor by that single continuous-frame displacement
+    // so it remains under the HMD while Mario translates. Discontinuities
+    // already collapse previous/current anchors in vr_get_first_person_anchor.
+    worldPosition[0] +=
+        sVrFirstPersonAnchor[0] - sVrFirstPersonAnchorPrev[0];
+    worldPosition[2] +=
+        sVrFirstPersonAnchor[2] - sVrFirstPersonAnchorPrev[2];
     return true;
 }
 
@@ -556,19 +699,21 @@ static void vr_patch_controller_hand_matrices(uint32_t eyeIndex) {
         unsigned int positionValues[3];
         if (hand == VR_CONTROLLER_LEFT) {
             rotationDegrees[0] = configVrLeftGloveRotationX;
-            rotationDegrees[1] = configVrLeftGloveRotationY;
-            rotationDegrees[2] = configVrLeftGloveRotationZ;
             positionValues[0] = configVrLeftGlovePositionX;
             positionValues[1] = configVrLeftGlovePositionY;
             positionValues[2] = configVrLeftGlovePositionZ;
         } else {
             rotationDegrees[0] = configVrRightGloveRotationX;
-            rotationDegrees[1] = configVrRightGloveRotationY;
-            rotationDegrees[2] = configVrRightGloveRotationZ;
             positionValues[0] = configVrRightGlovePositionX;
             positionValues[1] = configVrRightGlovePositionY;
             positionValues[2] = configVrRightGlovePositionZ;
         }
+        // X is the only model-specific rotation adjustment still exposed.
+        // Ignore old saved Y/Z values now that the tested controller-space
+        // mapping is authoritative, rather than leaving a hidden calibration
+        // capable of changing the glove pose.
+        rotationDegrees[1] = 0;
+        rotationDegrees[2] = 0;
 
         Vec3s calibrationRotation;
         for (int axis = 0; axis < 3; axis++) {
@@ -635,6 +780,131 @@ static void vr_patch_controller_hand_matrices(uint32_t eyeIndex) {
     }
 }
 
+static bool vr_get_stabilized_first_person_pose(
+    Vec3f position,
+    Vec3f focus,
+    Vec3f cameraPosition,
+    Vec3f cameraFocus,
+    Vec3f forward
+) {
+    Vec3f marioAnchor;
+    if (!vr_get_first_person_anchor(marioAnchor)) {
+        return false;
+    }
+
+    forward[0] = focus[0] - position[0];
+    forward[1] = 0.0f;
+    forward[2] = focus[2] - position[2];
+    const float forwardLength = sqrtf(
+        forward[0] * forward[0] +
+        forward[2] * forward[2]
+    );
+
+    if (forwardLength > 0.0001f) {
+        vec3f_mul(forward, 1.0f / forwardLength);
+    } else {
+        forward[0] = sins(gMarioStates[0].faceAngle[1]);
+        forward[1] = 0.0f;
+        forward[2] = coss(gMarioStates[0].faceAngle[1]);
+    }
+
+    // Update door/flip compensation from the unmodified gameplay camera only.
+    // Billboard and skybox callers also use the public adjustment helper, but
+    // their eye-specific directions must not become the persistent yaw basis.
+    vr_update_first_person_action_turn(
+        atan2s(forward[2], forward[0])
+    );
+    vr_adjust_first_person_camera_direction(forward);
+
+    const s32 cameraDepthOffset =
+        (s32)clamp(
+            configVrCameraDepth,
+            0U,
+            VR_CAMERA_DEPTH_MAX
+        ) - (s32)VR_CAMERA_DEPTH_CENTER;
+    const f32 cameraDepth = 10.0f + (f32)cameraDepthOffset;
+    cameraPosition[0] = marioAnchor[0] + forward[0] * cameraDepth;
+    u8 characterIndex =
+        gNetworkPlayers[0].overrideModelIndex;
+    if (characterIndex >= CT_MAX) {
+        characterIndex = CT_MARIO;
+    }
+    const unsigned int cameraHeight =
+        *config_vr_camera_height_for_character(characterIndex);
+    const s32 cameraHeightOffset =
+        (s32)clamp(
+            cameraHeight,
+            0U,
+            VR_CAMERA_HEIGHT_MAX
+        ) - (s32)VR_CAMERA_HEIGHT_CENTER;
+    cameraPosition[1] = marioAnchor[1] +
+        (f32)cameraHeightOffset;
+    cameraPosition[2] = marioAnchor[2] + forward[2] * cameraDepth;
+    cameraFocus[0] = cameraPosition[0] + forward[0] * 100.0f;
+    cameraFocus[1] = cameraPosition[1];
+    cameraFocus[2] = cameraPosition[2] + forward[2] * 100.0f;
+    return true;
+}
+
+static bool vr_get_true_first_person_camera_height(f32* height) {
+    struct MarioBodyState* bodyState =
+        gMarioStates[0].marioBodyState;
+    if (height == NULL ||
+        bodyState == NULL ||
+        (bodyState->updateHeadPosTime != gGlobalTimer &&
+         (gGlobalTimer == 0 ||
+          bodyState->updateHeadPosTime != gGlobalTimer - 1))) {
+        return false;
+    }
+
+    // geo_mario_head_rotation receives its matrix before the animated head
+    // part's translation, which made the old anchor land in Mario's chest.
+    // This is the actual head/neck joint and inherits the torso-height
+    // adjustment, so it remains on top of the torso at every model height.
+    const f32 animatedHeadHeight =
+        bodyState->animPartsPos[MARIO_ANIM_PART_HEAD][1];
+    const f32 animatedTorsoHeight =
+        bodyState->animPartsPos[MARIO_ANIM_PART_TORSO][1];
+    // The head part origin is a neck/attachment point and can sit visibly
+    // inside the upper torso on some built-in and replacement models. Derive
+    // an eye-level offset from that model's own torso-to-head span, with
+    // conservative bounds for unusually proportioned character packs.
+    const f32 eyeOffset = clamp(
+        fabsf(animatedHeadHeight - animatedTorsoHeight) * 0.35f,
+        45.0f,
+        70.0f
+    );
+    const f32 sampledHeight = animatedHeadHeight + eyeOffset;
+    if (!isfinite(sampledHeight) ||
+        sampledHeight < -100000.0f ||
+        sampledHeight > 100000.0f) {
+        return false;
+    }
+
+    const u32 sampledTimestamp = bodyState->updateHeadPosTime;
+    if (!sVrTrueFirstPersonHeightValid ||
+        sampledTimestamp != sVrTrueFirstPersonHeightTimestamp) {
+        const bool continuous =
+            sVrTrueFirstPersonHeightValid &&
+            sampledTimestamp ==
+                sVrTrueFirstPersonHeightTimestamp + 1;
+        sVrTrueFirstPersonHeightPrev = continuous
+            ? sVrTrueFirstPersonHeight
+            : sampledHeight;
+        sVrTrueFirstPersonHeight = sampledHeight;
+        sVrTrueFirstPersonHeightTimestamp = sampledTimestamp;
+        sVrTrueFirstPersonHeightValid = true;
+    }
+
+    const f32 delta = gRenderingInterpolated
+        ? clamp(gRenderingDelta, 0.0f, 1.0f)
+        : 1.0f;
+    *height = sVrTrueFirstPersonHeightPrev +
+        (sVrTrueFirstPersonHeight -
+         sVrTrueFirstPersonHeightPrev) * delta;
+    return true;
+}
+
 static void vr_build_game_camera_matrix(
     Mat4 matrix,
     Vec3f position,
@@ -656,40 +926,38 @@ static void vr_build_game_camera_matrix(
                 (position[axis] - focus[axis]) * distanceScale;
         }
     } else if (configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON) {
-        Vec3f marioAnchor;
+        Vec3f forward;
+        if (vr_get_stabilized_first_person_pose(
+                position,
+                focus,
+                cameraPosition,
+                cameraFocus,
+                forward
+            )) {
 
-        if (vr_get_first_person_anchor(marioAnchor)) {
-            Vec3f forward = {
-                focus[0] - position[0],
-                0.0f,
-                focus[2] - position[2]
-            };
-            const float forwardLength = sqrtf(
-                forward[0] * forward[0] +
-                forward[1] * forward[1] +
-                forward[2] * forward[2]
-            );
-
-            if (forwardLength > 0.0001f) {
-                vec3f_mul(forward, 1.0f / forwardLength);
-            } else {
-                forward[0] = sins(gMarioStates[0].faceAngle[1]);
-                forward[1] = 0.0f;
-                forward[2] = coss(gMarioStates[0].faceAngle[1]);
+            f32 trueFirstPersonHeight;
+            if (vr_is_active() &&
+                configVrExperimentalTrueFirstPerson &&
+                vr_get_true_first_person_camera_height(
+                    &trueFirstPersonHeight
+                )) {
+                // Use only the animated head/neck-joint height. Horizontal
+                // placement
+                // stays on the non-recursive gameplay anchor; tracked HMD
+                // translation is applied later and the rendered body follows
+                // it independently.
+                cameraPosition[1] = trueFirstPersonHeight;
+            } else if (vr_is_active() &&
+                       configVrExperimentalTrueFirstPerson) {
+                // The skeleton has not produced its first head point yet.
+                // Use Mario's normal neck height instead of consulting the
+                // user camera-height slider during this single-frame fallback.
+                cameraPosition[1] =
+                    gMarioStates[0].pos[1] + 155.0f;
             }
 
-            vr_adjust_first_person_camera_direction(forward);
-
-            // Follow Mario's interpolated position directly so vertical
-            // actions such as jumps do not inherit the normal third-person
-            // camera's delayed focus tracking.
-            cameraPosition[0] = marioAnchor[0] + forward[0] * 10.0f;
-            cameraPosition[1] = marioAnchor[1] +
-                (f32)clamp(configVrCameraHeight, 50U, 140U);
-            cameraPosition[2] = marioAnchor[2] + forward[2] * 10.0f;
-
             cameraFocus[0] = cameraPosition[0] + forward[0] * 100.0f;
-            cameraFocus[1] = cameraPosition[1] + forward[1] * 100.0f;
+            cameraFocus[1] = cameraPosition[1];
             cameraFocus[2] = cameraPosition[2] + forward[2] * 100.0f;
         }
     }
@@ -699,6 +967,135 @@ static void vr_build_game_camera_matrix(
     // lighting, billboards, and other camera-sensitive effects do not turn
     // with the player's head.
     mtxf_lookat(matrix, cameraPosition, cameraFocus, roll);
+}
+
+static bool vr_calculate_stabilized_headset_world_position(
+    Vec3f worldPosition
+) {
+    const float worldUnitsPerMeter = 100.0f;
+    float headTranslation[3] = { 0 };
+    Vec3f cameraPosition;
+    Vec3f cameraFocus;
+    Vec3f forward;
+
+    if (!vr_is_active() ||
+        configVrCameraMode != VR_CAMERA_MODE_FIRST_PERSON ||
+        worldPosition == NULL ||
+        sCameraNode == NULL ||
+        !vr_get_head_translation(headTranslation) ||
+        !vr_get_stabilized_first_person_pose(
+            sCameraNode->pos,
+            sCameraNode->focus,
+            cameraPosition,
+            cameraFocus,
+            forward
+        )) {
+        return false;
+    }
+
+    Mat4 cameraMatrix;
+    Mat4 inverseCameraMatrix;
+    mtxf_lookat(
+        cameraMatrix,
+        cameraPosition,
+        cameraFocus,
+        sCameraNode->roll
+    );
+    mtxf_inverse(inverseCameraMatrix, cameraMatrix);
+
+    Vec3f localHeadPosition = {
+        headTranslation[0] * worldUnitsPerMeter,
+        headTranslation[1] * worldUnitsPerMeter,
+        headTranslation[2] * worldUnitsPerMeter
+    };
+    for (u32 axis = 0; axis < 3; axis++) {
+        worldPosition[axis] =
+            localHeadPosition[0] * inverseCameraMatrix[0][axis] +
+            localHeadPosition[1] * inverseCameraMatrix[1][axis] +
+            localHeadPosition[2] * inverseCameraMatrix[2][axis] +
+            inverseCameraMatrix[3][axis];
+    }
+
+    // Camera depth is a view-to-body calibration. Do not let it drag the
+    // body root along with the camera or the relative adjustment would cancel
+    // itself out visually. Floating hands and their hitboxes intentionally
+    // remain camera-relative.
+    const s32 cameraDepthOffset =
+        (s32)clamp(
+            configVrCameraDepth,
+            0U,
+            VR_CAMERA_DEPTH_MAX
+        ) - (s32)VR_CAMERA_DEPTH_CENTER;
+    worldPosition[0] -= forward[0] * (f32)cameraDepthOffset;
+    worldPosition[2] -= forward[2] * (f32)cameraDepthOffset;
+    return vr_move_world_sample_to_current_gameplay_anchor(
+        worldPosition
+    );
+}
+
+static bool vr_get_stabilized_headset_world_position(
+    Vec3f worldPosition,
+    bool previousFrame
+) {
+    if (worldPosition == NULL) {
+        return false;
+    }
+
+    if (!sVrBodyAnchorSampleValid ||
+        sVrBodyAnchorSampleTimestamp != gGlobalTimer) {
+        Vec3f sampledPosition;
+        if (!vr_calculate_stabilized_headset_world_position(
+                sampledPosition
+            )) {
+            sVrBodyAnchorSampleValid = false;
+            return false;
+        }
+
+        const bool continuous =
+            sVrBodyAnchorSampleValid &&
+            gGlobalTimer == sVrBodyAnchorSampleTimestamp + 1;
+        if (continuous) {
+            vec3f_copy(
+                sVrBodyAnchorSamplePrev,
+                sVrBodyAnchorSample
+            );
+        } else {
+            vec3f_copy(
+                sVrBodyAnchorSamplePrev,
+                sampledPosition
+            );
+        }
+        vec3f_copy(sVrBodyAnchorSample, sampledPosition);
+        sVrBodyAnchorSampleTimestamp = gGlobalTimer;
+        sVrBodyAnchorSampleValid = true;
+    }
+
+    vec3f_copy(
+        worldPosition,
+        previousFrame
+            ? sVrBodyAnchorSamplePrev
+            : sVrBodyAnchorSample
+    );
+    return true;
+}
+
+static s16 vr_get_stabilized_body_yaw(bool previousFrame) {
+    if (!sVrBodyYawSampleValid ||
+        sVrBodyYawSampleTimestamp != gGlobalTimer) {
+        const s16 sampledYaw = vr_get_first_person_view_yaw();
+        const bool continuous =
+            sVrBodyYawSampleValid &&
+            gGlobalTimer == sVrBodyYawSampleTimestamp + 1;
+        sVrBodyYawSamplePrev = continuous
+            ? sVrBodyYawSample
+            : sampledYaw;
+        sVrBodyYawSample = sampledYaw;
+        sVrBodyYawSampleTimestamp = gGlobalTimer;
+        sVrBodyYawSampleValid = true;
+    }
+    return previousFrame
+        ? sVrBodyYawSamplePrev
+        : sVrBodyYawSample;
 }
 
 bool vr_get_controller_world_fist(
@@ -941,6 +1338,16 @@ static bool vr_build_head_view_matrix(
     } else if (!vr_build_head_rotation_matrix(matrix) ||
                !vr_get_head_translation(headTranslation)) {
         return false;
+    }
+
+    if (!menuScene &&
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
+        configVrExperimentalTrueFirstPerson) {
+        // True First Person obtains vertical motion from Mario's animated
+        // neck anchor. Suppress room-scale Y translation so camera height and
+        // physical crouching cannot detach the view from that head area;
+        // horizontal leaning and full head rotation remain available.
+        headTranslation[1] = 0.0f;
     }
 
     Vec3f right = {
@@ -1222,7 +1629,8 @@ static void patch_mtx_perspective(
     );
 
     // "infinite" draw distance
-    if (gOverrideFar == 0 && configDrawDistance == 6) {
+    if (vr_is_active() ||
+        (gOverrideFar == 0 && configDrawDistance == 6)) {
         far = max(far, MAX_FAR_PLANE_DIST);
     }
 
@@ -1625,10 +2033,7 @@ static void vr_append_controller_hands(
          hand++) {
         struct VrControllerState state;
         if (vr_get_controller_state(hand, &state)) {
-            const float grabAmount = fmaxf(
-                state.squeeze,
-                state.trigger
-            );
+            const float grabAmount = state.squeeze;
 
             // Separate close/open thresholds prevent noisy analog input from
             // rapidly switching the glove pose near the midpoint.
@@ -1728,7 +2133,45 @@ static void geo_process_master_list_sub(struct GraphNodeMasterList *node) {
  * parameter. Look at the RenderModeContainer struct to see the corresponding
  * render modes of layers.
  */
+static bool vr_hide_local_first_person_mario_part(void) {
+    if (!sVrFilteringLocalMarioBody ||
+        gCurMarioBodyState == NULL ||
+        gCurGraphNodeHeldObject != NULL) {
+        return false;
+    }
+
+    switch (gCurMarioBodyState->currAnimPart) {
+        case MARIO_ANIM_PART_HEAD:
+            return true;
+        case MARIO_ANIM_PART_UPPER_LEFT:
+        case MARIO_ANIM_PART_UPPER_RIGHT:
+            return true;
+        case MARIO_ANIM_PART_LEFT_ARM:
+        case MARIO_ANIM_PART_LEFT_FOREARM:
+        case MARIO_ANIM_PART_RIGHT_ARM:
+        case MARIO_ANIM_PART_RIGHT_FOREARM:
+            return !configVrExperimentalArmsMode;
+        case MARIO_ANIM_PART_LEFT_HAND:
+        case MARIO_ANIM_PART_RIGHT_HAND:
+            // The independently tracked floating gloves remain the hands in
+            // both normal first person and Arms Mode.
+            return true;
+        default:
+            // True First Person and Arms Mode still traverse hidden skeletons
+            // for their camera/IK anchors. The ordinary body visibility toggle
+            // controls every remaining Mario display list.
+            return !configVrFirstPersonBody;
+    }
+}
+
 static void geo_append_display_list(void *displayList, s16 layer) {
+    // First-person VR uses the regular animated Mario model for the torso and
+    // lower body, but tracked gloves replace its head, arms, and hands. Keep
+    // traversing every bone so animation attributes and modded player models
+    // remain synchronized; only suppress their actual display lists here.
+    if (vr_hide_local_first_person_mario_part()) {
+        return;
+    }
 
 #ifdef F3DEX_GBI_2
     gSPLookAt(gDisplayListHead++, &lookAt);
@@ -1835,7 +2278,10 @@ static void geo_process_perspective(struct GraphNodePerspective *node) {
     f32 far = replace_value_if_not_zero(node->far, gOverrideFar);
 
     // "infinite" draw distance
-    if (gOverrideFar == 0 && configDrawDistance == 6) { far = max(far, MAX_FAR_PLANE_DIST); }
+    if (vr_is_active() ||
+        (gOverrideFar == 0 && configDrawDistance == 6)) {
+        far = max(far, MAX_FAR_PLANE_DIST);
+    }
 
     guPerspective(mtx, &perspNorm, node->prevFov, aspect, near, far, 1.0f);
 
@@ -2379,6 +2825,294 @@ static void anim_process(Vec3f translation, Vec3s rotation, Vec3f scale, u8 *ani
  * Render an animated part. The current animation state is not part of the node
  * but set in global variables. If an animated part is skipped, everything afterwards desyncs.
  */
+static void vr_apply_world_translation_to_camera_matrix(
+    Mat4 matrix,
+    Mat4 cameraMatrix,
+    f32 worldX,
+    f32 worldY,
+    f32 worldZ
+) {
+    matrix[3][0] +=
+        worldX * cameraMatrix[0][0] +
+        worldY * cameraMatrix[1][0] +
+        worldZ * cameraMatrix[2][0];
+    matrix[3][1] +=
+        worldX * cameraMatrix[0][1] +
+        worldY * cameraMatrix[1][1] +
+        worldZ * cameraMatrix[2][1];
+    matrix[3][2] +=
+        worldX * cameraMatrix[0][2] +
+        worldY * cameraMatrix[1][2] +
+        worldZ * cameraMatrix[2][2];
+}
+
+static bool vr_is_left_arm_part(u32 animPart) {
+    return animPart == MARIO_ANIM_PART_LEFT_ARM ||
+        animPart == MARIO_ANIM_PART_LEFT_FOREARM;
+}
+
+static bool vr_is_right_arm_part(u32 animPart) {
+    return animPart == MARIO_ANIM_PART_RIGHT_ARM ||
+        animPart == MARIO_ANIM_PART_RIGHT_FOREARM;
+}
+
+static bool vr_get_stabilized_arm_target(
+    u32 handIndex,
+    Vec3f targetPosition,
+    bool previousFrame
+) {
+    if (handIndex >= VR_CONTROLLER_COUNT ||
+        targetPosition == NULL) {
+        return false;
+    }
+
+    if (!sVrArmTargetSampleValid[handIndex] ||
+        sVrArmTargetSampleTimestamp[handIndex] != gGlobalTimer) {
+        Vec3f sampledPosition;
+        if (!vr_get_controller_world_fist(
+                handIndex,
+                sampledPosition,
+                NULL
+            )) {
+            sVrArmTargetSampleValid[handIndex] = false;
+            return false;
+        }
+        if (!vr_move_world_sample_to_current_gameplay_anchor(
+                sampledPosition
+            )) {
+            sVrArmTargetSampleValid[handIndex] = false;
+            return false;
+        }
+
+        const bool continuous =
+            sVrArmTargetSampleValid[handIndex] &&
+            gGlobalTimer ==
+                sVrArmTargetSampleTimestamp[handIndex] + 1;
+        if (continuous) {
+            vec3f_copy(
+                sVrArmTargetSamplePrev[handIndex],
+                sVrArmTargetSample[handIndex]
+            );
+        } else {
+            vec3f_copy(
+                sVrArmTargetSamplePrev[handIndex],
+                sampledPosition
+            );
+        }
+        vec3f_copy(
+            sVrArmTargetSample[handIndex],
+            sampledPosition
+        );
+        sVrArmTargetSampleTimestamp[handIndex] = gGlobalTimer;
+        sVrArmTargetSampleValid[handIndex] = true;
+    }
+
+    vec3f_copy(
+        targetPosition,
+        previousFrame
+            ? sVrArmTargetSamplePrev[handIndex]
+            : sVrArmTargetSample[handIndex]
+    );
+    return true;
+}
+
+static void vr_lock_local_mario_arm_to_controller(
+    Mat4 matrix,
+    Mat4 cameraMatrix,
+    bool previousFrame
+) {
+    if (!configVrExperimentalArmsMode ||
+        gCurMarioBodyState == NULL) {
+        return;
+    }
+
+    const u32 animPart = gCurMarioBodyState->currAnimPart;
+    const bool leftArm = vr_is_left_arm_part(animPart);
+    const bool rightArm = vr_is_right_arm_part(animPart);
+    if (!leftArm && !rightArm) {
+        return;
+    }
+
+    const u32 handIndex = leftArm
+        ? VR_CONTROLLER_LEFT
+        : VR_CONTROLLER_RIGHT;
+    Vec3f targetPosition;
+    if (!vr_get_stabilized_arm_target(
+            handIndex,
+            targetPosition,
+            previousFrame
+        )) {
+        return;
+    }
+
+    Vec3f partPosition;
+    get_pos_from_transform_mtx(
+        partPosition,
+        matrix,
+        cameraMatrix
+    );
+    Vec3f directionWorld = {
+        targetPosition[0] - partPosition[0],
+        targetPosition[1] - partPosition[1],
+        targetPosition[2] - partPosition[2]
+    };
+    const f32 targetDistance = sqrtf(
+        directionWorld[0] * directionWorld[0] +
+        directionWorld[1] * directionWorld[1] +
+        directionWorld[2] * directionWorld[2]
+    );
+    if (targetDistance <= 0.001f ||
+        !isfinite(targetDistance)) {
+        return;
+    }
+
+    Vec3f armAxis = {
+        directionWorld[0] * cameraMatrix[0][0] +
+            directionWorld[1] * cameraMatrix[1][0] +
+            directionWorld[2] * cameraMatrix[2][0],
+        directionWorld[0] * cameraMatrix[0][1] +
+            directionWorld[1] * cameraMatrix[1][1] +
+            directionWorld[2] * cameraMatrix[2][1],
+        directionWorld[0] * cameraMatrix[0][2] +
+            directionWorld[1] * cameraMatrix[1][2] +
+            directionWorld[2] * cameraMatrix[2][2]
+    };
+    vec3f_normalize(armAxis);
+
+    Vec3f upReference = {
+        cameraMatrix[1][0],
+        cameraMatrix[1][1],
+        cameraMatrix[1][2]
+    };
+    Vec3f sideAxis;
+    vec3f_cross(sideAxis, armAxis, upReference);
+    f32 sideLength = sqrtf(
+        sideAxis[0] * sideAxis[0] +
+        sideAxis[1] * sideAxis[1] +
+        sideAxis[2] * sideAxis[2]
+    );
+    if (sideLength <= 0.001f) {
+        upReference[0] = cameraMatrix[2][0];
+        upReference[1] = cameraMatrix[2][1];
+        upReference[2] = cameraMatrix[2][2];
+        vec3f_cross(sideAxis, armAxis, upReference);
+    }
+    vec3f_normalize(sideAxis);
+
+    Vec3f upAxis;
+    vec3f_cross(upAxis, sideAxis, armAxis);
+    vec3f_normalize(upAxis);
+
+    const f32 yScale = sqrtf(
+        matrix[1][0] * matrix[1][0] +
+        matrix[1][1] * matrix[1][1] +
+        matrix[1][2] * matrix[1][2]
+    );
+    const f32 zScale = sqrtf(
+        matrix[2][0] * matrix[2][0] +
+        matrix[2][1] * matrix[2][1] +
+        matrix[2][2] * matrix[2][2]
+    );
+    const f32 bodyScale = MAX((yScale + zScale) * 0.5f, 0.001f);
+    const f32 remainingModelLength =
+        (animPart == MARIO_ANIM_PART_LEFT_FOREARM ||
+         animPart == MARIO_ANIM_PART_RIGHT_FOREARM)
+            ? 60.0f
+            : 125.0f;
+    const f32 armScale = clamp(
+        targetDistance / remainingModelLength,
+        bodyScale * 0.35f,
+        bodyScale * 3.0f
+    );
+
+    for (u32 axis = 0; axis < 3; axis++) {
+        matrix[0][axis] = armAxis[axis] * armScale;
+        matrix[1][axis] = upAxis[axis] * yScale;
+        matrix[2][axis] = sideAxis[axis] * zScale;
+    }
+}
+
+static void vr_adjust_local_mario_body_transform(
+    Mat4 matrix,
+    bool previousFrame
+) {
+    if (!sVrFilteringLocalMarioBody ||
+        gCurMarioBodyState == NULL ||
+        gCurGraphNodeCamera == NULL) {
+        return;
+    }
+
+    Mat4* cameraMatrix = previousFrame
+        ? gCurGraphNodeCamera->matrixPtrPrev
+        : gCurGraphNodeCamera->matrixPtr;
+    if (cameraMatrix == NULL) {
+        return;
+    }
+
+    vr_lock_local_mario_arm_to_controller(
+        matrix,
+        *cameraMatrix,
+        previousFrame
+    );
+
+    unsigned int heightValue;
+    switch (gCurMarioBodyState->currAnimPart) {
+        case MARIO_ANIM_PART_TORSO:
+            heightValue = configVrTorsoHeight;
+            break;
+        case MARIO_ANIM_PART_LOWER_LEFT:
+        case MARIO_ANIM_PART_LOWER_RIGHT:
+            heightValue = configVrLegHeight;
+            break;
+        default:
+            return;
+    }
+
+    const f32 heightOffset =
+        ((f32)clamp(heightValue, 0U, 200U) - 100.0f) *
+        0.5f;
+
+    // Animated part translations are local to their parent bone. Applying
+    // the setting there causes a bent/rotated torso or leg to turn "height"
+    // into forward motion. The combined matrix is in camera space, so move it
+    // along the camera matrix's world-up basis to produce a true world-Y
+    // offset regardless of the animation or Mario's facing direction.
+    vr_apply_world_translation_to_camera_matrix(
+        matrix,
+        *cameraMatrix,
+        0.0f,
+        heightOffset,
+        0.0f
+    );
+
+    if (gCurMarioBodyState->currAnimPart ==
+        MARIO_ANIM_PART_TORSO) {
+        Vec3f headsetPosition;
+        Vec3f torsoPosition;
+        if (vr_get_stabilized_headset_world_position(
+                headsetPosition,
+                previousFrame
+            )) {
+            get_pos_from_transform_mtx(
+                torsoPosition,
+                matrix,
+                *cameraMatrix
+            );
+            // The body root already follows horizontal room-scale tracking.
+            // Cancel the torso bone's remaining animated X/Z displacement so
+            // its center itself—not merely Mario's feet—stays under the HMD.
+            vr_apply_world_translation_to_camera_matrix(
+                matrix,
+                *cameraMatrix,
+                headsetPosition[0] - torsoPosition[0],
+                0.0f,
+                headsetPosition[2] - torsoPosition[2]
+            );
+        }
+    }
+
+}
+
 static void geo_process_animated_part(struct GraphNodeAnimatedPart *node) {
     if (gCurMarioBodyState && !gCurGraphNodeHeldObject) {
         gCurMarioBodyState->currAnimPart++;
@@ -2403,6 +3137,10 @@ static void geo_process_animated_part(struct GraphNodeAnimatedPart *node) {
     mtxf_rotate_xyz_and_translate(matrix, translation, rotation);
     mtxf_scale_vec3f(matrix, matrix, scale);
     mtxf_mul(gMatStack[gMatStackIndex + 1], matrix, gMatStack[gMatStackIndex]);
+    vr_adjust_local_mario_body_transform(
+        gMatStack[gMatStackIndex + 1],
+        false
+    );
 
     // previous frame
     geo_update_interpolation(node->translation, NULL, NULL,
@@ -2417,6 +3155,10 @@ static void geo_process_animated_part(struct GraphNodeAnimatedPart *node) {
         mtxf_rotate_xyz_and_translate(matrix, translation, rotation);
         mtxf_scale_vec3f(matrix, matrix, scale);
         mtxf_mul(gMatStackPrev[gMatStackIndex + 1], matrix, gMatStackPrev[gMatStackIndex]);
+        vr_adjust_local_mario_body_transform(
+            gMatStackPrev[gMatStackIndex + 1],
+            true
+        );
     );
 
     // Increment the matrix stack, If we fail to do so. Just return.
@@ -2646,71 +3388,6 @@ static void geo_process_shadow(struct GraphNodeShadow *node) {
  *
  * Since (0,0,0) is unaffected by rotation, columns 0, 1 and 2 are ignored.
  */
-static u32 sVrObjectCullingTimestamp = UINT32_MAX;
-static bool sVrObjectCullingValid = false;
-static Mat4 sVrObjectCullingHeadRotation;
-static f32 sVrObjectCullingHorizontalTangent = 0.0f;
-static f32 sVrObjectCullingVerticalTangent = 0.0f;
-
-static bool vr_update_object_culling_context(void) {
-    if (sVrObjectCullingTimestamp != gGlobalTimer) {
-        sVrObjectCullingTimestamp = gGlobalTimer;
-        sVrObjectCullingValid = false;
-
-        // Menu models are deliberately head locked, so ordinary headset
-        // direction culling must not be applied to them.
-        if (!vr_is_menu_scene() &&
-            vr_build_head_rotation_matrix(
-                sVrObjectCullingHeadRotation
-            )) {
-            f32 maxHorizontalTangent = 0.0f;
-            f32 maxVerticalTangent = 0.0f;
-
-            for (uint32_t eye = 0; eye < 2; eye++) {
-                float eyeTangents[4] = { 0 };
-                if (!vr_get_eye_tangents(eye, eyeTangents)) {
-                    continue;
-                }
-
-                maxHorizontalTangent = MAX(
-                    maxHorizontalTangent,
-                    MAX(
-                        fabsf(eyeTangents[0]),
-                        fabsf(eyeTangents[1])
-                    )
-                );
-                maxVerticalTangent = MAX(
-                    maxVerticalTangent,
-                    MAX(
-                        fabsf(eyeTangents[2]),
-                        fabsf(eyeTangents[3])
-                    )
-                );
-            }
-
-            if (maxHorizontalTangent > 0.0f &&
-                maxVerticalTangent > 0.0f) {
-                // Add 20 degrees beyond the runtime FOV. At the game's 30 Hz
-                // scene-update rate this protects fast head turns while still
-                // rejecting distant objects far outside both eyes.
-                const f32 padding = 0.34906585f;
-                const f32 maxHalfAngle = 1.48352986f;
-                sVrObjectCullingHorizontalTangent = tanf(MIN(
-                    atanf(maxHorizontalTangent) + padding,
-                    maxHalfAngle
-                ));
-                sVrObjectCullingVerticalTangent = tanf(MIN(
-                    atanf(maxVerticalTangent) + padding,
-                    maxHalfAngle
-                ));
-                sVrObjectCullingValid = true;
-            }
-        }
-    }
-
-    return sVrObjectCullingValid;
-}
-
 static s32 obj_is_in_view(struct GraphNodeObject *node, Mat4 matrix) {
     if (!node || !gCurGraphNodeCamFrustum) { return FALSE; }
 
@@ -2738,48 +3415,10 @@ static s32 obj_is_in_view(struct GraphNodeObject *node, Mat4 matrix) {
             return FALSE;
         }
 
-        // Always retain nearby objects. Besides preventing visible pop-in,
-        // this covers the offset between the normal camera used to build the
-        // display list and the first-person camera applied during eye render.
-        const f32 nearbyDistance = 4000.0f + cullingRadius;
-        if (distanceSquared <= nearbyDistance * nearbyDistance) {
-            return TRUE;
-        }
-
-        if (!vr_update_object_culling_context()) {
-            return TRUE;
-        }
-
-        // Apply the same HMD view rotation used later by the eye projection.
-        const f32 viewX =
-            x * sVrObjectCullingHeadRotation[0][0] +
-            y * sVrObjectCullingHeadRotation[1][0] +
-            z * sVrObjectCullingHeadRotation[2][0];
-        const f32 viewY =
-            x * sVrObjectCullingHeadRotation[0][1] +
-            y * sVrObjectCullingHeadRotation[1][1] +
-            z * sVrObjectCullingHeadRotation[2][1];
-        const f32 viewZ =
-            x * sVrObjectCullingHeadRotation[0][2] +
-            y * sVrObjectCullingHeadRotation[1][2] +
-            z * sVrObjectCullingHeadRotation[2][2];
-        const f32 depth = -viewZ;
-
-        if (depth + cullingRadius <= 0.0f) {
-            return FALSE;
-        }
-
-        const f32 positiveDepth = MAX(depth, 0.0f);
-        if (fabsf(viewX) >
-            positiveDepth * sVrObjectCullingHorizontalTangent +
-                cullingRadius) {
-            return FALSE;
-        }
-        if (fabsf(viewY) >
-            positiveDepth * sVrObjectCullingVerticalTangent +
-                cullingRadius) {
-            return FALSE;
-        }
+        // The scene is built only once before both independently rotated eye
+        // views are submitted. A conventional camera frustum can therefore
+        // reject something that either eye can see after a fast head turn.
+        // Keep VR objects authoritative within the fixed-point safety range.
         return TRUE;
     }
 
@@ -2851,10 +3490,18 @@ static void geo_process_object(struct Object *node) {
     Mat4 mtxf;
     s32 hasAnimation = (node->header.gfx.node.flags & GRAPH_RENDER_HAS_ANIMATION) != 0;
     Vec3f scalePrev;
-    const bool hideLocalMarioInVrFirstPerson =
+    const bool localMarioInVrFirstPerson =
         vr_is_active() &&
         configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
         node == gMarioStates[0].marioObj;
+    const bool processLocalMarioVrSkeleton =
+        localMarioInVrFirstPerson &&
+        (configVrFirstPersonBody ||
+         configVrExperimentalTrueFirstPerson ||
+         configVrExperimentalArmsMode);
+    const bool hideLocalMarioInVrFirstPerson =
+        localMarioInVrFirstPerson &&
+        !processLocalMarioVrSkeleton;
 
     // Sanity check our stack index, If we above or equal to our stack size. Return to prevent OOB.
     if ((gMatStackIndex + 1) >= MATRIX_STACK_SIZE) { LOG_ERROR("Preventing attempt to exceed the maximum size %i for our matrix stack with size of %i.", MATRIX_STACK_SIZE - 1, gMatStackIndex); return; }
@@ -2948,9 +3595,68 @@ static void geo_process_object(struct Object *node) {
             vec3f_copy(node->header.gfx.prevPos, node->header.gfx.pos);
             vec3s_copy(node->header.gfx.prevAngle, node->header.gfx.angle);
             node->header.gfx.prevTimestamp = gGlobalTimer;
-            mtxf_rotate_zxy_and_translate(mtxf, node->header.gfx.pos, node->header.gfx.angle);
+
+            Vec3f renderPosition;
+            Vec3f renderPositionPrev;
+            vec3f_copy(renderPosition, node->header.gfx.pos);
+            vec3f_copy(renderPositionPrev, posPrev);
+            if (processLocalMarioVrSkeleton) {
+                Vec3f headsetPosition;
+                Vec3f headsetPositionPrev;
+                if (vr_get_stabilized_headset_world_position(
+                        headsetPosition,
+                        false
+                    ) &&
+                    vr_get_stabilized_headset_world_position(
+                        headsetPositionPrev,
+                        true
+                    )) {
+                    // Visual-only root pin: keep the complete local body
+                    // directly beneath the tracked HMD in X/Z. Mario's
+                    // gameplay position, velocity, facing, and collision are
+                    // never changed.
+                    renderPosition[0] = headsetPosition[0];
+                    renderPosition[2] = headsetPosition[2];
+                    renderPositionPrev[0] = headsetPositionPrev[0];
+                    renderPositionPrev[2] = headsetPositionPrev[2];
+                }
+            }
+
+            Vec3s renderAngle;
+            Vec3s renderAnglePrev;
+            if (processLocalMarioVrSkeleton) {
+                // The first-person body skeleton follows the player's view
+                // heading independently from Mario's momentum-facing yaw.
+                // True First Person retains animation pitch/roll so its neck
+                // anchor follows flips, dives, and ground pounds.
+                vec3s_set(
+                    renderAngle,
+                    configVrExperimentalTrueFirstPerson
+                        ? node->header.gfx.angle[0]
+                        : 0,
+                    vr_get_stabilized_body_yaw(false),
+                    configVrExperimentalTrueFirstPerson
+                        ? node->header.gfx.angle[2]
+                        : 0
+                );
+                vec3s_set(
+                    renderAnglePrev,
+                    configVrExperimentalTrueFirstPerson
+                        ? anglePrev[0]
+                        : 0,
+                    vr_get_stabilized_body_yaw(true),
+                    configVrExperimentalTrueFirstPerson
+                        ? anglePrev[2]
+                        : 0
+                );
+            } else {
+                vec3s_copy(renderAngle, node->header.gfx.angle);
+                vec3s_copy(renderAnglePrev, anglePrev);
+            }
+
+            mtxf_rotate_zxy_and_translate(mtxf, renderPosition, renderAngle);
             mtxf_mul(gMatStack[gMatStackIndex + 1], mtxf, gMatStack[gMatStackIndex]);
-            mtxf_rotate_zxy_and_translate(mtxf, posPrev, anglePrev);
+            mtxf_rotate_zxy_and_translate(mtxf, renderPositionPrev, renderAnglePrev);
             mtxf_mul(gMatStackPrev[gMatStackIndex + 1], mtxf, gMatStackPrev[gMatStackIndex]);
         }
 
@@ -2982,7 +3688,11 @@ static void geo_process_object(struct Object *node) {
             if (node->hookRender) smlua_call_event_hooks(HOOK_ON_OBJECT_ANIM_UPDATE, node);
             dynos_gfx_swap_animations(node);
         }
-        if (obj_is_in_view(&node->header.gfx, gMatStack[gMatStackIndex])) {
+        if (processLocalMarioVrSkeleton ||
+            obj_is_in_view(
+                &node->header.gfx,
+                gMatStack[gMatStackIndex]
+            )) {
             Mtx *mtx = alloc_display_list(sizeof(*mtx));
             Mtx *mtxPrev = alloc_display_list(sizeof(*mtxPrev));
             if (mtx == NULL || mtxPrev == NULL) { return; }
@@ -2999,10 +3709,13 @@ static void geo_process_object(struct Object *node) {
                     gCurMarioBodyState->currAnimPart = MARIO_ANIM_PART_NONE;
                 }
                 gCurGraphNodeObject = (struct GraphNodeObject *) node;
+                sVrFilteringLocalMarioBody =
+                    processLocalMarioVrSkeleton;
                 node->header.gfx.sharedChild->parent = &node->header.gfx.node;
                 geo_sanitize_object_gfx();
                 geo_process_node_and_siblings(node->header.gfx.sharedChild);
                 node->header.gfx.sharedChild->parent = NULL;
+                sVrFilteringLocalMarioBody = false;
                 gCurGraphNodeObject = NULL;
                 gCurMarioBodyState = NULL;
             }
@@ -3061,7 +3774,13 @@ void geo_process_held_object(struct GraphNodeHeldObject *node) {
     if (node->fnNode.func != NULL) {
         node->fnNode.func(GEO_CONTEXT_RENDER, &node->fnNode.node, gMatStack[gMatStackIndex]);
     }
-    if (node->objNode != NULL && node->objNode->header.gfx.sharedChild != NULL) {
+    const bool trackedVrHeldObject =
+        vr_hand_interaction_is_tracked_held_object(
+            node->objNode
+        );
+    if (!trackedVrHeldObject &&
+        node->objNode != NULL &&
+        node->objNode->header.gfx.sharedChild != NULL) {
         s32 hasAnimation = (node->objNode->header.gfx.node.flags & GRAPH_RENDER_HAS_ANIMATION) != 0;
 
         translation[0] = node->translation[0] / 4.0f;
@@ -3186,6 +3905,10 @@ static void geo_process_bone(struct GraphNodeBone *node) {
     mtxf_rotate_xyz_and_translate(matrix, translation, rotation);
     mtxf_scale_vec3f(matrix, matrix, scale);
     mtxf_mul(gMatStack[gMatStackIndex + 1], matrix, gMatStack[gMatStackIndex]);
+    vr_adjust_local_mario_body_transform(
+        gMatStack[gMatStackIndex + 1],
+        false
+    );
 
     // previous frame
     geo_update_interpolation(node->translation, node->rotation, node->scale,
@@ -3202,6 +3925,10 @@ static void geo_process_bone(struct GraphNodeBone *node) {
         mtxf_rotate_xyz_and_translate(matrix, translation, rotation);
         mtxf_scale_vec3f(matrix, matrix, scale);
         mtxf_mul(gMatStackPrev[gMatStackIndex + 1], matrix, gMatStackPrev[gMatStackIndex]);
+        vr_adjust_local_mario_body_transform(
+            gMatStackPrev[gMatStackIndex + 1],
+            true
+        );
     );
 
     // Increment the matrix stack, If we fail to do so. Just return.

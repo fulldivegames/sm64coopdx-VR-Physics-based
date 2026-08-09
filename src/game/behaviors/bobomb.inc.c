@@ -188,10 +188,12 @@ void bobomb_free_loop(void) {
 
 void bobomb_held_loop(void) {
     if (o->heldByPlayerIndex >= MAX_PLAYERS) { return; }
-    o->header.gfx.node.flags |= GRAPH_RENDER_INVISIBLE;
     cur_obj_init_animation(1);
     struct Object* player = gMarioStates[o->heldByPlayerIndex].marioObj;
-    cur_obj_set_pos_relative(player, 0, 60.0f, 100.0);
+    if (!vr_hand_interaction_apply_held_object_transform(o)) {
+        o->header.gfx.node.flags |= GRAPH_RENDER_INVISIBLE;
+        cur_obj_set_pos_relative(player, 0, 60.0f, 100.0);
+    }
 
     o->oBobombFuseLit = 1;
     if (o->oBobombFuseTimer >= 151) {

@@ -129,10 +129,7 @@ static bool controller_vr_update_physical_punch(
             state->gripLinearVelocity[2]
     );
 
-    const float gripAmount = fmaxf(
-        state->squeeze,
-        state->trigger
-    );
+    const float gripAmount = state->squeeze;
     const float gripThreshold = controller_vr_clampf(
         (float)configVrPunchGripThreshold,
         10.0f,

@@ -11,6 +11,7 @@
 #include "game/memory.h"
 #include "game/obj_behaviors_2.h"
 #include "game/object_helpers.h"
+#include "game/vr_hand_interaction.h"
 #include "game/object_list_processor.h"
 #include "graph_node.h"
 #include "surface_collision.h"
@@ -19,6 +20,7 @@
 #include "pc/lua/smlua.h"
 #include "pc/lua/smlua_hooks.h"
 #include "pc/lua/smlua_utils.h"
+#include "pc/vr/vr.h"
 #include "game/rng_position.h"
 #include "game/interaction.h"
 #include "game/hardcoded.h"
@@ -1385,6 +1387,14 @@ cur_obj_update_begin:;
     smlua_call_behavior_hook(gCurrentObject);
     gCurrentObject->curBhvCommand = gCurBhvCommand;
 
+    // A locally held VR object keeps its native held behavior, but its final
+    // position and visibility come from the tracked hand after that behavior
+    // has run. The normal object transform update below then renders it at the
+    // hand without replacing enemy logic or multiplayer ownership state.
+    vr_hand_interaction_apply_held_object_transform(
+        gCurrentObject
+    );
+
     // Increment the object's timer.
     if (gCurrentObject->oTimer < 0x3FFFFFFF) {
         gCurrentObject->oTimer++;
@@ -1434,7 +1444,8 @@ cur_obj_update_begin:;
     } else if ((objFlags & OBJ_FLAG_COMPUTE_DIST_TO_MARIO) && gCurrentObject->collisionData == NULL) {
         if (!(objFlags & OBJ_FLAG_ACTIVE_FROM_AFAR)) {
             // If the object has a render distance, check if it should be shown.
-            if (!draw_distance_scalar_is_infinite() &&
+            if (!vr_is_active() &&
+                !draw_distance_scalar_is_infinite() &&
                 distanceFromMario > gCurrentObject->oDrawingDistance * draw_distance_scalar()
             ) {
                 // Out of render distance, hide the object.

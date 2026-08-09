@@ -21,6 +21,7 @@
 #include "pc/network/network.h"
 #include "pc/lua/smlua.h"
 #include "hardcoded.h"
+#include "vr_hand_interaction.h"
 
 /* |description|
 Plays a spinning sound at specific animation frames for flips (usually side flips or certain jump flips).
@@ -2079,6 +2080,15 @@ s32 act_flying(struct MarioState *m) {
 
 s32 act_riding_hoot(struct MarioState *m) {
     if (!m) { return 0; }
+
+    // VR can physically hold onto other moving actors without converting
+    // them into throwable objects. Reuse the stable hanging action while the
+    // tracked grip supplies the actor-relative player position.
+    if (vr_hand_interaction_apply_player_anchor(m)) {
+        set_character_animation(m, CHAR_ANIM_HANG_ON_OWL);
+        return FALSE;
+    }
+
     if (m->usedObj == NULL || m->usedObj->behavior != smlua_override_behavior(bhvHoot)) {
         m->usedObj = cur_obj_nearest_object_with_behavior(bhvHoot);
         if (m->usedObj == NULL) { return FALSE; }

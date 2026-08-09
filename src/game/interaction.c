@@ -352,6 +352,18 @@ static s16 update_first_person_held_object_origin(
         return releaseYaw;
     }
 
+    Vec3f trackedHoldPosition;
+    if (vr_hand_interaction_get_held_object_position(
+            m->heldObj,
+            trackedHoldPosition
+        )) {
+        vec3f_copy(
+            m->marioBodyState->heldObjLastPosition,
+            trackedHoldPosition
+        );
+        return releaseYaw;
+    }
+
     // The local Mario geo tree is intentionally hidden in first-person modes.
     // That also skips the hand-bone callback which normally refreshes this
     // position, so provide a stable virtual hold point before a drop/throw.
@@ -370,6 +382,9 @@ static s16 update_first_person_held_object_origin(
 void mario_drop_held_object(struct MarioState *m) {
     if (!m) { return; }
     if (m->playerIndex != 0) { return; }
+    if (vr_hand_interaction_blocks_native_held_object_release(m)) {
+        return;
+    }
 
     if (m->heldObj != NULL) {
         const s16 releaseYaw =
@@ -403,6 +418,9 @@ void mario_drop_held_object(struct MarioState *m) {
 void mario_throw_held_object(struct MarioState *m) {
     if (!m) { return; }
     if (m->playerIndex != 0) { return; }
+    if (vr_hand_interaction_blocks_native_held_object_release(m)) {
+        return;
+    }
 
     if (m->heldObj != NULL) {
         const s16 releaseYaw =
@@ -2438,6 +2456,19 @@ void mario_process_interactions(struct MarioState *m) {
 
                 m->collidedObjInteractTypes &= ~interactType;
 
+                if (m->playerIndex == 0 &&
+                    (vr_hand_interaction_is_player_anchor_object(
+                         object
+                     ) ||
+                     vr_hand_interaction_is_tracked_held_object(
+                         object
+                     ))) {
+                    // A tracked interaction already owns this object. Do not
+                    // let Mario's body collision push him away from the held
+                    // object or re-run the actor's normal interaction.
+                    continue;
+                }
+
                 if (object && !(object->oInteractStatus & INT_STATUS_INTERACTED)) {
                     bool allowInteract = true;
                     smlua_call_event_hooks(HOOK_ALLOW_INTERACT, m, object, interactType, &allowInteract);
@@ -2459,6 +2490,12 @@ void mario_process_interactions(struct MarioState *m) {
             struct NetworkPlayer* np2 = &gNetworkPlayers[i];
             if (!np2->connected) { continue; }
             if (&gMarioStates[i] == m) { continue; }
+            if (m->playerIndex == 0 &&
+                vr_hand_interaction_is_player_anchor_object(
+                    gMarioStates[i].marioObj
+                )) {
+                continue;
+            }
             interact_player_pvp(m, &gMarioStates[i]);
         }
     }

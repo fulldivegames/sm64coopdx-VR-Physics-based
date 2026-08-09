@@ -1,3 +1,5 @@
+#include <math.h>
+
 #include <PR/ultratypes.h>
 
 #include "sm64.h"
@@ -15,6 +17,7 @@
 #include "pc/network/network.h"
 #include "object_helpers.h"
 #include "pc/lua/smlua.h"
+#include "vr_hand_interaction.h"
 
 /**
  * Used by act_punching() to determine Mario's forward velocity during each
@@ -380,8 +383,18 @@ s32 act_holding_bowser(struct MarioState *m) {
     }
 
     s16 spin;
+    f32 vrTurnInput = 0.0f;
+    bool vrGripReleased = false;
+    const bool vrBowserControls =
+        vr_hand_interaction_get_bowser_controls(
+            m,
+            &vrTurnInput,
+            &vrGripReleased
+        );
 
-    if (m->playerIndex == 0 && m->input & INPUT_B_PRESSED) {
+    if (m->playerIndex == 0 &&
+        ((m->input & INPUT_B_PRESSED) ||
+         (vrBowserControls && vrGripReleased))) {
 #ifndef VERSION_JP
         if (m->angleVel[1] <= -0xE00 || m->angleVel[1] >= 0xE00) {
             play_character_sound(m, CHAR_SOUND_SO_LONGA_BOWSER);
@@ -395,17 +408,63 @@ s32 act_holding_bowser(struct MarioState *m) {
     }
 
     if (m->playerIndex == 0 && m->angleVel[1] == 0) {
-        if (m->actionTimer++ > 120) {
+        if (!vrBowserControls && m->actionTimer++ > 120) {
             return set_mario_action(m, ACT_RELEASING_BOWSER, 1);
         }
 
+        if (vrBowserControls) {
+            // A closed physical grip owns the hold, so Bowser must not use
+            // the vanilla two-second stationary auto-drop timer.
+            m->actionTimer = 0;
+        }
         set_character_animation(m, CHAR_ANIM_HOLDING_BOWSER);
     } else {
         m->actionTimer = 0;
         set_character_animation(m, CHAR_ANIM_SWINGING_BOWSER);
     }
 
-    if (m->intendedMag > 20.0f) {
+    if (vrBowserControls) {
+        const s32 acceleration = MAX(
+            1,
+            (48 * (s32)clamp(
+                configVrBowserSpinAcceleration,
+                25U,
+                200U
+            ) + 50) / 100
+        );
+        const s32 maximumSpeed =
+            (0x1000 * (s32)clamp(
+                configVrBowserMaxSpinSpeed,
+                50U,
+                150U
+            ) + 50) / 100;
+
+        m->actionArg = 0;
+        if (fabsf(vrTurnInput) > 0.0001f) {
+            const s32 inputAcceleration = MAX(
+                1,
+                (s32)roundf(
+                    (f32)acceleration * fabsf(vrTurnInput)
+                )
+            );
+            const s32 targetSpeed = vrTurnInput > 0.0f
+                ? maximumSpeed
+                : -maximumSpeed;
+            m->angleVel[1] = approach_s32(
+                m->angleVel[1],
+                targetSpeed,
+                inputAcceleration,
+                inputAcceleration
+            );
+        } else {
+            m->angleVel[1] = approach_s32(
+                m->angleVel[1],
+                0,
+                acceleration,
+                acceleration
+            );
+        }
+    } else if (m->intendedMag > 20.0f) {
         if (m->actionArg == 0) {
             m->actionArg = 1;
             m->twirlYaw = m->intendedYaw;

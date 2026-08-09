@@ -44,6 +44,7 @@ extern f32 gOverrideFar;
 void geo_process_node_and_siblings(struct GraphNode *firstNode);
 void geo_process_root(struct GraphNodeRoot *node, Vp *b, Vp *c, s32 clearColor);
 void register_mtx_vr_ui(Mtx *matrix);
+void vr_reset_first_person_calibration(void);
 void vr_adjust_first_person_camera_direction(Vec3f direction);
 s16 vr_get_first_person_action_turn_yaw(void);
 bool vr_get_controller_world_fist(

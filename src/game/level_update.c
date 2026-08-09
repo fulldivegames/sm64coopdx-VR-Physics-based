@@ -456,6 +456,7 @@ void init_mario_after_warp(void) {
         }
 
         init_mario();
+        vr_reset_first_person_calibration();
         set_mario_initial_action(gMarioState, marioSpawnType, sWarpDest.arg);
 
         // remove offset from local mario during warps
@@ -1786,6 +1787,7 @@ s32 init_level(void) {
     geo_clear_interp_data();
     djui_hud_clear_interp_data();
     reset_dialog_render_state();
+    vr_reset_first_person_calibration();
 
     s32 val4 = 0;
 
