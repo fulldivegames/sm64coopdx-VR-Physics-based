@@ -1,4 +1,5 @@
 #include <math.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -40,13 +41,25 @@
 #include "pc/gfx/gfx_window_manager_api.h"
 
 #define G_TX_LOADTILE_6_UNKNOWN 6
+#define GFX_SHADER_CACHE_FILENAME "gfx_shader_cache.txt"
 
 u8 gGfxPcResetTex1 = 0;
 
 static struct TextureCache gfx_texture_cache = { 0 };
 static struct ColorCombiner color_combiner_pool[CC_MAX_SHADERS] = { 0 };
-static uint8_t color_combiner_pool_size = 0;
-static uint8_t color_combiner_pool_index = 0;
+static uint16_t color_combiner_pool_size = 0;
+static uint16_t color_combiner_pool_index = 0;
+static uint16_t sBuiltInColorCombinerCount = 0;
+static bool sShaderStartupWarmupComplete = false;
+static FILE *sShaderCacheAppendFile = NULL;
+
+static void gfx_pc_precomp_shader_exact(
+    uint32_t rgb1,
+    uint32_t alpha1,
+    uint32_t rgb2,
+    uint32_t alpha2,
+    uint32_t flags
+);
 
 struct RSP {
     ALIGNED16 Mat4 MP_matrix;
@@ -216,12 +229,35 @@ static void combine_mode_update_hash(struct CombineMode* cm) {
 static void color_combiner_update_hash(struct ColorCombiner* cc) {
     uint64_t hash = cc->cm.hash;
 
-    for (int i = 0; i < 8; i++) {
+    for (size_t i = 0;
+         i < sizeof(cc->shader_commands_as_u64) /
+             sizeof(cc->shader_commands_as_u64[0]);
+         i++) {
         hash = (hash << 5) + hash + cc->shader_input_mapping_as_u64[i];
         hash = (hash << 5) + hash + cc->shader_commands_as_u64[i];
     }
 
     cc->hash = hash;
+}
+
+static void gfx_shader_cache_write_definition(
+    FILE *file,
+    const struct CombineMode *cm
+) {
+    if (file == NULL || cm == NULL) {
+        return;
+    }
+
+    fprintf(
+        file,
+        "%08" PRIx32 " %08" PRIx32 " %08" PRIx32
+        " %08" PRIx32 " %08" PRIx32 "\n",
+        cm->rgb1,
+        cm->alpha1,
+        cm->rgb2,
+        cm->alpha2,
+        cm->flags
+    );
 }
 
 static struct ShaderProgram *gfx_lookup_or_create_shader_program(struct ColorCombiner* cc) {
@@ -237,6 +273,11 @@ static struct ShaderProgram *gfx_lookup_or_create_shader_program(struct ColorCom
 static void gfx_generate_cc(struct ColorCombiner *cc) {
     u8 next_input_number = 0;
     u8 input_number[CC_ENUM_MAX] = { 0 };
+
+    // A cache slot may be reused after the pool wraps. Clear all command data
+    // so the shader hash never depends on bytes left by the previous entry.
+    memset(cc->shader_input_mapping, 0, sizeof(cc->shader_input_mapping));
+    memset(cc->shader_commands, 0, sizeof(cc->shader_commands));
 
     for  (int i = 0; i < SHADER_CMD_LENGTH; i++) {
         u8 cm_cmd = cc->cm.all_values[i];
@@ -317,6 +358,17 @@ static struct ColorCombiner *gfx_lookup_or_create_color_combiner(struct CombineM
 
     memcpy(&comb->cm, cm, sizeof(struct CombineMode));
     gfx_generate_cc(comb);
+
+    if (sShaderStartupWarmupComplete &&
+        sShaderCacheAppendFile != NULL) {
+        gfx_shader_cache_write_definition(
+            sShaderCacheAppendFile,
+            &comb->cm
+        );
+        // Shader discovery is infrequent. Flushing this tiny definition now
+        // keeps it available for the next startup even after an abnormal exit.
+        fflush(sShaderCacheAppendFile);
+    }
 
     return prev_combiner = comb;
 }
@@ -2069,7 +2121,61 @@ void gfx_init(struct GfxWindowManagerAPI *wapi, struct GfxRenderingAPI *rapi, co
     gfx_wapi->init(window_title);
     gfx_rapi->init();
 
+    printf("[GFX] Building quick startup shader cache...\n");
     gfx_cc_precomp();
+    sBuiltInColorCombinerCount = color_combiner_pool_size;
+
+    uint32_t loadedCount = 0;
+
+    FILE *shaderCache = fopen(
+        fs_get_write_path(GFX_SHADER_CACHE_FILENAME),
+        "r"
+    );
+    if (shaderCache != NULL) {
+        char line[160];
+        uint32_t rgb1;
+        uint32_t alpha1;
+        uint32_t rgb2;
+        uint32_t alpha2;
+        uint32_t flags;
+
+        while (color_combiner_pool_size < CC_MAX_SHADERS &&
+               fgets(line, sizeof(line), shaderCache) != NULL) {
+            if (sscanf(
+                    line,
+                    "%" SCNx32 " %" SCNx32 " %" SCNx32
+                    " %" SCNx32 " %" SCNx32,
+                    &rgb1,
+                    &alpha1,
+                    &rgb2,
+                    &alpha2,
+                    &flags
+                ) == 5) {
+                gfx_pc_precomp_shader_exact(
+                    rgb1,
+                    alpha1,
+                    rgb2,
+                    alpha2,
+                    flags
+                );
+                loadedCount++;
+            }
+        }
+        fclose(shaderCache);
+    }
+
+    printf(
+        "[GFX] Startup shader cache ready: %u shader program(s), "
+        "%u learned definition(s).\n",
+        color_combiner_pool_size,
+        loadedCount
+    );
+
+    sShaderCacheAppendFile = fopen(
+        fs_get_write_path(GFX_SHADER_CACHE_FILENAME),
+        "a"
+    );
+    sShaderStartupWarmupComplete = true;
 
     gGfxInited = true;
 }
@@ -2136,6 +2242,40 @@ void gfx_end_frame(void) {
 }
 
 void gfx_shutdown(void) {
+    sShaderStartupWarmupComplete = false;
+    if (sShaderCacheAppendFile != NULL) {
+        fclose(sShaderCacheAppendFile);
+        sShaderCacheAppendFile = NULL;
+    }
+
+    if (color_combiner_pool_size > 0) {
+        FILE *shaderCache = fopen(
+            fs_get_write_path(GFX_SHADER_CACHE_FILENAME),
+            "w"
+        );
+        if (shaderCache != NULL) {
+            const uint16_t firstCachedCombiner =
+                color_combiner_pool_size == CC_MAX_SHADERS
+                    ? 0
+                    : sBuiltInColorCombinerCount;
+            fprintf(
+                shaderCache,
+                "# SM64 Co-Op DX learned color-combiner shader cache\n"
+            );
+            for (uint16_t i = firstCachedCombiner;
+                 i < color_combiner_pool_size;
+                 i++) {
+                const struct CombineMode *cm =
+                    &color_combiner_pool[i].cm;
+                gfx_shader_cache_write_definition(
+                    shaderCache,
+                    cm
+                );
+            }
+            fclose(shaderCache);
+        }
+    }
+
     if (gfx_rapi) {
         if (gfx_rapi->shutdown) gfx_rapi->shutdown();
         gfx_rapi = NULL;
@@ -2446,13 +2586,58 @@ static void gfx_sp_load_or_save_state(uint8_t cmd, uint32_t state) {
     }
 }
 
-void gfx_pc_precomp_shader(uint32_t rgb1, uint32_t alpha1, uint32_t rgb2, uint32_t alpha2, uint32_t flags) {
+static void gfx_pc_precomp_shader_exact(uint32_t rgb1, uint32_t alpha1, uint32_t rgb2, uint32_t alpha2, uint32_t flags) {
     gfx_dp_set_combine_mode(rgb1, alpha1, rgb2, alpha2);
 
     struct CombineMode* cm = &rdp.combine_mode;
     cm->flags = flags;
 
     gfx_lookup_or_create_color_combiner(cm);
+}
+
+void gfx_pc_precomp_shader(uint32_t rgb1, uint32_t alpha1, uint32_t rgb2, uint32_t alpha2, uint32_t flags) {
+    struct CombineMode variant = { 0 };
+
+    // Build the common geometry variants up front. The base-game list already
+    // covers its alpha/fog/dither/two-cycle combinations, while these two bits
+    // are selected later from the vertex stream and were therefore the main
+    // source of otherwise avoidable first-use compilation during gameplay.
+    variant.flags = flags;
+    gfx_pc_precomp_shader_exact(
+        rgb1,
+        alpha1,
+        rgb2,
+        alpha2,
+        variant.flags
+    );
+
+    variant.world_geometry = true;
+    gfx_pc_precomp_shader_exact(
+        rgb1,
+        alpha1,
+        rgb2,
+        alpha2,
+        variant.flags
+    );
+
+    variant.flags = flags;
+    variant.light_map = true;
+    gfx_pc_precomp_shader_exact(
+        rgb1,
+        alpha1,
+        rgb2,
+        alpha2,
+        variant.flags
+    );
+
+    variant.world_geometry = true;
+    gfx_pc_precomp_shader_exact(
+        rgb1,
+        alpha1,
+        rgb2,
+        alpha2,
+        variant.flags
+    );
 }
 
 void OPTIMIZE_O3 ext_gfx_run_dl(Gfx* cmd) {

@@ -20,6 +20,12 @@
 #include "pc/network/packets/packet.h"
 #include "pc/vr/vr.h"
 
+#ifdef DEBUG
+#define VR_INTERACTION_DEBUG(...) printf(__VA_ARGS__)
+#else
+#define VR_INTERACTION_DEBUG(...) ((void)0)
+#endif
+
 #define VR_FIST_ACTIVE_FRAMES 33
 #define VR_FIST_SWEEP_SAMPLES 4
 #define VR_FIST_BASE_RADIUS 12.0f
@@ -28,11 +34,15 @@
 #define VR_MOTION_DIVE_PAIR_WINDOW_FRAMES 5
 #define VR_GRIP_CLOSE_THRESHOLD 0.55f
 #define VR_GRIP_OPEN_THRESHOLD 0.35f
-#define VR_GRAB_EXTRA_REACH 10.0f
+#define VR_GRAB_EXTRA_REACH 16.0f
 #define VR_THROW_MIN_SPEED 60.0f
 #define VR_THROW_VELOCITY_SCALE 0.125f
 #define VR_THROW_VELOCITY_MEMORY 0.78f
 #define VR_BOWSER_TURN_DEADZONE 0.18f
+#define VR_BOWSER_HAND_TURN_FULL_INPUT 0x600
+#define VR_BOWSER_HAND_TURN_JITTER 0x60
+#define VR_BOWSER_FULL_POWER_ARC 0x1000
+#define VR_BOWSER_MIN_HAND_RADIUS_METERS 0.10f
 
 #define VR_ANCHORABLE_INTERACT_TYPES ( \
     INTERACT_BOUNCE_TOP | \
@@ -88,6 +98,11 @@ static struct Object* sVrTrackedAnchorObject = NULL;
 static u32 sVrTrackedAnchorHand = VR_CONTROLLER_COUNT;
 static Vec3f sVrTrackedAnchorOffset = { 0.0f, 0.0f, 0.0f };
 static u32 sVrBowserGripHand = VR_CONTROLLER_COUNT;
+static bool sVrBowserHandYawValid = false;
+static s16 sVrBowserPreviousHandYaw = 0;
+static s32 sVrBowserAccumulatedHandYaw = 0;
+static f32 sVrBowserPhysicalTurnInput = 0.0f;
+static bool sVrBowserFullPowerImpulse = false;
 
 static void vr_hand_interaction_clear_tracked_hold(void) {
     sVrTrackedHeldObject = NULL;
@@ -128,6 +143,14 @@ static void vr_hand_interaction_clear_player_anchor(void) {
     vec3f_set(sVrTrackedAnchorOffset, 0.0f, 0.0f, 0.0f);
 }
 
+static void vr_hand_interaction_clear_bowser_motion(void) {
+    sVrBowserHandYawValid = false;
+    sVrBowserPreviousHandYaw = 0;
+    sVrBowserAccumulatedHandYaw = 0;
+    sVrBowserPhysicalTurnInput = 0.0f;
+    sVrBowserFullPowerImpulse = false;
+}
+
 static void vr_hand_interaction_reset(void) {
     for (u32 hand = 0;
          hand < VR_CONTROLLER_COUNT;
@@ -140,6 +163,7 @@ static void vr_hand_interaction_reset(void) {
     sVrPunchSoundComboStep = 0;
     sVrPunchSoundComboResetFrames = 0;
     sVrBowserGripHand = VR_CONTROLLER_COUNT;
+    vr_hand_interaction_clear_bowser_motion();
 }
 
 static void vr_hand_interaction_update_punch_sound(
@@ -271,7 +295,9 @@ static void vr_hand_interaction_register_motion_dive_punch(
             0.06f,
             -1.0f
         );
-        printf("[VR] Two-hand motion dive triggered.\n");
+        VR_INTERACTION_DEBUG(
+            "[VR] Two-hand motion dive triggered.\n"
+        );
     }
 }
 
@@ -420,10 +446,104 @@ static bool vr_hand_interaction_is_bowser_hold(
         obj_has_behavior(mario->heldObj, bhvBowser);
 }
 
+static bool vr_hand_interaction_is_bowser_sequence(
+    struct MarioState* mario
+) {
+    return mario != NULL &&
+        mario->playerIndex == 0 &&
+        (mario->action == ACT_PICKING_UP_BOWSER ||
+         vr_hand_interaction_is_bowser_hold(mario));
+}
+
+static void vr_hand_interaction_update_bowser_hand_turn(
+    struct MarioState* mario,
+    u32 hand,
+    bool controllerAvailable,
+    const struct VrControllerState* controllerState
+) {
+    sVrBowserPhysicalTurnInput = 0.0f;
+    if (!vr_hand_interaction_is_bowser_hold(mario) ||
+        hand != sVrBowserGripHand ||
+        !sVrGripPressed[hand] ||
+        !controllerAvailable ||
+        controllerState == NULL ||
+        (!controllerState->gripPoseValid &&
+         !controllerState->aimPoseValid)) {
+        sVrBowserHandYawValid = false;
+        sVrBowserAccumulatedHandYaw = 0;
+        return;
+    }
+
+    float headPosition[3];
+    if (!vr_get_head_translation(headPosition)) {
+        sVrBowserHandYawValid = false;
+        sVrBowserAccumulatedHandYaw = 0;
+        return;
+    }
+
+    // Controller and head poses are both expressed in the recentered OpenXR
+    // tracking space. Measuring the hand around the head here makes physical
+    // Bowser momentum depend only on hand movement, never camera/HMD yaw.
+    const float* trackedHandPosition =
+        controllerState->gripPoseValid
+            ? controllerState->gripPosition
+            : controllerState->aimPosition;
+    const f32 handX = trackedHandPosition[0] - headPosition[0];
+    const f32 handZ = trackedHandPosition[2] - headPosition[2];
+    if (handX * handX + handZ * handZ <
+        VR_BOWSER_MIN_HAND_RADIUS_METERS *
+            VR_BOWSER_MIN_HAND_RADIUS_METERS) {
+        sVrBowserHandYawValid = false;
+        sVrBowserAccumulatedHandYaw = 0;
+        return;
+    }
+
+    const s16 handYaw = atan2s(handZ, handX);
+    if (sVrBowserHandYawValid) {
+        const s16 yawDelta =
+            (s16)(handYaw - sVrBowserPreviousHandYaw);
+        const s32 delta = (s32)yawDelta;
+        if (delta >= VR_BOWSER_HAND_TURN_JITTER ||
+            delta <= -VR_BOWSER_HAND_TURN_JITTER) {
+            sVrBowserPhysicalTurnInput = clamp(
+                (f32)delta /
+                    (f32)VR_BOWSER_HAND_TURN_FULL_INPUT,
+                -1.0f,
+                1.0f
+            );
+
+            // Direction reversals start a new swing. A deliberate 22.5-degree
+            // hand arc is one physical turn and guarantees full throw power.
+            if ((sVrBowserAccumulatedHandYaw > 0 && delta < 0) ||
+                (sVrBowserAccumulatedHandYaw < 0 && delta > 0)) {
+                sVrBowserAccumulatedHandYaw = delta;
+            } else {
+                sVrBowserAccumulatedHandYaw += delta;
+            }
+            sVrBowserAccumulatedHandYaw = clamp(
+                sVrBowserAccumulatedHandYaw,
+                -VR_BOWSER_FULL_POWER_ARC,
+                VR_BOWSER_FULL_POWER_ARC
+            );
+            if (sVrBowserAccumulatedHandYaw ==
+                    VR_BOWSER_FULL_POWER_ARC ||
+                sVrBowserAccumulatedHandYaw ==
+                    -VR_BOWSER_FULL_POWER_ARC) {
+                sVrBowserFullPowerImpulse = true;
+                sVrBowserAccumulatedHandYaw = 0;
+            }
+        }
+    }
+
+    sVrBowserPreviousHandYaw = handYaw;
+    sVrBowserHandYawValid = true;
+}
+
 bool vr_hand_interaction_get_bowser_controls(
     struct MarioState* mario,
     f32* turnInput,
-    bool* gripReleased
+    bool* gripReleased,
+    bool* fullPowerImpulse
 ) {
     if (turnInput != NULL) {
         *turnInput = 0.0f;
@@ -431,12 +551,16 @@ bool vr_hand_interaction_get_bowser_controls(
     if (gripReleased != NULL) {
         *gripReleased = false;
     }
+    if (fullPowerImpulse != NULL) {
+        *fullPowerImpulse = false;
+    }
 
     if (!vr_is_active() ||
         !configVrMotionControllerInput ||
         !configVrPhysicalGrabbing ||
         !vr_hand_interaction_is_bowser_hold(mario)) {
         sVrBowserGripHand = VR_CONTROLLER_COUNT;
+        vr_hand_interaction_clear_bowser_motion();
         return false;
     }
 
@@ -450,6 +574,7 @@ bool vr_hand_interaction_get_bowser_controls(
         } else {
             return false;
         }
+        vr_hand_interaction_clear_bowser_motion();
     }
 
     if (!sVrGripPressed[sVrBowserGripHand]) {
@@ -457,23 +582,36 @@ bool vr_hand_interaction_get_bowser_controls(
         if (gripReleased != NULL) {
             *gripReleased = true;
         }
+        vr_hand_interaction_clear_bowser_motion();
         return true;
     }
 
-    if (turnInput != NULL && mario->controller != NULL) {
-        f32 input = (f32)mario->controller->extStickX / 127.0f;
-        const f32 magnitude = fabsf(input);
+    f32 input = sVrBowserPhysicalTurnInput;
+    if (mario->controller != NULL) {
+        f32 stickInput =
+            (f32)mario->controller->extStickX / 127.0f;
+        const f32 magnitude = fabsf(stickInput);
         if (magnitude <= VR_BOWSER_TURN_DEADZONE) {
-            input = 0.0f;
+            stickInput = 0.0f;
         } else {
-            input = copysignf(
+            stickInput = copysignf(
                 (magnitude - VR_BOWSER_TURN_DEADZONE) /
                     (1.0f - VR_BOWSER_TURN_DEADZONE),
-                input
+                stickInput
             );
         }
+        if (fabsf(stickInput) > fabsf(input)) {
+            input = stickInput;
+        }
+    }
+
+    if (turnInput != NULL) {
         *turnInput = clamp(input, -1.0f, 1.0f);
     }
+    if (fullPowerImpulse != NULL) {
+        *fullPowerImpulse = sVrBowserFullPowerImpulse;
+    }
+    sVrBowserFullPowerImpulse = false;
 
     return true;
 }
@@ -532,6 +670,40 @@ static void vr_hand_interaction_update_held_position(
     sVrTrackedHeldPositionValid = true;
 
     vr_hand_interaction_apply_held_object_transform(object);
+}
+
+static bool vr_hand_interaction_adopt_native_hold(
+    struct MarioState* mario,
+    u32 hand,
+    const Vec3f handPosition,
+    const Vec3f handVelocity
+) {
+    struct Object* object = mario != NULL ? mario->heldObj : NULL;
+    if (!configVrPhysicalGrabbing ||
+        object == NULL ||
+        sVrTrackedHeldObject != NULL ||
+        hand >= VR_CONTROLLER_COUNT ||
+        !sVrGripPressed[hand] ||
+        obj_has_behavior(object, bhvBowser) ||
+        (object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
+        return false;
+    }
+
+    // Dive/punch pickups already established the native held-object and
+    // multiplayer state. Adopt that same object instead of grabbing it again.
+    sVrTrackedHeldObject = object;
+    sVrTrackedHeldHand = hand;
+    vr_hand_interaction_update_held_position(
+        object,
+        handPosition,
+        handVelocity
+    );
+    vr_apply_haptic(hand, 0.35f, 0.06f, -1.0f);
+    VR_INTERACTION_DEBUG(
+        "[VR] %s hand adopted Mario's held object.\n",
+        hand == VR_CONTROLLER_LEFT ? "Left" : "Right"
+    );
+    return true;
 }
 
 static bool vr_hand_interaction_object_can_be_grabbed(
@@ -603,6 +775,132 @@ static bool vr_hand_interaction_grab_overlaps_object(
             deltaY * deltaY +
             deltaZ * deltaZ;
     }
+    return true;
+}
+
+static struct Object* vr_hand_interaction_find_bowser_tail(
+    const Vec3f handPosition
+) {
+    if (gObjectLists == NULL) {
+        return NULL;
+    }
+
+    const f32 handRadius = vr_hand_interaction_fist_radius();
+    const f32 reach = 100.0f + handRadius + VR_GRAB_EXTRA_REACH;
+    const f32 reachSquared = reach * reach;
+    struct Object* nearestTail = NULL;
+    f32 nearestDistanceSquared = 0.0f;
+
+    struct ObjectNode* list = &gObjectLists[OBJ_LIST_GENACTOR];
+    struct ObjectNode* node = list->next;
+    while (node != NULL && node != list) {
+        struct Object* tail = (struct Object*)node;
+        node = node->next;
+
+        struct Object* bowser = tail->parentObj;
+        if (!obj_has_behavior(tail, bhvBowserTailAnchor) ||
+            (tail->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
+            bowser == NULL ||
+            !obj_has_behavior(bowser, bhvBowser) ||
+            bowser->oHeldState != HELD_FREE ||
+            (bowser->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
+            bowser->oAction == 5 ||
+            bowser->oAction == 6 ||
+            bowser->oAction == 19 ||
+            bowser->oAction == 20) {
+            continue;
+        }
+
+        // The native tail helper intentionally becomes intangible and moves
+        // to action 2 while Mario overlaps it. That is the normal state in
+        // which a physical glove is close enough to grab, so do not reject it.
+        const f32 deltaX = handPosition[0] - tail->oPosX;
+        const f32 deltaY = handPosition[1] - tail->oPosY;
+        const f32 deltaZ = handPosition[2] - tail->oPosZ;
+        const f32 distanceSquared =
+            deltaX * deltaX +
+            deltaY * deltaY +
+            deltaZ * deltaZ;
+        if (distanceSquared > reachSquared) {
+            continue;
+        }
+
+        if (nearestTail == NULL ||
+            distanceSquared < nearestDistanceSquared) {
+            nearestTail = tail;
+            nearestDistanceSquared = distanceSquared;
+        }
+    }
+
+    return nearestTail;
+}
+
+static bool vr_hand_interaction_try_bowser_grab(
+    struct MarioState* mario,
+    u32 hand,
+    const Vec3f handPosition
+) {
+    if (!configVrPhysicalGrabbing ||
+        mario == NULL ||
+        mario->heldObj != NULL ||
+        hand >= VR_CONTROLLER_COUNT) {
+        return false;
+    }
+
+    struct Object* tail =
+        vr_hand_interaction_find_bowser_tail(handPosition);
+    struct Object* bowser = tail != NULL ? tail->parentObj : NULL;
+    if (bowser == NULL) {
+        return false;
+    }
+
+    bool allowInteract = true;
+    smlua_call_event_hooks(
+        HOOK_ALLOW_INTERACT,
+        mario,
+        bowser,
+        INTERACT_GRABBABLE,
+        &allowInteract
+    );
+    if (!allowInteract) {
+        return false;
+    }
+
+    mario->faceAngle[1] = bowser->oMoveAngleYaw;
+    mario->interactObj = bowser;
+    mario->usedObj = bowser;
+    if (!set_mario_action(mario, ACT_PICKING_UP_BOWSER, 0)) {
+        smlua_call_event_hooks(
+            HOOK_ON_INTERACT,
+            mario,
+            bowser,
+            INTERACT_GRABBABLE,
+            false
+        );
+        return false;
+    }
+
+    // Keep the native Bowser-held state and networking. Only the physical
+    // controller ownership is one-handed from the player's perspective.
+    tail->oAction = 2;
+    bowser->oIntangibleTimer = 0;
+    sVrBowserGripHand = hand;
+    vr_hand_interaction_clear_bowser_motion();
+    if (bowser->oSyncID != 0) {
+        network_send_object_reliability(bowser, true);
+    }
+    smlua_call_event_hooks(
+        HOOK_ON_INTERACT,
+        mario,
+        bowser,
+        INTERACT_GRABBABLE,
+        true
+    );
+    vr_apply_haptic(hand, 0.55f, 0.09f, -1.0f);
+    VR_INTERACTION_DEBUG(
+        "[VR] %s hand grabbed Bowser's tail.\n",
+        hand == VR_CONTROLLER_LEFT ? "Left" : "Right"
+    );
     return true;
 }
 
@@ -772,7 +1070,9 @@ static bool vr_hand_interaction_try_hoot_hold(
         true
     );
     vr_apply_haptic(hand, 0.45f, 0.07f, -1.0f);
-    printf("[VR] Physical hold attached to Hoot.\n");
+    VR_INTERACTION_DEBUG(
+        "[VR] Physical hold attached to Hoot.\n"
+    );
     return true;
 }
 
@@ -831,7 +1131,9 @@ static bool vr_hand_interaction_start_player_anchor(
         true
     );
     vr_apply_haptic(hand, 0.45f, 0.07f, -1.0f);
-    printf("[VR] Physical hold anchored to a moving actor.\n");
+    VR_INTERACTION_DEBUG(
+        "[VR] Physical hold anchored to a moving actor.\n"
+    );
     return true;
 }
 
@@ -886,7 +1188,9 @@ static void vr_hand_interaction_release_player_anchor(
     if (hand < VR_CONTROLLER_COUNT) {
         vr_apply_haptic(hand, 0.15f, 0.04f, -1.0f);
     }
-    printf("[VR] Physical moving-actor hold released.\n");
+    VR_INTERACTION_DEBUG(
+        "[VR] Physical moving-actor hold released.\n"
+    );
 }
 
 static bool vr_hand_interaction_try_grab(
@@ -960,7 +1264,7 @@ static bool vr_hand_interaction_try_grab(
         true
     );
     vr_apply_haptic(hand, 0.45f, 0.07f, -1.0f);
-    printf(
+    VR_INTERACTION_DEBUG(
         "[VR] %s hand grabbed an object.\n",
         hand == VR_CONTROLLER_LEFT ? "Left" : "Right"
     );
@@ -992,6 +1296,7 @@ static void vr_hand_interaction_release_grab(
     const bool throwObject = allowThrow &&
         totalSpeed >= VR_THROW_MIN_SPEED;
 
+    const u32 releaseAction = mario != NULL ? mario->action : 0;
     if (mario != NULL && mario->heldObj == object) {
         if (mario->marioBodyState != NULL &&
             sVrTrackedHeldPositionValid) {
@@ -1008,6 +1313,29 @@ static void vr_hand_interaction_release_grab(
             mario_drop_held_object(mario);
         }
         sVrTrackedReleaseInProgress = false;
+
+        // A native dive/punch pickup may still be in a holding animation when
+        // the physical grip releases it. Leave that animation immediately so
+        // it cannot re-enter a hold state with a null object.
+        if (mario->heldObj == NULL) {
+            switch (releaseAction) {
+                case ACT_PICKING_UP:
+                case ACT_DIVE_PICKING_UP:
+                case ACT_HOLD_IDLE:
+                case ACT_HOLD_HEAVY_IDLE:
+                    set_mario_action(mario, ACT_IDLE, 0);
+                    break;
+                case ACT_HOLD_WALKING:
+                case ACT_HOLD_HEAVY_WALKING:
+                case ACT_HOLD_DECELERATING:
+                    set_mario_action(mario, ACT_WALKING, 0);
+                    break;
+                case ACT_HOLD_JUMP:
+                case ACT_HOLD_FREEFALL:
+                    set_mario_action(mario, ACT_FREEFALL, 0);
+                    break;
+            }
+        }
     }
 
     if ((object->activeFlags & ACTIVE_FLAG_ACTIVE) != 0 &&
@@ -1051,7 +1379,7 @@ static void vr_hand_interaction_release_grab(
             -1.0f
         );
     }
-    printf(
+    VR_INTERACTION_DEBUG(
         "[VR] Tracked object %s.\n",
         throwObject ? "thrown" : "released"
     );
@@ -1188,7 +1516,7 @@ static bool vr_hand_interaction_attack_object(
     );
     vr_apply_haptic(hand, 0.55f, 0.06f, -1.0f);
 
-    printf(
+    VR_INTERACTION_DEBUG(
         "[VR] %s fist hit an object.\n",
         hand == VR_CONTROLLER_LEFT ? "Left" : "Right"
     );
@@ -1266,8 +1594,9 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         vr_hand_interaction_clear_tracked_hold();
     }
 
-    if (!vr_hand_interaction_is_bowser_hold(mario)) {
+    if (!vr_hand_interaction_is_bowser_sequence(mario)) {
         sVrBowserGripHand = VR_CONTROLLER_COUNT;
+        vr_hand_interaction_clear_bowser_motion();
     }
 
     if (sVrTrackedHootObject != NULL &&
@@ -1342,6 +1671,27 @@ void vr_hand_interaction_update(struct MarioState* mario) {
                 velocity
             );
 
+        if (positionValid &&
+            sVrTrackedHeldObject == NULL &&
+            mario->heldObj != NULL &&
+            sVrGripPressed[hand]) {
+            vr_hand_interaction_adopt_native_hold(
+                mario,
+                hand,
+                position,
+                velocity
+            );
+        }
+
+        if (sVrBowserGripHand == hand) {
+            vr_hand_interaction_update_bowser_hand_turn(
+                mario,
+                hand,
+                controllerAvailable,
+                &state
+            );
+        }
+
         if (sVrTrackedHeldHand == hand) {
             if (!positionValid ||
                 !sVrGripPressed[hand]) {
@@ -1374,22 +1724,29 @@ void vr_hand_interaction_update(struct MarioState* mario) {
                 );
             }
         } else if (configVrPhysicalGrabbing &&
-                   !gripWasPressed &&
                    sVrGripPressed[hand] &&
                    positionValid) {
             const bool grabbedObject =
-                vr_hand_interaction_try_grab(
-                    mario,
-                    hand,
-                    position,
-                    velocity
-                );
-            if (!grabbedObject) {
-                vr_hand_interaction_try_actor_hold(
+                vr_hand_interaction_try_bowser_grab(
                     mario,
                     hand,
                     position
                 );
+            if (!grabbedObject && !gripWasPressed) {
+                const bool grabbedRegularObject =
+                    vr_hand_interaction_try_grab(
+                        mario,
+                        hand,
+                        position,
+                        velocity
+                    );
+                if (!grabbedRegularObject) {
+                    vr_hand_interaction_try_actor_hold(
+                        mario,
+                        hand,
+                        position
+                    );
+                }
             }
         }
 
@@ -1398,7 +1755,8 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         const bool handIsHoldingObject =
             sVrTrackedHeldHand == hand ||
             sVrTrackedHootHand == hand ||
-            sVrTrackedAnchorHand == hand;
+            sVrTrackedAnchorHand == hand ||
+            sVrBowserGripHand == hand;
 
         if (punchStarted &&
             configVrPhysicalPunching &&

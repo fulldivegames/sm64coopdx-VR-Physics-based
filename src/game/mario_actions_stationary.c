@@ -54,7 +54,9 @@ s32 check_common_idle_cancels(struct MarioState *m) {
     }
 
     if (m->input & INPUT_NONZERO_ANALOG) {
-        m->faceAngle[1] = (s16) m->intendedYaw;
+        m->faceAngle[1] = vr_first_person_backpedal_active(m)
+            ? (s16)(m->intendedYaw + 0x8000)
+            : (s16)m->intendedYaw;
         return set_mario_action(m, ACT_WALKING, 0);
     }
 
@@ -101,7 +103,9 @@ s32 check_common_hold_idle_cancels(struct MarioState *m) {
     }
 
     if (m->input & INPUT_NONZERO_ANALOG) {
-        m->faceAngle[1] = (s16) m->intendedYaw;
+        m->faceAngle[1] = vr_first_person_backpedal_active(m)
+            ? (s16)(m->intendedYaw + 0x8000)
+            : (s16)m->intendedYaw;
         return set_mario_action(m, ACT_HOLD_WALKING, 0);
     }
 

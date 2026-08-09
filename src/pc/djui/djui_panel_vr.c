@@ -9,6 +9,32 @@
 
 static bool sVrMode = false;
 
+static char* sVrControllerBindingChoices[
+    VR_CONTROLLER_BINDING_COUNT
+] = {
+    "Disabled",
+    "Left Primary",
+    "Left Secondary",
+    "Left Trigger",
+    "Left Grip",
+    "Left Stick Click",
+    "Left Menu",
+    "Right Primary",
+    "Right Secondary",
+    "Right Trigger",
+    "Right Grip",
+    "Right Stick Click",
+    "Right Menu"
+};
+
+static char* sVrControllerStickChoices[
+    VR_CONTROLLER_STICK_COUNT
+] = {
+    "Left Stick",
+    "Right Stick",
+    "Disabled"
+};
+
 static unsigned int djui_panel_vr_clamp_uint(
     unsigned int value,
     unsigned int minimum,
@@ -34,7 +60,7 @@ static void djui_panel_vr_mode_changed(struct DjuiBase* caller) {
 static void djui_panel_vr_camera_defaults(struct DjuiBase* caller) {
     (void)caller;
 
-    configVrCameraMode = VR_CAMERA_MODE_THIRD_PERSON;
+    configVrCameraMode = VR_CAMERA_MODE_FIRST_PERSON;
     configVrCameraDistance = 100;
     configVrCameraDepth = VR_CAMERA_DEPTH_CENTER;
     configVrMovementCalibration = 50;
@@ -59,17 +85,38 @@ static void djui_panel_vr_performance_defaults(struct DjuiBase* caller) {
 static void djui_panel_vr_experimental_defaults(struct DjuiBase* caller) {
     (void)caller;
 
-    configVrExperimentalFlipTurn = true;
+    configVrExperimentalSideFlipFollow = true;
+    configVrExperimentalWallJumpTurn = true;
     configVrExperimentalFlatFirstPerson = false;
     configVrExperimentalTrueFirstPerson = false;
     configVrExperimentalArmsMode = false;
+    configVrExperimentalMountedBody = false;
+    configVrPhysicalCrouching = true;
+    configVrOriginalMarioMovement = false;
+    configVrBackpedalSpeed = VR_BACKPEDAL_SPEED_DEFAULT;
 }
 
-static void djui_panel_vr_controls_defaults(struct DjuiBase* caller) {
+static void djui_panel_vr_controller_defaults(
+    struct DjuiBase* caller
+) {
     (void)caller;
 
     configVrMotionControllerInput = true;
     configVrPunchButton = false;
+    configVrMoveStick = VR_CONTROLLER_STICK_LEFT;
+    configVrCameraStick = VR_CONTROLLER_STICK_RIGHT;
+    configVrJumpBinding =
+        VR_CONTROLLER_BINDING_RIGHT_PRIMARY;
+    configVrAttackBinding =
+        VR_CONTROLLER_BINDING_RIGHT_SECONDARY;
+    configVrCrouchBinding =
+        VR_CONTROLLER_BINDING_LEFT_TRIGGER;
+    configVrLBinding =
+        VR_CONTROLLER_BINDING_LEFT_STICK_CLICK;
+    configVrRBinding =
+        VR_CONTROLLER_BINDING_RIGHT_STICK_CLICK;
+    configVrPauseBinding =
+        VR_CONTROLLER_BINDING_LEFT_MENU;
 }
 
 static void djui_panel_vr_motion_control_defaults(
@@ -85,7 +132,7 @@ static void djui_panel_vr_motion_control_defaults(
     configVrPunchSpeed = 150;
     configVrPunchDistance = 20;
     configVrPunchGripThreshold = 35;
-    configVrPunchColliderLength = 150;
+    configVrPunchColliderLength = 250;
     configVrBowserSpinAcceleration = 100;
     configVrBowserMaxSpinSpeed = 100;
 }
@@ -118,7 +165,7 @@ static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
         config_vr_camera_height_for_character(configPlayerModel);
 
     if (configVrCameraMode >= VR_CAMERA_MODE_COUNT) {
-        configVrCameraMode = VR_CAMERA_MODE_THIRD_PERSON;
+        configVrCameraMode = VR_CAMERA_MODE_FIRST_PERSON;
     }
     if (configVrCameraDistance < 50) {
         configVrCameraDistance = 50;
@@ -148,7 +195,7 @@ static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
     {
         char* cameraModes[VR_CAMERA_MODE_COUNT] = {
             "Third Person Mode",
-            "First Person Mode (Experimental)"
+            "First Person Mode"
         };
 
         djui_selectionbox_create(
@@ -224,10 +271,10 @@ static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
 }
 
 static void djui_panel_vr_performance_create(struct DjuiBase* caller) {
-    if (configVrRenderScale < 50) {
-        configVrRenderScale = 50;
-    } else if (configVrRenderScale > 100) {
-        configVrRenderScale = 100;
+    if (configVrRenderScale < VR_RENDER_SCALE_MIN) {
+        configVrRenderScale = VR_RENDER_SCALE_MIN;
+    } else if (configVrRenderScale > VR_RENDER_SCALE_MAX) {
+        configVrRenderScale = VR_RENDER_SCALE_MAX;
     }
     if (configVrDesktopMirrorFps < 15) {
         configVrDesktopMirrorFps = 15;
@@ -246,8 +293,8 @@ static void djui_panel_vr_performance_create(struct DjuiBase* caller) {
             body,
             "Render Scale (%)",
             &configVrRenderScale,
-            50,
-            100,
+            VR_RENDER_SCALE_MIN,
+            VR_RENDER_SCALE_MAX,
             NULL
         );
 
@@ -295,8 +342,15 @@ static void djui_panel_vr_experimental_create(struct DjuiBase* caller) {
     {
         djui_checkbox_create(
             body,
-            "180 Degree Flip Camera Turn",
-            &configVrExperimentalFlipTurn,
+            "Side-Flip Camera Follow",
+            &configVrExperimentalSideFlipFollow,
+            NULL
+        );
+
+        djui_checkbox_create(
+            body,
+            "180 Degree Wall-Jump Camera Turn",
+            &configVrExperimentalWallJumpTurn,
             NULL
         );
 
@@ -321,6 +375,36 @@ static void djui_panel_vr_experimental_create(struct DjuiBase* caller) {
             NULL
         );
 
+        djui_checkbox_create(
+            body,
+            "Enable Body During Wing Cap, Swimming, and Shell Riding",
+            &configVrExperimentalMountedBody,
+            NULL
+        );
+
+        djui_checkbox_create(
+            body,
+            "Physical Crouching / Ground Pounds",
+            &configVrPhysicalCrouching,
+            NULL
+        );
+
+        djui_checkbox_create(
+            body,
+            "Original Mario Movement",
+            &configVrOriginalMarioMovement,
+            NULL
+        );
+
+        djui_slider_create(
+            body,
+            "Backpedal Speed",
+            &configVrBackpedalSpeed,
+            VR_BACKPEDAL_SPEED_MIN,
+            VR_BACKPEDAL_SPEED_MAX,
+            NULL
+        );
+
         djui_button_create(
             body,
             "Set to Defaults",
@@ -339,9 +423,39 @@ static void djui_panel_vr_experimental_create(struct DjuiBase* caller) {
     djui_panel_add(caller, panel, NULL);
 }
 
-static void djui_panel_vr_controls_create(struct DjuiBase* caller) {
+static void djui_panel_vr_controller_settings_create(
+    struct DjuiBase* caller
+) {
+    configVrMoveStick = djui_panel_vr_clamp_uint(
+        configVrMoveStick,
+        0,
+        VR_CONTROLLER_STICK_COUNT - 1
+    );
+    configVrCameraStick = djui_panel_vr_clamp_uint(
+        configVrCameraStick,
+        0,
+        VR_CONTROLLER_STICK_COUNT - 1
+    );
+    unsigned int* bindings[] = {
+        &configVrJumpBinding,
+        &configVrAttackBinding,
+        &configVrCrouchBinding,
+        &configVrLBinding,
+        &configVrRBinding,
+        &configVrPauseBinding
+    };
+    for (unsigned int i = 0;
+         i < sizeof(bindings) / sizeof(bindings[0]);
+         i++) {
+        *bindings[i] = djui_panel_vr_clamp_uint(
+            *bindings[i],
+            0,
+            VR_CONTROLLER_BINDING_COUNT - 1
+        );
+    }
+
     struct DjuiThreePanel* panel =
-        djui_panel_menu_create("VR Controls", false);
+        djui_panel_menu_create("Controller Settings", false);
 
     struct DjuiBase* body =
         djui_three_panel_get_body(panel);
@@ -351,6 +465,78 @@ static void djui_panel_vr_controls_create(struct DjuiBase* caller) {
             body,
             "Motion Controller Input",
             &configVrMotionControllerInput,
+            NULL
+        );
+
+        djui_selectionbox_create(
+            body,
+            "Movement",
+            sVrControllerStickChoices,
+            VR_CONTROLLER_STICK_COUNT,
+            &configVrMoveStick,
+            NULL
+        );
+
+        djui_selectionbox_create(
+            body,
+            "Camera",
+            sVrControllerStickChoices,
+            VR_CONTROLLER_STICK_COUNT,
+            &configVrCameraStick,
+            NULL
+        );
+
+        djui_selectionbox_create(
+            body,
+            "Jump",
+            sVrControllerBindingChoices,
+            VR_CONTROLLER_BINDING_COUNT,
+            &configVrJumpBinding,
+            NULL
+        );
+
+        djui_selectionbox_create(
+            body,
+            "Attack / Interact",
+            sVrControllerBindingChoices,
+            VR_CONTROLLER_BINDING_COUNT,
+            &configVrAttackBinding,
+            NULL
+        );
+
+        djui_selectionbox_create(
+            body,
+            "Crouch",
+            sVrControllerBindingChoices,
+            VR_CONTROLLER_BINDING_COUNT,
+            &configVrCrouchBinding,
+            NULL
+        );
+
+        djui_selectionbox_create(
+            body,
+            "L Button",
+            sVrControllerBindingChoices,
+            VR_CONTROLLER_BINDING_COUNT,
+            &configVrLBinding,
+            NULL
+        );
+
+        djui_selectionbox_create(
+            body,
+            "R Button",
+            sVrControllerBindingChoices,
+            VR_CONTROLLER_BINDING_COUNT,
+            &configVrRBinding,
+            NULL
+        );
+
+        djui_selectionbox_create(
+            body,
+            "Pause",
+            sVrControllerBindingChoices,
+            VR_CONTROLLER_BINDING_COUNT,
+            &configVrPauseBinding,
             NULL
         );
 
@@ -365,7 +551,7 @@ static void djui_panel_vr_controls_create(struct DjuiBase* caller) {
             body,
             "Set to Defaults",
             DJUI_BUTTON_STYLE_NORMAL,
-            djui_panel_vr_controls_defaults
+            djui_panel_vr_controller_defaults
         );
 
         djui_button_create(
@@ -790,9 +976,9 @@ void djui_panel_vr_create(struct DjuiBase* caller) {
 
         djui_button_create(
             body,
-            "VR Controls",
+            "Controller Settings",
             DJUI_BUTTON_STYLE_NORMAL,
-            djui_panel_vr_controls_create
+            djui_panel_vr_controller_settings_create
         );
 
         djui_button_create(

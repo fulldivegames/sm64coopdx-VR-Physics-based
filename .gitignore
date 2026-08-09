@@ -61,6 +61,7 @@ dist/*
 .assets-local.txt
 sm64_save_file.bin
 sm64config.txt
+gfx_shader_cache.txt
 
 # Local VR source handoff archives
 /src/pc/vr/*.zip

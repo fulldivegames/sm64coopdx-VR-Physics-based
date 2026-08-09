@@ -17,17 +17,37 @@
 #define DEFAULT_COOPNET_IP "net.coop64.us"
 #define DEFAULT_COOPNET_PORT 34197
 
-// Camera-height values are stored unsigned for the existing config/slider
-// system. The center represents zero world-space offset.
-#define VR_CAMERA_HEIGHT_CENTER 500U
-#define VR_CAMERA_HEIGHT_MAX   1000U
-#define VR_CAMERA_HEIGHT_DEFAULT_MARIO   665U
-#define VR_CAMERA_HEIGHT_DEFAULT_LUIGI   681U
-#define VR_CAMERA_HEIGHT_DEFAULT_TOAD    593U
-#define VR_CAMERA_HEIGHT_DEFAULT_WALUIGI 718U
-#define VR_CAMERA_HEIGHT_DEFAULT_WARIO   699U
+// Camera height is stored directly in world units above Mario's gameplay
+// anchor, so the value shown in Camera Settings matches the applied height.
+#define VR_CAMERA_HEIGHT_MAX 1000U
+#define VR_CAMERA_HEIGHT_LEGACY_CENTER 500U
+#define VR_CAMERA_HAT_INSET 2U
+#define VR_HEAD_ATTACHMENT_HEIGHT_MARIO   155U
+#define VR_HEAD_ATTACHMENT_HEIGHT_LUIGI   171U
+#define VR_HEAD_ATTACHMENT_HEIGHT_TOAD     83U
+#define VR_HEAD_ATTACHMENT_HEIGHT_WALUIGI 208U
+#define VR_HEAD_ATTACHMENT_HEIGHT_WARIO   189U
+#define VR_HAT_TOP_HEIGHT_MARIO   217U
+#define VR_HAT_TOP_HEIGHT_LUIGI   218U
+#define VR_HAT_TOP_HEIGHT_TOAD    130U
+#define VR_HAT_TOP_HEIGHT_WALUIGI 255U
+#define VR_HAT_TOP_HEIGHT_WARIO   236U
+#define VR_CAMERA_HEIGHT_DEFAULT_MARIO 160U
+#define VR_CAMERA_HEIGHT_DEFAULT_LUIGI \
+    (VR_HAT_TOP_HEIGHT_LUIGI - VR_CAMERA_HAT_INSET)
+#define VR_CAMERA_HEIGHT_DEFAULT_TOAD \
+    (VR_HAT_TOP_HEIGHT_TOAD - VR_CAMERA_HAT_INSET)
+#define VR_CAMERA_HEIGHT_DEFAULT_WALUIGI \
+    (VR_HAT_TOP_HEIGHT_WALUIGI - VR_CAMERA_HAT_INSET)
+#define VR_CAMERA_HEIGHT_DEFAULT_WARIO \
+    (VR_HAT_TOP_HEIGHT_WARIO - VR_CAMERA_HAT_INSET)
 #define VR_CAMERA_DEPTH_CENTER  200U
 #define VR_CAMERA_DEPTH_MAX     400U
+#define VR_BACKPEDAL_SPEED_MIN      8U
+#define VR_BACKPEDAL_SPEED_MAX     32U
+#define VR_BACKPEDAL_SPEED_DEFAULT 20U
+#define VR_RENDER_SCALE_MIN        25U
+#define VR_RENDER_SCALE_MAX       100U
 
 typedef struct {
     unsigned int x, y, w, h;
@@ -69,6 +89,32 @@ enum VrCameraMode {
     VR_CAMERA_MODE_COUNT
 };
 
+// Logical OpenXR controls used by the VR controller remapper. OpenXR maps
+// these generic inputs onto the active headset/controller interaction profile.
+enum VrControllerBinding {
+    VR_CONTROLLER_BINDING_DISABLED,
+    VR_CONTROLLER_BINDING_LEFT_PRIMARY,
+    VR_CONTROLLER_BINDING_LEFT_SECONDARY,
+    VR_CONTROLLER_BINDING_LEFT_TRIGGER,
+    VR_CONTROLLER_BINDING_LEFT_GRIP,
+    VR_CONTROLLER_BINDING_LEFT_STICK_CLICK,
+    VR_CONTROLLER_BINDING_LEFT_MENU,
+    VR_CONTROLLER_BINDING_RIGHT_PRIMARY,
+    VR_CONTROLLER_BINDING_RIGHT_SECONDARY,
+    VR_CONTROLLER_BINDING_RIGHT_TRIGGER,
+    VR_CONTROLLER_BINDING_RIGHT_GRIP,
+    VR_CONTROLLER_BINDING_RIGHT_STICK_CLICK,
+    VR_CONTROLLER_BINDING_RIGHT_MENU,
+    VR_CONTROLLER_BINDING_COUNT
+};
+
+enum VrControllerStick {
+    VR_CONTROLLER_STICK_LEFT,
+    VR_CONTROLLER_STICK_RIGHT,
+    VR_CONTROLLER_STICK_DISABLED,
+    VR_CONTROLLER_STICK_COUNT
+};
+
 extern char configSaveNames[4][MAX_SAVE_NAME_STRING];
 
 // display settings
@@ -88,6 +134,9 @@ unsigned int* config_vr_camera_height_for_character(
 unsigned int config_vr_camera_default_height_for_character(
     unsigned int characterIndex
 );
+unsigned int config_vr_head_attachment_height_for_character(
+    unsigned int characterIndex
+);
 extern unsigned int configVrMovementCalibration;
 extern unsigned int configVrFov;
 extern unsigned int configVrRenderScale;
@@ -96,6 +145,14 @@ extern unsigned int configVrDesktopMirrorFps;
 extern unsigned int configVrHudOpacity;
 extern bool         configVrMotionControllerInput;
 extern bool         configVrPunchButton;
+extern unsigned int configVrMoveStick;
+extern unsigned int configVrCameraStick;
+extern unsigned int configVrJumpBinding;
+extern unsigned int configVrAttackBinding;
+extern unsigned int configVrCrouchBinding;
+extern unsigned int configVrLBinding;
+extern unsigned int configVrRBinding;
+extern unsigned int configVrPauseBinding;
 extern bool         configVrPhysicalPunching;
 extern bool         configVrPhysicalGrabbing;
 extern bool         configVrMarioPunchSound;
@@ -123,10 +180,15 @@ extern unsigned int configVrRightGlovePositionZ;
 extern bool         configVrFirstPersonBody;
 extern unsigned int configVrTorsoHeight;
 extern unsigned int configVrLegHeight;
-extern bool         configVrExperimentalFlipTurn;
+extern bool         configVrExperimentalSideFlipFollow;
+extern bool         configVrExperimentalWallJumpTurn;
 extern bool         configVrExperimentalFlatFirstPerson;
 extern bool         configVrExperimentalTrueFirstPerson;
 extern bool         configVrExperimentalArmsMode;
+extern bool         configVrExperimentalMountedBody;
+extern bool         configVrPhysicalCrouching;
+extern bool         configVrOriginalMarioMovement;
+extern unsigned int configVrBackpedalSpeed;
 extern bool         configShowPing;
 extern enum RefreshRateMode configFramerateMode;
 extern unsigned int configFrameLimit;

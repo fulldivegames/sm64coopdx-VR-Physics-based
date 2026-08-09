@@ -522,6 +522,46 @@ inline static void delta_interpolate_mtx_accurate(Mtx* out, Mtx* a, Mtx* b, f32 
 }
 
 void delta_interpolate_mtx(Mtx* out, Mtx* a, Mtx* b, f32 delta) {
+    // Accurate interpolation decomposes both matrices and performs a
+    // quaternion slerp. Most level geometry is static, and XR commonly asks
+    // for a final frame whose interpolation delta has already reached an
+    // endpoint. Preserve the exact result while bypassing that expensive path.
+    if (delta <= 0.0f) {
+        if (out != a) {
+            memcpy(out, a, sizeof(*out));
+        }
+        return;
+    }
+    if (delta >= 1.0f || memcmp(a, b, sizeof(*a)) == 0) {
+        if (out != b) {
+            memcpy(out, b, sizeof(*out));
+        }
+        return;
+    }
+
+    // A translation-only change does not require matrix decomposition or a
+    // quaternion slerp. Preserve the unchanged basis exactly and interpolate
+    // the three translation components directly.
+    if (memcmp(a->m[0], b->m[0], sizeof(a->m[0])) == 0 &&
+        memcmp(a->m[1], b->m[1], sizeof(a->m[1])) == 0 &&
+        memcmp(a->m[2], b->m[2], sizeof(a->m[2])) == 0 &&
+        a->m[3][3] == b->m[3][3]) {
+        const f32 antiDelta = 1.0f - delta;
+        f32 translation[3];
+        for (s32 axis = 0; axis < 3; axis++) {
+            translation[axis] =
+                a->m[3][axis] * antiDelta +
+                b->m[3][axis] * delta;
+        }
+        if (out != b) {
+            memcpy(out, b, sizeof(*out));
+        }
+        for (s32 axis = 0; axis < 3; axis++) {
+            out->m[3][axis] = translation[axis];
+        }
+        return;
+    }
+
     // HACK: Limit accurate interpolation to 64-bit builds
     if (sizeof(void*) > 4) {
         if (configInterpolationMode) {
@@ -540,6 +580,18 @@ void delta_interpolate_mtx(Mtx* out, Mtx* a, Mtx* b, f32 delta) {
 }
 
 void detect_and_skip_mtx_interpolation(Mtx** mtxPrev, Mtx** mtx) {
+    // Static transforms cannot trip the rotation-discontinuity guard. Avoid
+    // normalizing six axes for the overwhelmingly common unchanged case.
+    if (*mtxPrev == *mtx ||
+        (memcmp((*mtxPrev)->m[0], (*mtx)->m[0],
+                sizeof((*mtxPrev)->m[0])) == 0 &&
+         memcmp((*mtxPrev)->m[1], (*mtx)->m[1],
+                sizeof((*mtxPrev)->m[1])) == 0 &&
+         memcmp((*mtxPrev)->m[2], (*mtx)->m[2],
+                sizeof((*mtxPrev)->m[2])) == 0)) {
+        return;
+    }
+
     // if the matrix has changed "too much", then skip interpolation
     const f32 minDot = sqrt(2.0f) / -3.0f;
     Vec3f prevX; vec3f_copy(prevX, (f32*)(*mtxPrev)->m[0]); vec3f_normalize(prevX);

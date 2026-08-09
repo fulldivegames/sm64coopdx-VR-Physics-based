@@ -36,6 +36,8 @@ struct FirstPersonCamera gFirstPersonCamera = {
 
 extern s16 gMenuMode;
 
+#define VR_LOOK_UP_WARP_MIN_FORWARD_Y 0.70f
+
 static bool flat_first_person_requested(void) {
     // VR has its own stereo first-person camera. The original single-camera
     // implementation is available on a monitor only through the explicit
@@ -43,6 +45,47 @@ static bool flat_first_person_requested(void) {
     return !vr_is_active() &&
         configVrExperimentalFlatFirstPerson &&
         !gDjuiInMainMenu;
+}
+
+static void first_person_check_vr_look_up_warp(void) {
+    struct MarioState* m = &gMarioStates[0];
+
+    // Normal VR first person deliberately leaves Mario in his gameplay
+    // actions, so it never enters ACT_FIRST_PERSON or the flat first-person
+    // camera path that normally handles the castle lobby's Wing Cap warp.
+    // Keep this check on the existing once-per-gameplay-frame camera update
+    // and reject every frame except the special lobby floor before sampling
+    // the HMD pose.
+    if (!vr_is_active() ||
+        configVrCameraMode != VR_CAMERA_MODE_FIRST_PERSON ||
+        m->floor == NULL ||
+        m->floor->type != SURFACE_LOOK_UP_WARP ||
+        m->forwardVel != 0.0f ||
+        sCurrPlayMode == PLAY_MODE_PAUSED ||
+        save_file_get_total_star_count(
+            gCurrSaveFileNum - 1,
+            COURSE_MIN - 1,
+            COURSE_MAX - 1
+        ) < gLevelValues.wingCapLookUpReq ||
+        first_person_check_cancels(m)) {
+        return;
+    }
+
+    float rotation[4] = { 0 };
+    if (!vr_get_head_rotation(rotation)) {
+        return;
+    }
+
+    // Rotate OpenXR's (0, 0, -1) forward vector by the tracked quaternion.
+    // Its Y component is independent of headset yaw and roll, so looking up
+    // about 45 degrees matches the original C-Up camera's activation posture.
+    const float forwardY = 2.0f * (
+        rotation[3] * rotation[0] -
+        rotation[1] * rotation[2]
+    );
+    if (forwardY >= VR_LOOK_UP_WARP_MIN_FORWARD_Y) {
+        level_trigger_warp(m, WARP_OP_LOOK_UP);
+    }
 }
 
 bool first_person_check_cancels(struct MarioState *m) {
@@ -176,6 +219,8 @@ static void first_person_camera_update(void) {
 void first_person_update(void) {
     static bool sFlatFirstPersonWasActive = false;
     const bool flatFirstPersonActive = flat_first_person_requested();
+
+    first_person_check_vr_look_up_warp();
 
     if (flatFirstPersonActive && !sFlatFirstPersonWasActive) {
         gFirstPersonCamera.pitch = 0;

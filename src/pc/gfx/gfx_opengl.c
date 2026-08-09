@@ -56,8 +56,8 @@ struct GLTexture {
 };
 
 static struct ShaderProgram shader_program_pool[CC_MAX_SHADERS];
-static uint8_t shader_program_pool_size = 0;
-static uint8_t shader_program_pool_index = 0;
+static uint16_t shader_program_pool_size = 0;
+static uint16_t shader_program_pool_index = 0;
 static GLuint opengl_vbo;
 static GLuint opengl_vao;
 
@@ -564,12 +564,16 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     glCompileShader(vertex_shader);
     glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &success);
     if (!success) {
-        GLint max_length = 0;
-        glGetShaderiv(vertex_shader, GL_INFO_LOG_LENGTH, &max_length);
         char error_log[1024];
+        GLsizei log_length = 0;
         fprintf(stderr, "Vertex shader compilation failed\n");
-        glGetShaderInfoLog(vertex_shader, max_length, &max_length, &error_log[0]);
-        fprintf(stderr, "%s\n", &error_log[0]);
+        glGetShaderInfoLog(
+            vertex_shader,
+            (GLsizei)sizeof(error_log),
+            &log_length,
+            error_log
+        );
+        fprintf(stderr, "%s\n", error_log);
         sys_fatal("vertex shader compilation failed (see terminal)");
     }
 
@@ -578,12 +582,16 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     glCompileShader(fragment_shader);
     glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &success);
     if (!success) {
-        GLint max_length = 0;
-        glGetShaderiv(fragment_shader, GL_INFO_LOG_LENGTH, &max_length);
         char error_log[1024];
+        GLsizei log_length = 0;
         fprintf(stderr, "Fragment shader compilation failed\n");
-        glGetShaderInfoLog(fragment_shader, max_length, &max_length, &error_log[0]);
-        fprintf(stderr, "%s\n", &error_log[0]);
+        glGetShaderInfoLog(
+            fragment_shader,
+            (GLsizei)sizeof(error_log),
+            &log_length,
+            error_log
+        );
+        fprintf(stderr, "%s\n", error_log);
         sys_fatal("fragment shader compilation failed (see terminal)");
     }
 
@@ -591,10 +599,35 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     glAttachShader(shader_program, vertex_shader);
     glAttachShader(shader_program, fragment_shader);
     glLinkProgram(shader_program);
+    glGetProgramiv(shader_program, GL_LINK_STATUS, &success);
+    if (!success) {
+        char error_log[1024];
+        GLsizei log_length = 0;
+        fprintf(stderr, "Shader program linking failed\n");
+        glGetProgramInfoLog(
+            shader_program,
+            (GLsizei)sizeof(error_log),
+            &log_length,
+            error_log
+        );
+        fprintf(stderr, "%s\n", error_log);
+        sys_fatal("shader program linking failed (see terminal)");
+    }
+
+    // Once linked, the program owns the compiled code. Keeping every source
+    // shader object alive wastes driver memory during long modded sessions.
+    glDetachShader(shader_program, vertex_shader);
+    glDetachShader(shader_program, fragment_shader);
+    glDeleteShader(vertex_shader);
+    glDeleteShader(fragment_shader);
 
     size_t cnt = 0;
 
     struct ShaderProgram *prg = &shader_program_pool[shader_program_pool_index];
+    if (shader_program_pool_size == CC_MAX_SHADERS &&
+        prg->opengl_program_id != 0) {
+        glDeleteProgram(prg->opengl_program_id);
+    }
     shader_program_pool_index = (shader_program_pool_index + 1) % CC_MAX_SHADERS;
     if (shader_program_pool_size < CC_MAX_SHADERS) { shader_program_pool_size++; }
 
@@ -819,7 +852,11 @@ static void gfx_opengl_init(void) {
         sys_fatal("could not init GLEW:\n%s", glewGetErrorString(err));
 #endif
 
-    tex_cache_size = TEX_CACHE_STEP;
+    // Reserve the address-cache capacity up front. Growing this array during
+    // gameplay invalidates the active texture pointers and can create a
+    // visible one-frame allocator hitch when a mod introduces texture 513,
+    // 1025, and so on.
+    tex_cache_size = MAX_CACHED_TEXTURES;
     tex_cache = calloc(tex_cache_size, sizeof(struct GLTexture));
     if (!tex_cache) sys_fatal("out of memory allocating texture cache");
 
@@ -879,6 +916,29 @@ static const char* gfx_opengl_get_name(void) {
 }
 
 static void gfx_opengl_shutdown(void) {
+    for (uint16_t i = 0; i < shader_program_pool_size; i++) {
+        if (shader_program_pool[i].opengl_program_id != 0) {
+            glDeleteProgram(shader_program_pool[i].opengl_program_id);
+        }
+    }
+    if (num_textures > 0 && tex_cache != NULL) {
+        for (int i = 0; i < num_textures; i++) {
+            glDeleteTextures(1, &tex_cache[i].gltex);
+        }
+    }
+    if (opengl_vbo != 0) {
+        glDeleteBuffers(1, &opengl_vbo);
+    }
+    if (opengl_vao != 0) {
+        glDeleteVertexArrays(1, &opengl_vao);
+    }
+    free(tex_cache);
+    tex_cache = NULL;
+    tex_cache_size = 0;
+    num_textures = 0;
+    shader_program_pool_size = 0;
+    shader_program_pool_index = 0;
+    opengl_prg = NULL;
 }
 
 struct GfxRenderingAPI gfx_opengl_api = {

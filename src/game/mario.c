@@ -49,14 +49,23 @@
 #include "first_person_cam.h"
 
 #define MAX_HANG_PREVENTION 64
+#define VR_FIRST_PERSON_FORWARD_STEER_LIMIT 0x4000
+#define VR_FIRST_PERSON_BACKPEDAL_SIDE_LIMIT 0x4000
+#define VR_FIRST_PERSON_BACKPEDAL_GRACE_FRAMES 120U
+#define VR_FIRST_PERSON_BACKPEDAL_ENTER_RATIO -0.08f
+#define VR_FIRST_PERSON_BACKPEDAL_EXIT_RATIO   0.08f
+#define VR_FIRST_PERSON_SIDE_FLIP_MIN_SPEED 6.0f
 
-static bool sVrFirstPersonYawCalibrationPending = true;
-static s16 sVrFirstPersonHeadYawCalibration = 0;
+static bool sVrBackpedalRequested = false;
+static bool sVrBackpedalGraceActive = false;
+static bool sVrForwardRecoveryActive = false;
+static u32 sVrBackpedalGraceEndFrame = 0;
 
-static bool vr_get_first_person_raw_head_yaw(s16* yaw) {
-    float rotation[4] = { 0 };
-
-    if (yaw == NULL || !vr_get_head_rotation(rotation)) {
+static bool vr_get_first_person_raw_head_yaw_from_rotation(
+    const float rotation[4],
+    s16* yaw
+) {
+    if (rotation == NULL || yaw == NULL) {
         return false;
     }
 
@@ -78,11 +87,14 @@ static bool vr_get_first_person_raw_head_yaw(s16* yaw) {
     return true;
 }
 
-void vr_request_first_person_yaw_calibration(void) {
-    // The next valid HMD sample becomes straight ahead. Deferring the sample
-    // is important during level initialization, when OpenXR may not have
-    // published the new frame's pose yet.
-    sVrFirstPersonYawCalibrationPending = true;
+static bool vr_get_first_person_raw_head_yaw(s16* yaw) {
+    float rotation[4] = { 0 };
+
+    return vr_get_head_rotation(rotation) &&
+        vr_get_first_person_raw_head_yaw_from_rotation(
+            rotation,
+            yaw
+        );
 }
 
 static s16 vr_first_person_head_yaw_offset(void) {
@@ -90,13 +102,11 @@ static s16 vr_first_person_head_yaw_offset(void) {
     if (!vr_get_first_person_raw_head_yaw(&rawYaw)) {
         return 0;
     }
-
-    if (sVrFirstPersonYawCalibrationPending) {
-        sVrFirstPersonHeadYawCalibration = (s16)-rawYaw;
-        sVrFirstPersonYawCalibrationPending = false;
-    }
-
-    return (s16)(rawYaw + sVrFirstPersonHeadYawCalibration);
+    // OpenXR already reports rotation relative to the session/recentered
+    // tracking origin. Zeroing it a second time on each level transition made
+    // whichever direction the player happened to look during loading become
+    // the new body-forward direction.
+    return rawYaw;
 }
 
 static s16 vr_first_person_compress_stick_yaw(s16 stickYaw) {
@@ -116,7 +126,131 @@ static s16 vr_first_person_compress_stick_yaw(s16 stickYaw) {
     return (s16)(relativeYaw + 0x8000);
 }
 
-s16 vr_get_first_person_view_yaw(void) {
+static bool vr_first_person_locomotion_available(
+    struct MarioState* m
+) {
+    return m != NULL &&
+        m->playerIndex == 0 &&
+        m->controller != NULL &&
+        vr_is_active() &&
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
+        !configVrOriginalMarioMovement;
+}
+
+static bool vr_first_person_backpedal_requested(
+    struct MarioState* m
+) {
+    return vr_first_person_locomotion_available(m) &&
+        sVrBackpedalRequested;
+}
+
+static void vr_update_first_person_backpedal_state(
+    struct MarioState* m
+) {
+    if (!vr_first_person_locomotion_available(m) ||
+        m->controller->stickMag <= 0.0f) {
+        sVrBackpedalRequested = false;
+        sVrBackpedalGraceActive = false;
+        sVrForwardRecoveryActive = false;
+        return;
+    }
+
+    const bool wasRequested = sVrBackpedalRequested;
+    const f32 forwardAxis =
+        m->controller->stickY /
+        m->controller->stickMag;
+
+    // Classify the stick by normalized direction rather than a fixed raw-Y
+    // value. Partial diagonal deflections now register as reliably as a fully
+    // tilted stick, while separate enter/exit angles still reject axis noise.
+    if (sVrBackpedalRequested) {
+        if (forwardAxis >
+            VR_FIRST_PERSON_BACKPEDAL_EXIT_RATIO) {
+            sVrBackpedalRequested = false;
+        }
+    } else if (forwardAxis <
+               VR_FIRST_PERSON_BACKPEDAL_ENTER_RATIO) {
+        sVrBackpedalRequested = true;
+    }
+
+    if (!wasRequested &&
+        sVrBackpedalRequested &&
+        m->action == ACT_WALKING &&
+        m->forwardVel >= VR_FIRST_PERSON_SIDE_FLIP_MIN_SPEED) {
+        // Preserve Mario's native skid/turnaround action long enough for its
+        // side-flip input. If the player keeps holding backward, locomotion
+        // switches directly to the reverse jog when this window expires.
+        sVrBackpedalGraceActive = true;
+        sVrBackpedalGraceEndFrame =
+            gGlobalTimer + VR_FIRST_PERSON_BACKPEDAL_GRACE_FRAMES;
+    }
+
+    if (wasRequested && !sVrBackpedalRequested) {
+        sVrBackpedalGraceActive = false;
+        sVrForwardRecoveryActive =
+            m->action == ACT_WALKING &&
+            m->forwardVel < 0.0f;
+    } else if (sVrBackpedalRequested) {
+        sVrForwardRecoveryActive = false;
+    }
+
+    if (m->action == ACT_SIDE_FLIP ||
+        (s32)(gGlobalTimer - sVrBackpedalGraceEndFrame) >= 0) {
+        sVrBackpedalGraceActive = false;
+    }
+}
+
+bool vr_first_person_backpedal_grace_active(
+    struct MarioState* m
+) {
+    return vr_first_person_backpedal_requested(m) &&
+        sVrBackpedalGraceActive;
+}
+
+bool vr_first_person_side_flip_ready(struct MarioState* m) {
+    if (!vr_first_person_locomotion_available(m) ||
+        !sVrBackpedalRequested ||
+        m->intendedMag <= 0.0f ||
+        m->forwardVel < VR_FIRST_PERSON_SIDE_FLIP_MIN_SPEED) {
+        return false;
+    }
+
+    // The assist is intentionally one-way: positive forward momentum followed
+    // by entry into the backward stick region. Leaving backpedal for forward
+    // movement must use forward recovery and produce a normal jump.
+    return true;
+}
+
+bool vr_first_person_backpedal_active(struct MarioState* m) {
+    if (!vr_first_person_backpedal_requested(m)) {
+        return false;
+    }
+
+    // The grace timer controls side-flip eligibility, not the entire reverse
+    // movement state. Suppress backpedaling only while entering or actively
+    // playing Mario's real skid; once that skid ends, the reverse jog begins
+    // even if some of the 120-frame side-flip window remains.
+    return !(sVrBackpedalGraceActive &&
+        ((m->action == ACT_WALKING &&
+          m->forwardVel >= VR_FIRST_PERSON_SIDE_FLIP_MIN_SPEED) ||
+         m->action == ACT_TURNING_AROUND));
+}
+
+bool vr_first_person_forward_recovery_active(
+    struct MarioState* m
+) {
+    return vr_first_person_locomotion_available(m) &&
+        !sVrBackpedalRequested &&
+        sVrForwardRecoveryActive;
+}
+
+void vr_finish_first_person_forward_recovery(void) {
+    sVrForwardRecoveryActive = false;
+}
+
+static s16 vr_get_first_person_view_yaw_from_head_yaw(
+    s16 headYaw
+) {
     const s32 calibration =
         (s32)MIN(configVrMovementCalibration, 100U) - 50;
 
@@ -126,10 +260,68 @@ s16 vr_get_first_person_view_yaw(void) {
     // applied on top of it.
     return (s16)(
         -gNewCamera.yaw - 0x4000 +
-        vr_first_person_head_yaw_offset() +
+        headYaw +
         vr_get_first_person_action_turn_yaw() +
         calibration * 0x10000 / 720
     );
+}
+
+s16 vr_get_first_person_view_yaw(void) {
+    return vr_get_first_person_view_yaw_from_head_yaw(
+        vr_first_person_head_yaw_offset()
+    );
+}
+
+bool vr_get_first_person_view_direction(
+    struct MarioState* m,
+    Vec3f direction
+) {
+    float rotation[4] = { 0 };
+
+    if (m == NULL ||
+        direction == NULL ||
+        m->playerIndex != 0 ||
+        !vr_is_active() ||
+        configVrCameraMode != VR_CAMERA_MODE_FIRST_PERSON ||
+        !vr_get_head_rotation(rotation)) {
+        return false;
+    }
+
+    // Rotate OpenXR's local forward vector (0, 0, -1). Its vertical
+    // component supplies pitch, while vr_get_first_person_view_yaw supplies
+    // the matching world-space yaw after the free-camera base, recentering,
+    // action turns, and the player's movement calibration are applied.
+    const f32 localForwardY = 2.0f *
+        (rotation[3] * rotation[0] -
+         rotation[1] * rotation[2]);
+    if (!isfinite(localForwardY)) {
+        return false;
+    }
+
+    // OpenXR normalizes the cached quaternion once per frame, so its rotated
+    // forward vector is already unit length. Reusing that invariant avoids a
+    // second normalization in this gameplay hot path.
+    const f32 normalizedY = clamp(
+        localForwardY,
+        -1.0f,
+        1.0f
+    );
+    const f32 horizontalLength = sqrtf(MAX(
+        0.0f,
+        1.0f - normalizedY * normalizedY
+    ));
+    s16 headYaw = 0;
+    vr_get_first_person_raw_head_yaw_from_rotation(
+        rotation,
+        &headYaw
+    );
+    const s16 viewYaw =
+        vr_get_first_person_view_yaw_from_head_yaw(headYaw);
+
+    direction[0] = horizontalLength * sins(viewYaw);
+    direction[1] = normalizedY;
+    direction[2] = horizontalLength * coss(viewYaw);
+    return true;
 }
 
 u32 unused80339F10;
@@ -1606,6 +1798,8 @@ void update_mario_joystick_inputs(struct MarioState *m) {
     // don't update remote inputs past this point
     if ((sCurrPlayMode == PLAY_MODE_PAUSED) || m->playerIndex != 0) { return; }
 
+    vr_update_first_person_backpedal_state(m);
+
     if (m->intendedMag > 0.0f) {
         const s16 stickYaw = atan2s(
             -controller->stickY,
@@ -1622,21 +1816,71 @@ void update_mario_joystick_inputs(struct MarioState *m) {
 
         if (vr_is_active() &&
             configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON) {
-            const s16 compressedStickYaw =
-                vr_first_person_compress_stick_yaw(stickYaw);
+            if (!configVrOriginalMarioMovement) {
+                const s16 viewYaw =
+                    vr_get_first_person_view_yaw();
 
-            // The game's existing intended yaw already provides the correct
-            // flat-camera world direction. Apply only the restricted stick
-            // correction and the zero-centered HMD yaw delta on top of it.
-            m->intendedYaw += compressedStickYaw - stickYaw;
-            m->intendedYaw += vr_first_person_head_yaw_offset();
-            m->intendedYaw +=
-                vr_get_first_person_action_turn_yaw();
+                if (vr_first_person_backpedal_requested(m)) {
+                    const f32 lateralInput = clamp(
+                        controller->stickX /
+                            controller->stickMag,
+                        -1.0f,
+                        1.0f
+                    );
+                    const f32 lateralMagnitude =
+                        fabsf(lateralInput);
+                    const f32 curvedLateralInput =
+                        lateralInput *
+                        lateralMagnitude *
+                        lateralMagnitude *
+                        lateralMagnitude;
+                    const s16 backpedalSteer = (s16)roundf(
+                        curvedLateralInput *
+                            VR_FIRST_PERSON_BACKPEDAL_SIDE_LIMIT
+                    );
 
-            const s32 calibration =
-                (s32)MIN(configVrMovementCalibration, 100U) - 50;
-            m->intendedYaw +=
-                (s16)(calibration * 0x10000 / 720);
+                    // Meet the full 90-degree side direction continuously at
+                    // the front/rear boundary, then use a quartic curve to
+                    // settle quickly toward mostly straight backpedaling.
+                    // A normal down-left/down-right diagonal remains roughly
+                    // 22.5 degrees off backward instead of becoming a strafe.
+                    m->intendedYaw =
+                        viewYaw + 0x8000 + backpedalSteer;
+                } else {
+                    // SM64's gameplay yaw and the physical stick's lateral
+                    // axis run in opposite directions in this view basis.
+                    // Negating the relative angle keeps stick-left moving
+                    // left and stick-right moving right.
+                    const s16 relativeStickYaw = (s16)-atan2s(
+                        controller->stickY,
+                        controller->stickX
+                    );
+                    const s16 limitedStickYaw = (s16)clamp(
+                        (s32)relativeStickYaw,
+                        -VR_FIRST_PERSON_FORWARD_STEER_LIMIT,
+                        VR_FIRST_PERSON_FORWARD_STEER_LIMIT
+                    );
+
+                    // Preserve normal Mario locomotion throughout the full
+                    // symmetrical 90-degree forward steering half-circle.
+                    m->intendedYaw = viewYaw + limitedStickYaw;
+                }
+            } else {
+                const s16 compressedStickYaw =
+                    vr_first_person_compress_stick_yaw(stickYaw);
+
+                // Preserve the original First Person Mario movement path
+                // when the player explicitly selects it.
+                m->intendedYaw += compressedStickYaw - stickYaw;
+                m->intendedYaw += vr_first_person_head_yaw_offset();
+                m->intendedYaw +=
+                    vr_get_first_person_action_turn_yaw();
+
+                const s32 calibration =
+                    (s32)MIN(configVrMovementCalibration, 100U) - 50;
+                m->intendedYaw +=
+                    (s16)(calibration * 0x10000 / 720);
+            }
         }
         m->input |= INPUT_NONZERO_ANALOG;
     } else {

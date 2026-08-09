@@ -86,7 +86,7 @@ enum GraphicsBackend configGraphicsBackend        = GAPI_GL;
 unsigned int configFiltering                      = 2; // 0 = Nearest, 1 = Bilinear, 2 = Trilinear
 bool         configShowFPS                        = false;
 bool         configVrAutoStart                    = false;
-unsigned int configVrCameraMode                   = VR_CAMERA_MODE_THIRD_PERSON;
+unsigned int configVrCameraMode                   = VR_CAMERA_MODE_FIRST_PERSON;
 unsigned int configVrCameraDistance               = 100;
 unsigned int configVrCameraHeight                 = VR_CAMERA_HEIGHT_DEFAULT_MARIO;
 unsigned int configVrCameraDepth                  = VR_CAMERA_DEPTH_CENTER;
@@ -94,7 +94,7 @@ static unsigned int sConfigVrCameraHeightLuigi    = VR_CAMERA_HEIGHT_DEFAULT_LUI
 static unsigned int sConfigVrCameraHeightToad     = VR_CAMERA_HEIGHT_DEFAULT_TOAD;
 static unsigned int sConfigVrCameraHeightWaluigi  = VR_CAMERA_HEIGHT_DEFAULT_WALUIGI;
 static unsigned int sConfigVrCameraHeightWario    = VR_CAMERA_HEIGHT_DEFAULT_WARIO;
-static unsigned int sConfigVrCameraHeightVersion  = 3;
+static unsigned int sConfigVrCameraHeightVersion  = 9;
 unsigned int configVrMovementCalibration          = 50;
 unsigned int configVrFov                          = 100;
 unsigned int configVrRenderScale                  = 100;
@@ -103,6 +103,14 @@ unsigned int configVrDesktopMirrorFps             = 60;
 unsigned int configVrHudOpacity                   = 100;
 bool         configVrMotionControllerInput        = true;
 bool         configVrPunchButton                  = false;
+unsigned int configVrMoveStick                    = VR_CONTROLLER_STICK_LEFT;
+unsigned int configVrCameraStick                  = VR_CONTROLLER_STICK_RIGHT;
+unsigned int configVrJumpBinding                  = VR_CONTROLLER_BINDING_RIGHT_PRIMARY;
+unsigned int configVrAttackBinding                = VR_CONTROLLER_BINDING_RIGHT_SECONDARY;
+unsigned int configVrCrouchBinding                = VR_CONTROLLER_BINDING_LEFT_TRIGGER;
+unsigned int configVrLBinding                     = VR_CONTROLLER_BINDING_LEFT_STICK_CLICK;
+unsigned int configVrRBinding                     = VR_CONTROLLER_BINDING_RIGHT_STICK_CLICK;
+unsigned int configVrPauseBinding                 = VR_CONTROLLER_BINDING_LEFT_MENU;
 bool         configVrPhysicalPunching             = true;
 bool         configVrPhysicalGrabbing             = true;
 bool         configVrMarioPunchSound              = true;
@@ -111,9 +119,10 @@ bool         configVrMotionControlledGroundDive   = true;
 unsigned int configVrPunchSpeed                   = 150;
 unsigned int configVrPunchDistance                = 20;
 unsigned int configVrPunchGripThreshold           = 35;
-unsigned int configVrPunchColliderLength          = 150;
+unsigned int configVrPunchColliderLength          = 250;
 unsigned int configVrBowserSpinAcceleration       = 100;
 unsigned int configVrBowserMaxSpinSpeed           = 100;
+static unsigned int sConfigVrInteractionTuningVersion = 0;
 unsigned int configVrGloveSize                    = 70;
 unsigned int configVrLeftGloveRotationX           = 180;
 unsigned int configVrLeftGloveRotationY           = 0;
@@ -131,10 +140,15 @@ bool         configVrFirstPersonBody              = true;
 unsigned int configVrTorsoHeight                  = 100;
 unsigned int configVrLegHeight                    = 100;
 static unsigned int configVrGloveCalibrationVersion = 0;
-bool         configVrExperimentalFlipTurn         = true;
+bool         configVrExperimentalSideFlipFollow   = true;
+bool         configVrExperimentalWallJumpTurn     = true;
 bool         configVrExperimentalFlatFirstPerson  = false;
 bool         configVrExperimentalTrueFirstPerson  = false;
 bool         configVrExperimentalArmsMode         = false;
+bool         configVrExperimentalMountedBody      = false;
+bool         configVrPhysicalCrouching             = true;
+bool         configVrOriginalMarioMovement        = false;
+unsigned int configVrBackpedalSpeed               = VR_BACKPEDAL_SPEED_DEFAULT;
 bool         configShowPing                       = false;
 enum RefreshRateMode configFramerateMode          = RRM_AUTO;
 unsigned int configFrameLimit                     = 60;
@@ -159,8 +173,9 @@ unsigned int* config_vr_camera_height_for_character(
 unsigned int config_vr_camera_default_height_for_character(
     unsigned int characterIndex
 ) {
-    // Each value is ten world units above the character's head attachment
-    // joint: the upper end of the torso chain in the built-in GeoLayout.
+    // Mario uses the player-tested 160-unit baseline. The other built-in
+    // profiles remain two units below their static hat crowns. Animation does
+    // not bob the regular First Person view.
     switch (characterIndex) {
         case CT_LUIGI:
             return VR_CAMERA_HEIGHT_DEFAULT_LUIGI;
@@ -172,6 +187,23 @@ unsigned int config_vr_camera_default_height_for_character(
             return VR_CAMERA_HEIGHT_DEFAULT_WARIO;
         default:
             return VR_CAMERA_HEIGHT_DEFAULT_MARIO;
+    }
+}
+
+unsigned int config_vr_head_attachment_height_for_character(
+    unsigned int characterIndex
+) {
+    switch (characterIndex) {
+        case CT_LUIGI:
+            return VR_HEAD_ATTACHMENT_HEIGHT_LUIGI;
+        case CT_TOAD:
+            return VR_HEAD_ATTACHMENT_HEIGHT_TOAD;
+        case CT_WALUIGI:
+            return VR_HEAD_ATTACHMENT_HEIGHT_WALUIGI;
+        case CT_WARIO:
+            return VR_HEAD_ATTACHMENT_HEIGHT_WARIO;
+        default:
+            return VR_HEAD_ATTACHMENT_HEIGHT_MARIO;
     }
 }
 
@@ -364,6 +396,14 @@ static const struct ConfigOption options[] = {
     {.name = "vr_hud_opacity",                 .type = CONFIG_TYPE_UINT, .uintValue = &configVrHudOpacity},
     {.name = "vr_motion_controller_input",     .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControllerInput},
     {.name = "vr_punch_button",                .type = CONFIG_TYPE_BOOL, .boolValue = &configVrPunchButton},
+    {.name = "vr_move_stick",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrMoveStick},
+    {.name = "vr_camera_stick",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrCameraStick},
+    {.name = "vr_jump_binding",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrJumpBinding},
+    {.name = "vr_attack_binding",              .type = CONFIG_TYPE_UINT, .uintValue = &configVrAttackBinding},
+    {.name = "vr_crouch_binding",              .type = CONFIG_TYPE_UINT, .uintValue = &configVrCrouchBinding},
+    {.name = "vr_l_binding",                   .type = CONFIG_TYPE_UINT, .uintValue = &configVrLBinding},
+    {.name = "vr_r_binding",                   .type = CONFIG_TYPE_UINT, .uintValue = &configVrRBinding},
+    {.name = "vr_pause_binding",               .type = CONFIG_TYPE_UINT, .uintValue = &configVrPauseBinding},
     {.name = "vr_physical_punching",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrPhysicalPunching},
     {.name = "vr_physical_grabbing",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrPhysicalGrabbing},
     {.name = "vr_mario_punch_sound",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMarioPunchSound},
@@ -375,6 +415,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_punch_collider_length",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrPunchColliderLength},
     {.name = "vr_bowser_spin_acceleration",    .type = CONFIG_TYPE_UINT, .uintValue = &configVrBowserSpinAcceleration},
     {.name = "vr_bowser_max_spin_speed",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrBowserMaxSpinSpeed},
+    {.name = "vr_interaction_tuning_version",  .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrInteractionTuningVersion},
     {.name = "vr_glove_size",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrGloveSize},
     {.name = "vr_left_glove_rotation_x",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrLeftGloveRotationX},
     {.name = "vr_left_glove_rotation_y",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrLeftGloveRotationY},
@@ -392,10 +433,15 @@ static const struct ConfigOption options[] = {
     {.name = "vr_torso_height",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrTorsoHeight},
     {.name = "vr_leg_height",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrLegHeight},
     {.name = "vr_glove_calibration_version",   .type = CONFIG_TYPE_UINT, .uintValue = &configVrGloveCalibrationVersion},
-    {.name = "vr_experimental_flip_turn",      .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalFlipTurn},
+    {.name = "vr_experimental_flip_turn",      .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalSideFlipFollow},
+    {.name = "vr_experimental_wall_jump_turn", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalWallJumpTurn},
     {.name = "vr_experimental_flat_first_person", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalFlatFirstPerson},
     {.name = "vr_experimental_true_first_person", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalTrueFirstPerson},
     {.name = "vr_experimental_arms_mode",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalArmsMode},
+    {.name = "vr_experimental_mounted_body",    .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalMountedBody},
+    {.name = "vr_physical_crouching",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrPhysicalCrouching},
+    {.name = "vr_original_mario_movement",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrOriginalMarioMovement},
+    {.name = "vr_backpedal_speed",              .type = CONFIG_TYPE_UINT, .uintValue = &configVrBackpedalSpeed},
     {.name = "show_ping",                      .type = CONFIG_TYPE_BOOL, .boolValue = &configShowPing},
     {.name = "framerate_mode",                 .type = CONFIG_TYPE_UINT, .uintValue = &configFramerateMode},
     {.name = "frame_limit",                    .type = CONFIG_TYPE_UINT, .uintValue = &configFrameLimit},
@@ -858,7 +904,7 @@ static void configfile_migrate_vr_camera_height(void) {
             unsigned int* height =
                 config_vr_camera_height_for_character(character);
             *height = MIN(*height, 300U) +
-                VR_CAMERA_HEIGHT_CENTER;
+                VR_CAMERA_HEIGHT_LEGACY_CENTER;
         }
         sConfigVrCameraHeightVersion = 1;
     }
@@ -874,7 +920,7 @@ static void configfile_migrate_vr_camera_height(void) {
             unsigned int* height =
                 config_vr_camera_height_for_character(character);
             if (*height == 0U) {
-                *height = VR_CAMERA_HEIGHT_CENTER;
+                *height = VR_CAMERA_HEIGHT_LEGACY_CENTER;
             }
         }
         sConfigVrCameraHeightVersion = 2;
@@ -889,12 +935,64 @@ static void configfile_migrate_vr_camera_height(void) {
              character++) {
             unsigned int* height =
                 config_vr_camera_height_for_character(character);
-            if (*height == VR_CAMERA_HEIGHT_CENTER) {
+            if (*height == VR_CAMERA_HEIGHT_LEGACY_CENTER) {
                 *height =
                     config_vr_camera_default_height_for_character(character);
             }
         }
         sConfigVrCameraHeightVersion = 3;
+    }
+
+    if (sConfigVrCameraHeightVersion < 8) {
+        // Replace earlier development calibrations once with the model-based
+        // hat-height defaults. User adjustments made after this migration are
+        // preserved normally.
+        for (unsigned int character = 0;
+             character < CT_MAX;
+             character++) {
+            *config_vr_camera_height_for_character(character) =
+                config_vr_camera_default_height_for_character(character);
+        }
+        sConfigVrCameraHeightVersion = 8;
+    }
+
+    if (sConfigVrCameraHeightVersion < 9) {
+        // Version 8 encoded signed height around 500. Convert that internal
+        // representation once so Camera Settings now displays the actual
+        // world-space height. Values below 500 came from a player entering a
+        // direct height during development and are already usable as-is.
+        for (unsigned int character = 0;
+             character < CT_MAX;
+             character++) {
+            unsigned int* height =
+                config_vr_camera_height_for_character(character);
+            if (character == CT_MARIO && *height == 715U) {
+                *height = VR_CAMERA_HEIGHT_DEFAULT_MARIO;
+            } else if (*height >= VR_CAMERA_HEIGHT_LEGACY_CENTER) {
+                *height -= VR_CAMERA_HEIGHT_LEGACY_CENTER;
+            }
+        }
+        sConfigVrCameraHeightVersion = 9;
+    }
+}
+
+static void configfile_migrate_vr_interaction_tuning(void) {
+    if (sConfigVrInteractionTuningVersion < 1) {
+        // Increase only the known original default. Preserve any collider
+        // length the player deliberately calibrated.
+        if (configVrPunchColliderLength == 150U) {
+            configVrPunchColliderLength = 225U;
+        }
+        sConfigVrInteractionTuningVersion = 1;
+    }
+
+    if (sConfigVrInteractionTuningVersion < 2) {
+        // Give the current default one smaller reach increase while still
+        // preserving every non-default player calibration.
+        if (configVrPunchColliderLength == 225U) {
+            configVrPunchColliderLength = 250U;
+        }
+        sConfigVrInteractionTuningVersion = 2;
     }
 }
 
@@ -915,6 +1013,7 @@ static void configfile_load_internal(const char *filename, bool* error) {
         printf("Config file '%s' not found. Creating it.\n", filename);
         configfile_migrate_vr_glove_calibration();
         configfile_migrate_vr_camera_height();
+        configfile_migrate_vr_interaction_tuning();
         configfile_save(filename);
         return;
     }
@@ -1029,6 +1128,7 @@ NEXT_OPTION:
 
     configfile_migrate_vr_glove_calibration();
     configfile_migrate_vr_camera_height();
+    configfile_migrate_vr_interaction_tuning();
 
     if (configGraphicsBackend < GAPI_GL || configGraphicsBackend > GAPI_MAX) { configGraphicsBackend = GAPI_GL; }
 

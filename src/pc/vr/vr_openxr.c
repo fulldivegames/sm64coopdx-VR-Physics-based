@@ -157,10 +157,10 @@ static bool sAsymmetricProjectionLogged = false;
 static uint32_t vr_openxr_scaled_dimension(uint32_t dimension) {
     uint32_t scale = configVrRenderScale;
 
-    if (scale < 50) {
-        scale = 50;
-    } else if (scale > 100) {
-        scale = 100;
+    if (scale < VR_RENDER_SCALE_MIN) {
+        scale = VR_RENDER_SCALE_MIN;
+    } else if (scale > VR_RENDER_SCALE_MAX) {
+        scale = VR_RENDER_SCALE_MAX;
     }
 
     return (dimension * scale + 50) / 100;
@@ -178,6 +178,10 @@ static bool sFrameTimingLogged = false;
 static XrQuaternionf sHeadOrientationReference = { 0 };
 static XrVector3f sHeadPositionReference = { 0 };
 static bool sHeadOrientationReferenceValid = false;
+static bool sVrEnterRecenterPending = false;
+static bool sTrackingOriginRecenterPending = false;
+static XrTime sTrackingOriginRecenterTime = 0;
+static uint32_t sTrackingOriginGeneration = 0;
 static bool sCachedTrackingValid = false;
 static float sCachedEyeOffsets[2][3] = { 0 };
 static float sCachedHeadRotation[4] = { 0 };
@@ -685,6 +689,97 @@ static bool vr_openxr_create_controller_actions(void) {
         "/interaction_profiles/oculus/touch_controller",
         touchBindings,
         sizeof(touchBindings) / sizeof(touchBindings[0])
+    );
+
+    const struct VrOpenXrBindingSpec indexBindings[] = {
+        { sGripPoseAction, "/user/hand/left/input/grip/pose" },
+        { sGripPoseAction, "/user/hand/right/input/grip/pose" },
+        { sAimPoseAction, "/user/hand/left/input/aim/pose" },
+        { sAimPoseAction, "/user/hand/right/input/aim/pose" },
+        { sTriggerAction, "/user/hand/left/input/trigger/value" },
+        { sTriggerAction, "/user/hand/right/input/trigger/value" },
+        { sSqueezeAction, "/user/hand/left/input/squeeze/value" },
+        { sSqueezeAction, "/user/hand/right/input/squeeze/value" },
+        { sThumbstickAction, "/user/hand/left/input/thumbstick" },
+        { sThumbstickAction, "/user/hand/right/input/thumbstick" },
+        { sPrimaryButtonAction, "/user/hand/left/input/a/click" },
+        { sPrimaryButtonAction, "/user/hand/right/input/a/click" },
+        { sSecondaryButtonAction, "/user/hand/left/input/b/click" },
+        { sSecondaryButtonAction, "/user/hand/right/input/b/click" },
+        { sMenuButtonAction, "/user/hand/left/input/b/click" },
+        { sMenuButtonAction, "/user/hand/right/input/b/click" },
+        { sThumbstickButtonAction, "/user/hand/left/input/thumbstick/click" },
+        { sThumbstickButtonAction, "/user/hand/right/input/thumbstick/click" },
+        { sHapticAction, "/user/hand/left/output/haptic" },
+        { sHapticAction, "/user/hand/right/output/haptic" }
+    };
+    vr_openxr_suggest_controller_bindings(
+        "/interaction_profiles/valve/index_controller",
+        indexBindings,
+        sizeof(indexBindings) / sizeof(indexBindings[0])
+    );
+
+    const struct VrOpenXrBindingSpec viveBindings[] = {
+        { sGripPoseAction, "/user/hand/left/input/grip/pose" },
+        { sGripPoseAction, "/user/hand/right/input/grip/pose" },
+        { sAimPoseAction, "/user/hand/left/input/aim/pose" },
+        { sAimPoseAction, "/user/hand/right/input/aim/pose" },
+        { sTriggerAction, "/user/hand/left/input/trigger/value" },
+        { sTriggerAction, "/user/hand/right/input/trigger/value" },
+        { sSqueezeAction, "/user/hand/left/input/squeeze/click" },
+        { sSqueezeAction, "/user/hand/right/input/squeeze/click" },
+        { sThumbstickAction, "/user/hand/left/input/trackpad" },
+        { sThumbstickAction, "/user/hand/right/input/trackpad" },
+        { sPrimaryButtonAction, "/user/hand/left/input/trackpad/click" },
+        { sPrimaryButtonAction, "/user/hand/right/input/trackpad/click" },
+        { sSecondaryButtonAction, "/user/hand/left/input/menu/click" },
+        { sSecondaryButtonAction, "/user/hand/right/input/menu/click" },
+        { sMenuButtonAction, "/user/hand/left/input/menu/click" },
+        { sMenuButtonAction, "/user/hand/right/input/menu/click" },
+        { sThumbstickButtonAction, "/user/hand/left/input/trackpad/click" },
+        { sThumbstickButtonAction, "/user/hand/right/input/trackpad/click" },
+        { sHapticAction, "/user/hand/left/output/haptic" },
+        { sHapticAction, "/user/hand/right/output/haptic" }
+    };
+    vr_openxr_suggest_controller_bindings(
+        "/interaction_profiles/htc/vive_controller",
+        viveBindings,
+        sizeof(viveBindings) / sizeof(viveBindings[0])
+    );
+
+    const struct VrOpenXrBindingSpec mixedRealityBindings[] = {
+        { sGripPoseAction, "/user/hand/left/input/grip/pose" },
+        { sGripPoseAction, "/user/hand/right/input/grip/pose" },
+        { sAimPoseAction, "/user/hand/left/input/aim/pose" },
+        { sAimPoseAction, "/user/hand/right/input/aim/pose" },
+        { sTriggerAction, "/user/hand/left/input/trigger/value" },
+        { sTriggerAction, "/user/hand/right/input/trigger/value" },
+        { sSqueezeAction, "/user/hand/left/input/squeeze/click" },
+        { sSqueezeAction, "/user/hand/right/input/squeeze/click" },
+        { sThumbstickAction, "/user/hand/left/input/thumbstick" },
+        { sThumbstickAction, "/user/hand/right/input/thumbstick" },
+        { sPrimaryButtonAction, "/user/hand/left/input/trackpad/click" },
+        { sPrimaryButtonAction, "/user/hand/right/input/trackpad/click" },
+        { sSecondaryButtonAction, "/user/hand/left/input/squeeze/click" },
+        { sSecondaryButtonAction, "/user/hand/right/input/squeeze/click" },
+        { sMenuButtonAction, "/user/hand/left/input/menu/click" },
+        { sMenuButtonAction, "/user/hand/right/input/menu/click" },
+        { sThumbstickButtonAction, "/user/hand/left/input/thumbstick/click" },
+        { sThumbstickButtonAction, "/user/hand/right/input/thumbstick/click" },
+        { sHapticAction, "/user/hand/left/output/haptic" },
+        { sHapticAction, "/user/hand/right/output/haptic" }
+    };
+    vr_openxr_suggest_controller_bindings(
+        "/interaction_profiles/microsoft/motion_controller",
+        mixedRealityBindings,
+        sizeof(mixedRealityBindings) /
+            sizeof(mixedRealityBindings[0])
+    );
+    vr_openxr_suggest_controller_bindings(
+        "/interaction_profiles/samsung/odyssey_controller",
+        mixedRealityBindings,
+        sizeof(mixedRealityBindings) /
+            sizeof(mixedRealityBindings[0])
     );
 
     const struct VrOpenXrBindingSpec simpleBindings[] = {
@@ -1693,6 +1788,19 @@ static bool vr_openxr_poll_events(void) {
             if (!vr_openxr_handle_session_state(stateEvent)) {
                 return false;
             }
+        } else if (event.type ==
+                   XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING) {
+            const XrEventDataReferenceSpaceChangePending* spaceEvent =
+                (const XrEventDataReferenceSpaceChangePending*)&event;
+            if (spaceEvent->session == sSession &&
+                spaceEvent->referenceSpaceType ==
+                    XR_REFERENCE_SPACE_TYPE_LOCAL) {
+                sTrackingOriginRecenterPending = true;
+                sTrackingOriginRecenterTime = spaceEvent->changeTime;
+                printf(
+                    "[VR] OpenXR tracking-origin recenter pending.\n"
+                );
+            }
         }
 
         memset(&event, 0, sizeof(event));
@@ -1829,6 +1937,32 @@ static void vr_openxr_rotate_vector(
         rotation->w * twiceCrossZ +
         rotation->x * twiceCrossY -
         rotation->y * twiceCrossX;
+}
+
+static XrQuaternionf vr_openxr_yaw_only_orientation(
+    const XrQuaternionf* orientation
+) {
+    // A tracking-origin recenter establishes horizontal forward only. Using
+    // the full headset quaternion here made a tilted head redefine world-up,
+    // leaving the entire view permanently rolled or pitched after recenter.
+    const float yaw = atan2f(
+        2.0f * (
+            orientation->w * orientation->y +
+            orientation->x * orientation->z
+        ),
+        1.0f - 2.0f * (
+            orientation->x * orientation->x +
+            orientation->y * orientation->y
+        )
+    );
+    const float halfYaw = yaw * 0.5f;
+    const XrQuaternionf reference = {
+        0.0f,
+        sinf(halfYaw),
+        0.0f,
+        cosf(halfYaw)
+    };
+    return reference;
 }
 
 static void vr_openxr_update_cached_tracking(void) {
@@ -3315,11 +3449,46 @@ bool vr_openxr_begin_frame(void) {
     sFrameViewsLocated =
         vr_openxr_locate_views(sFrameDisplayTime);
 
+    if (sVrEnterRecenterPending &&
+        sFrameViewsLocated &&
+        sViewPoseValid &&
+        sSessionState == XR_SESSION_STATE_FOCUSED) {
+        // Do not accept the early valid poses reported while the session is
+        // merely visible. The first focused pose represents the headset's
+        // settled play position and becomes the neutral height/yaw for this
+        // VR activation.
+        sHeadOrientationReferenceValid = false;
+        sCachedTrackingValid = false;
+        sVrEnterRecenterPending = false;
+        sTrackingOriginGeneration++;
+        printf(
+            "[VR] Headset automatically recalibrated "
+            "on VR entry.\n"
+        );
+    }
+
     if (sFrameViewsLocated &&
         sViewPoseValid &&
+        sTrackingOriginRecenterPending &&
+        sFrameDisplayTime >= sTrackingOriginRecenterTime) {
+        // The LOCAL-space change is now active. Capture the first pose in the
+        // new space as the application's neutral origin so headset, hands,
+        // body yaw, and room-scale translation all rebase together.
+        sHeadOrientationReferenceValid = false;
+        sCachedTrackingValid = false;
+        sTrackingOriginRecenterPending = false;
+        sTrackingOriginRecenterTime = 0;
+        sTrackingOriginGeneration++;
+    }
+
+    if (sFrameViewsLocated &&
+        sViewPoseValid &&
+        !sVrEnterRecenterPending &&
         !sHeadOrientationReferenceValid) {
         sHeadOrientationReference =
-            sViews[0].pose.orientation;
+            vr_openxr_yaw_only_orientation(
+                &sViews[0].pose.orientation
+            );
         sHeadPositionReference.x =
             (sViews[0].pose.position.x +
              sViews[1].pose.position.x) * 0.5f;
@@ -3541,6 +3710,36 @@ bool vr_openxr_get_head_translation(float translation[3]) {
     return true;
 }
 
+bool vr_openxr_get_calibrated_head_height(float* height) {
+    if (height == NULL ||
+        !sHeadOrientationReferenceValid ||
+        !sViewPoseValid) {
+        return false;
+    }
+
+    // Most runtimes expose the LOCAL origin at floor level after their room
+    // calibration. A few use an eye-level LOCAL origin; retain a normal adult
+    // standing-height fallback so the same one-third descent threshold remains
+    // usable on those runtimes.
+    *height = fabsf(sHeadPositionReference.y);
+    if (*height < 0.75f || *height > 2.50f) {
+        *height = 1.65f;
+    }
+    return true;
+}
+
+uint32_t vr_openxr_get_tracking_origin_generation(void) {
+    return sTrackingOriginGeneration;
+}
+
+void vr_openxr_request_recenter(void) {
+    // Keep this pending across instance startup/session creation. It is
+    // consumed only after OpenXR supplies a valid pose in the FOCUSED state.
+    sVrEnterRecenterPending = true;
+    sHeadOrientationReferenceValid = false;
+    sCachedTrackingValid = false;
+}
+
 bool vr_openxr_get_controller_state(
     uint32_t handIndex,
     struct VrControllerState* state
@@ -3672,6 +3871,13 @@ void vr_openxr_shutdown(void) {
         sizeof(sHeadPositionReference)
     );
     sHeadOrientationReferenceValid = false;
+    sVrEnterRecenterPending = false;
+    sTrackingOriginRecenterPending = false;
+    sTrackingOriginRecenterTime = 0;
+    // Keep the generation monotonic across VR disable/re-enable cycles. The
+    // renderer retains its last observed value while VR is off, so resetting
+    // this counter here could make the next activation look unchanged and
+    // interpolate from stale camera/body samples.
     sCachedTrackingValid = false;
     memset(sCachedEyeOffsets, 0, sizeof(sCachedEyeOffsets));
     memset(sCachedHeadRotation, 0, sizeof(sCachedHeadRotation));
@@ -3795,6 +4001,18 @@ bool vr_openxr_get_head_rotation(float rotation[4]) {
 bool vr_openxr_get_head_translation(float translation[3]) {
     (void)translation;
     return false;
+}
+
+bool vr_openxr_get_calibrated_head_height(float* height) {
+    (void)height;
+    return false;
+}
+
+uint32_t vr_openxr_get_tracking_origin_generation(void) {
+    return 0;
+}
+
+void vr_openxr_request_recenter(void) {
 }
 
 bool vr_openxr_get_controller_state(

@@ -1,69 +1,160 @@
-SM64 CO-OP DX VR - WINDOWS PLAYER GUIDE
-========================================
+SM64 CO-OP DX VR v0.3.0 - WINDOWS PLAYER GUIDE
+================================================
 
 WHAT YOU NEED
 
 - A 64-bit Windows PC
-- A PC VR headset with an active OpenXR runtime
-- A standard gamepad
+- A PC VR headset and controllers with an active OpenXR runtime
 - Your own legally obtained, unmodified Super Mario 64 US ROM
-  (the ROM commonly identified as Super Mario 64 (U) [!].z64)
+- Optional: a standard gamepad
 
 Nintendo ROMs and game assets are not included in this download.
-The included OpenXR loader is distributed under the Khronos OpenXR SDK
-license, provided in licenses/OpenXR-SDK-LICENSE.txt. Its bundled MinGW runtime
-dependencies and their applicable license notices are also provided in the
-licenses folder.
+The OpenXR loader and its license are included. Required MinGW runtime
+libraries and their license notices are in the licenses folder.
 
 
 FIRST-TIME SETUP
 
 1. Extract the entire ZIP to a normal folder. Do not run the game from
    inside the ZIP.
-2. Start your headset software and make sure the OpenXR runtime you want
-   to use is active.
-3. Connect your gamepad.
-4. Launch SM64-Co-Op-DX-VR.exe.
-5. The first-launch screen will ask for a ROM. Drag your legally obtained,
-   unmodified US .z64 ROM onto the game window.
-6. Open Settings > VR, enable VR Mode, and choose Camera Settings.
-7. Select Third Person Mode or First Person Mode (Experimental) and adjust
-   its camera settings to your preference.
+2. Start your headset software and make sure your preferred OpenXR runtime
+   is active.
+3. Launch SM64-Co-Op-DX-VR.exe.
+4. When asked, drag your legally obtained, unmodified US .z64 ROM onto the
+   game window.
+5. Open Settings > VR and enable VR Mode.
+6. Open Camera Settings and select Third Person Mode or First Person Mode.
 
-The game remembers the validated ROM in its user-data folder, so it should
-not need to be dragged in again on every launch.
+The game remembers the validated ROM in its user-data folder.
 
 
-VR CAMERA MODES
+CAMERA MODES
 
-- Third Person Mode keeps Mario visible and works with the default camera or
-  SM64 Co-Op DX's free camera. Camera distance is adjustable.
-- First Person Mode (Experimental) hides the local Mario model, uses the
-  headset as Mario's forward direction, and supports smooth horizontal
-  turning with the right stick. Camera height, field of view, and
-  movement-direction calibration are adjustable under Camera Settings.
-- Experimental settings include an optional smooth 180-degree camera turn for
-  backflips and side flips, plus an opt-in flat-screen first-person mode.
-- Performance settings include headset render scale and desktop mirror FPS.
-  Lower render scale can improve performance while still filling the headset
-  display.
+- Third Person Mode keeps the character visible. It works with the original
+  camera and SM64 Co-Op DX's free camera. Camera distance is adjustable.
+- First Person Mode is the default. The headset controls the view and Mario's
+  forward direction. The camera stick provides smooth horizontal turning.
+- First-person movement supports normal forward steering up to 90 degrees,
+  a steerable reverse jog, and a short forward-to-back side-flip window.
+- Swimming, Wing Cap flight, and shell riding follow the direction you look.
+  Normal action buttons are still used for swimming strokes and other moves.
+- The character's head and normal arms are hidden in first person. Tracked,
+  player-colored gloves remain visible. Torso and legs can be toggled.
 
-KNOWN ISSUE: The 3D star models currently do not appear on the Star Select
-screen in VR. The screen remains usable.
+
+DEFAULT VR CONTROLS
+
+Move                    Left stick
+Smooth turn / camera    Right stick
+Jump                    Right Primary (usually A)
+Attack / interact       Right Secondary (usually B)
+Crouch                  Left Trigger
+L button                Left stick click
+R button                Right stick click
+Pause                   Left Menu
+Close fist / grab       Hold that hand's Grip
+Right Trigger punch     Disabled by default; optional in Controller Settings
+
+Open Settings > VR > Controller Settings to remap the sticks and buttons.
+A connected gamepad can remain active alongside the VR controllers.
+
+
+PHYSICAL ACTIONS
+
+PUNCH
+Hold a grip to close that glove, then make a deliberate punch. The tracked
+fist is the attack point. Mario's body does not have to face the target.
+
+GRAB AND THROW
+Close either grip while the glove overlaps something the game allows Mario
+to pick up, such as a Bob-omb, Mips, or a baby penguin. Keep holding to carry
+it at your hand. Release gently to drop it, or release during a faster hand
+movement to throw it.
+
+DIVE
+Punch with both hands at nearly the same time. In the air this performs a
+dive. While running fast enough, it performs a ground running dive. The two
+types can be enabled separately in Motion Control Settings.
+
+CROUCH AND GROUND POUND
+With Physical Crouching / Ground Pounds enabled, lower your headset by about
+one third of your calibrated standing height. Mario stays crouched until you
+stand back up. Crouching while airborne triggers a ground pound.
+
+BOWSER
+Reach either glove to Bowser's tail and hold that grip. Move the held hand in
+a turning arc around your body to build spin speed, then release the grip to
+throw. The camera stick can also help turn. Spin acceleration and maximum
+speed are adjustable.
+
+HOOT AND MOVING ACTORS
+Grip a supported interaction point to attach to it. Release the grip to let
+go. Physical interactions use the game's normal interaction and networking
+paths where possible.
+
+
+VR SETTINGS
+
+Camera Settings
+  Camera mode, distance, per-character height, forward/back position,
+  movement calibration, and field of view.
+
+Controller Settings
+  Motion-controller input, stick selection, button mapping, and optional
+  Right Trigger punching.
+
+Motion Control Settings
+  Punching, grabbing, motion dives, punch sound, punch requirements,
+  collider length, and Bowser spin tuning.
+
+Model Settings
+  Torso and legs, glove size, glove rotation, and glove/body positions.
+
+Performance
+  Render scale, desktop view on/off, and desktop mirror frame rate. Lower
+  render scale or disable Desktop View if more performance is needed.
+
+HUD Settings
+  HUD opacity.
+
+Experimental
+  Side-flip camera follow, 180-degree wall-jump turns, flat first person,
+  True First Person, Arms Mode, mounted-action body visibility, physical
+  crouching, original Mario movement, and backpedal speed.
+
+True First Person follows animated body movement and might cause sickness.
+Every submenu has a Set to Defaults button.
+
+
+STARTUP SHADER CACHE
+
+The game prepares common shaders when it starts. New shader definitions found
+during play are stored in gfx_shader_cache.txt and prepared on later launches.
+This is intended to reduce repeat stutters in levels and mods you have used.
+
+
+KNOWN LIMITATIONS
+
+- Windows and OpenGL are the only implemented OpenXR graphics path.
+- Motion controls, online co-op, mods, and other headsets need more testing.
+- True First Person and Arms Mode are experimental.
+- The 3D star models do not currently appear on the Star Select screen in VR.
+- Some original flat billboard objects can look unusual in stereo VR.
 
 
 TROUBLESHOOTING
 
-- If Windows SmartScreen appears, confirm that you downloaded the ZIP from
-  the official fulldivegames GitHub release page. This community build is
-  not currently code-signed.
-- If VR does not start, confirm that your headset's OpenXR runtime is active.
+- Make sure the headset's OpenXR runtime is active before enabling VR.
+- If Windows SmartScreen appears, confirm that the ZIP came from the official
+  fulldivegames GitHub release page. This build is not currently code-signed.
+- Windows Firewall may ask about network access because the game includes
+  online multiplayer. Only allow the networks you intend to use.
 - For diagnostic output, open PowerShell in the extracted folder and run:
 
     .\SM64-Co-Op-DX-VR.exe --console
 
-- Include your headset, OpenXR runtime, GPU, reproduction steps, and the
-  console lines beginning with [VR] when reporting a VR problem.
+- Include your headset, OpenXR runtime, GPU, reproduction steps, and relevant
+  [VR] or [GFX] console lines when reporting a problem.
 
 
 PROJECT PAGE

@@ -308,6 +308,15 @@ static bool sVrTrueFirstPersonHeightValid = false;
 static u32 sVrTrueFirstPersonHeightTimestamp = 0;
 static f32 sVrTrueFirstPersonHeightPrev = 0.0f;
 static f32 sVrTrueFirstPersonHeight = 0.0f;
+static bool sVrMountedHatAnchorValid = false;
+static u32 sVrMountedHatAnchorTimestamp = 0;
+static Vec3f sVrMountedBodyUpPrev = { 0.0f, 1.0f, 0.0f };
+static Vec3f sVrMountedBodyUp = { 0.0f, 1.0f, 0.0f };
+static u32 sVrTrackingOriginGeneration = 0;
+static bool sVrTorsoAlignmentValid = false;
+static u8 sVrTorsoAlignmentCharacter = CT_MAX;
+static u32 sVrTorsoAlignmentCharacterTimestamp = 0;
+static f32 sVrTorsoAlignment = 0.0f;
 
 void vr_reset_first_person_calibration(void) {
     sVrFirstPersonAnchorValid = false;
@@ -359,7 +368,27 @@ void vr_reset_first_person_calibration(void) {
     sVrTrueFirstPersonHeightTimestamp = 0;
     sVrTrueFirstPersonHeightPrev = 0.0f;
     sVrTrueFirstPersonHeight = 0.0f;
-    vr_request_first_person_yaw_calibration();
+    sVrMountedHatAnchorValid = false;
+    sVrMountedHatAnchorTimestamp = 0;
+    vec3f_set(sVrMountedBodyUpPrev, 0.0f, 1.0f, 0.0f);
+    vec3f_set(sVrMountedBodyUp, 0.0f, 1.0f, 0.0f);
+    sVrTorsoAlignmentValid = false;
+    sVrTorsoAlignmentCharacter = CT_MAX;
+    sVrTorsoAlignmentCharacterTimestamp = 0;
+    sVrTorsoAlignment = 0.0f;
+}
+
+static void vr_refresh_tracking_origin(void) {
+    const u32 generation = vr_get_tracking_origin_generation();
+    if (generation == sVrTrackingOriginGeneration) {
+        return;
+    }
+
+    sVrTrackingOriginGeneration = generation;
+    // Never interpolate a body, arm, or camera sample across an OpenXR
+    // reference-space recenter. The following valid frame establishes both
+    // endpoints from the runtime's new tracking origin.
+    vr_reset_first_person_calibration();
 }
 
 static void vr_update_first_person_action_turn(s16 cameraYaw) {
@@ -437,9 +466,24 @@ static void vr_update_first_person_action_turn(s16 cameraYaw) {
                 sVrDoorYawStartCompensation +
                 (s16)(sVrDoorYawReference - cameraYaw)
             );
-        } else if (configVrExperimentalFlipTurn &&
-            (marioAction == ACT_BACKFLIP ||
-             marioAction == ACT_SIDE_FLIP)) {
+        } else if (configVrExperimentalSideFlipFollow &&
+                   marioAction == ACT_SIDE_FLIP) {
+            // Follow the side flip's actual gameplay momentum instead of
+            // applying a fixed half-turn. faceAngle is assigned from
+            // intendedYaw when ACT_SIDE_FLIP begins and is the direction of
+            // its horizontal forward velocity.
+            const s16 viewYaw = vr_get_first_person_view_yaw();
+            const s16 momentumYaw = gMarioStates[0].faceAngle[1];
+            const s16 momentumDelta =
+                (s16)(momentumYaw - viewYaw);
+
+            sVrActionTurnStartFrame = renderFrame;
+            sVrActionTurnStartYaw = sVrActionTurnCurrentYaw;
+            sVrActionTurnTargetYaw =
+                sVrActionTurnCurrentYaw + momentumDelta;
+            sVrActionTurnActive = true;
+        } else if (configVrExperimentalWallJumpTurn &&
+                   marioAction == ACT_WALL_KICK_AIR) {
             sVrActionTurnStartFrame = renderFrame;
             sVrActionTurnStartYaw = sVrActionTurnCurrentYaw;
             sVrActionTurnTargetYaw =
@@ -780,6 +824,167 @@ static void vr_patch_controller_hand_matrices(uint32_t eyeIndex) {
     }
 }
 
+static bool vr_first_person_uses_mounted_hat_anchor(void) {
+    const u32 action = gMarioStates[0].action;
+
+    // These actions move and/or pitch the complete character relative to
+    // Mario's gameplay origin. A fixed world-up camera height consequently
+    // leaves the view above, behind, or inside the model instead of at its
+    // hidden hat. Ordinary movement deliberately stays on the stable camera
+    // height path so running animations cannot bob the player's view.
+    return (action & ACT_FLAG_RIDING_SHELL) != 0 ||
+        (action & ACT_FLAG_SWIMMING_OR_FLYING) != 0 ||
+        action == ACT_SHOT_FROM_CANNON ||
+        action == ACT_RIDING_HOOT;
+}
+
+static bool vr_get_mounted_hat_camera_position(
+    Vec3f colliderAnchor,
+    Vec3f position
+) {
+    struct MarioState* mario = &gMarioStates[0];
+    struct MarioBodyState* bodyState = mario->marioBodyState;
+
+    if (position == NULL ||
+        !vr_first_person_uses_mounted_hat_anchor() ||
+        mario->marioObj == NULL ||
+        bodyState == NULL ||
+        (bodyState->updateHeadPosTime != gGlobalTimer &&
+         (gGlobalTimer == 0 ||
+          bodyState->updateHeadPosTime != gGlobalTimer - 1))) {
+        sVrMountedHatAnchorValid = false;
+        return false;
+    }
+
+    Vec3f* sampledHead = &bodyState->animPartsPos[MARIO_ANIM_PART_HEAD];
+    Vec3f* sampledTorso = &bodyState->animPartsPos[MARIO_ANIM_PART_TORSO];
+    Vec3f sampledBodyUp;
+    for (u32 axis = 0; axis < 3; axis++) {
+        if (!isfinite((*sampledHead)[axis]) ||
+            !isfinite((*sampledTorso)[axis])) {
+            sVrMountedHatAnchorValid = false;
+            return false;
+        }
+        // Subtracting these world-space joints deliberately removes Mario's
+        // collider translation and all shared HMD/body translation. Only the
+        // animation's orientation survives for flying and rideable poses.
+        sampledBodyUp[axis] =
+            (*sampledHead)[axis] - (*sampledTorso)[axis];
+    }
+    const f32 sampledLength = sqrtf(
+        sampledBodyUp[0] * sampledBodyUp[0] +
+        sampledBodyUp[1] * sampledBodyUp[1] +
+        sampledBodyUp[2] * sampledBodyUp[2]
+    );
+    if (!isfinite(sampledLength) || sampledLength <= 0.001f) {
+        sVrMountedHatAnchorValid = false;
+        return false;
+    }
+    vec3f_mul(sampledBodyUp, 1.0f / sampledLength);
+
+    const u32 sampledTimestamp = bodyState->updateHeadPosTime;
+    if (!sVrMountedHatAnchorValid ||
+        sampledTimestamp != sVrMountedHatAnchorTimestamp) {
+        const bool continuous =
+            sVrMountedHatAnchorValid &&
+            sampledTimestamp == sVrMountedHatAnchorTimestamp + 1;
+
+        if (continuous) {
+            vec3f_copy(sVrMountedBodyUpPrev, sVrMountedBodyUp);
+        } else {
+            vec3f_copy(sVrMountedBodyUpPrev, sampledBodyUp);
+        }
+        vec3f_copy(sVrMountedBodyUp, sampledBodyUp);
+        sVrMountedHatAnchorTimestamp = sampledTimestamp;
+        sVrMountedHatAnchorValid = true;
+    }
+
+    const f32 delta = gRenderingInterpolated
+        ? clamp(gRenderingDelta, 0.0f, 1.0f)
+        : 1.0f;
+    Vec3f bodyUp;
+    delta_interpolate_vec3f(
+        bodyUp,
+        sVrMountedBodyUpPrev,
+        sVrMountedBodyUp,
+        delta
+    );
+    const f32 bodyUpLength = sqrtf(
+        bodyUp[0] * bodyUp[0] +
+        bodyUp[1] * bodyUp[1] +
+        bodyUp[2] * bodyUp[2]
+    );
+    if (bodyUpLength > 0.001f && isfinite(bodyUpLength)) {
+        vec3f_mul(bodyUp, 1.0f / bodyUpLength);
+    } else {
+        vec3f_set(bodyUp, 0.0f, 1.0f, 0.0f);
+    }
+
+    f32 swimmingSurfaceBlend = 0.0f;
+    if ((mario->action & ACT_FLAG_SWIMMING) != 0) {
+        // Mario's water collider is capped 80 units below the surface. A
+        // fully body-oriented eye-height vector can consequently rotate the
+        // camera through the torso and below the water plane during a nearly
+        // horizontal surface stroke. Blend only this shallow region toward
+        // collider-up; deeper swimming retains the same body-mounted anchor
+        // used by Wing Cap flight.
+        const f32 swimmingDepth =
+            (f32)mario->waterLevel - colliderAnchor[1];
+        swimmingSurfaceBlend = clamp(
+            (180.0f - swimmingDepth) / 100.0f,
+            0.0f,
+            1.0f
+        );
+        if (swimmingSurfaceBlend > 0.0f) {
+            bodyUp[0] *= 1.0f - swimmingSurfaceBlend;
+            bodyUp[1] = bodyUp[1] *
+                (1.0f - swimmingSurfaceBlend) +
+                swimmingSurfaceBlend;
+            bodyUp[2] *= 1.0f - swimmingSurfaceBlend;
+
+            const f32 surfaceBodyUpLength = sqrtf(
+                bodyUp[0] * bodyUp[0] +
+                bodyUp[1] * bodyUp[1] +
+                bodyUp[2] * bodyUp[2]
+            );
+            if (surfaceBodyUpLength > 0.001f &&
+                isfinite(surfaceBodyUpLength)) {
+                vec3f_mul(bodyUp, 1.0f / surfaceBodyUpLength);
+            } else {
+                vec3f_set(bodyUp, 0.0f, 1.0f, 0.0f);
+            }
+        }
+    }
+
+    u8 characterIndex = gNetworkPlayers[0].overrideModelIndex;
+    if (characterIndex >= CT_MAX) {
+        characterIndex = CT_MARIO;
+    }
+    const s32 configuredHeight = (s32)clamp(
+        *config_vr_camera_height_for_character(characterIndex),
+        0U,
+        VR_CAMERA_HEIGHT_MAX
+    );
+    // The gameplay collider is the sole source of translation. Rotating the
+    // configured eye-height vector with the body pose keeps the view mounted
+    // during flight/shell animations without letting room-scale tracking or
+    // animated joint offsets make it drift away from Mario.
+    for (u32 axis = 0; axis < 3; axis++) {
+        position[axis] = colliderAnchor[axis] +
+            bodyUp[axis] * (f32)configuredHeight;
+    }
+    if (swimmingSurfaceBlend > 0.0f) {
+        const f32 surfaceEyeClearance =
+            (f32)mario->waterLevel + 10.0f;
+        const f32 blendedSurfaceFloor =
+            position[1] +
+            (surfaceEyeClearance - position[1]) *
+                swimmingSurfaceBlend;
+        position[1] = MAX(position[1], blendedSurfaceFloor);
+    }
+    return true;
+}
+
 static bool vr_get_stabilized_first_person_pose(
     Vec3f position,
     Vec3f focus,
@@ -787,6 +992,8 @@ static bool vr_get_stabilized_first_person_pose(
     Vec3f cameraFocus,
     Vec3f forward
 ) {
+    vr_refresh_tracking_origin();
+
     Vec3f marioAnchor;
     if (!vr_get_first_person_anchor(marioAnchor)) {
         return false;
@@ -823,7 +1030,6 @@ static bool vr_get_stabilized_first_person_pose(
             VR_CAMERA_DEPTH_MAX
         ) - (s32)VR_CAMERA_DEPTH_CENTER;
     const f32 cameraDepth = 10.0f + (f32)cameraDepthOffset;
-    cameraPosition[0] = marioAnchor[0] + forward[0] * cameraDepth;
     u8 characterIndex =
         gNetworkPlayers[0].overrideModelIndex;
     if (characterIndex >= CT_MAX) {
@@ -831,15 +1037,26 @@ static bool vr_get_stabilized_first_person_pose(
     }
     const unsigned int cameraHeight =
         *config_vr_camera_height_for_character(characterIndex);
-    const s32 cameraHeightOffset =
-        (s32)clamp(
-            cameraHeight,
-            0U,
-            VR_CAMERA_HEIGHT_MAX
-        ) - (s32)VR_CAMERA_HEIGHT_CENTER;
-    cameraPosition[1] = marioAnchor[1] +
-        (f32)cameraHeightOffset;
-    cameraPosition[2] = marioAnchor[2] + forward[2] * cameraDepth;
+    const s32 cameraHeightOffset = (s32)clamp(
+        cameraHeight,
+        0U,
+        VR_CAMERA_HEIGHT_MAX
+    );
+    Vec3f cameraAnchor;
+    if (!vr_get_mounted_hat_camera_position(
+            marioAnchor,
+            cameraAnchor
+        )) {
+        cameraAnchor[0] = marioAnchor[0];
+        cameraAnchor[1] = marioAnchor[1] +
+            (f32)cameraHeightOffset;
+        cameraAnchor[2] = marioAnchor[2];
+    }
+    cameraPosition[0] = cameraAnchor[0] +
+        forward[0] * cameraDepth;
+    cameraPosition[1] = cameraAnchor[1];
+    cameraPosition[2] = cameraAnchor[2] +
+        forward[2] * cameraDepth;
     cameraFocus[0] = cameraPosition[0] + forward[0] * 100.0f;
     cameraFocus[1] = cameraPosition[1];
     cameraFocus[2] = cameraPosition[2] + forward[2] * 100.0f;
@@ -1406,9 +1623,6 @@ static void patch_mtx_vr_billboards(uint32_t eyeIndex) {
         cylindricalBackward[0] = headRotation[0][2];
         cylindricalBackward[1] = headRotation[1][2];
         cylindricalBackward[2] = headRotation[2][2];
-        vr_adjust_first_person_camera_direction(
-            cylindricalBackward
-        );
 
         mtxf_identity(inverseFullFacingRotation);
         for (s32 row = 0; row < 3; row++) {
@@ -1553,6 +1767,10 @@ void register_mtx_vr_ui(Mtx *matrix) {
 }
 
 static void patch_mtx_vr_ui(uint32_t eyeIndex) {
+    if (sVrUiMatrixCount == 0) {
+        return;
+    }
+
     float left = 0.0f;
     float right = SCREEN_WIDTH;
     float bottom = 0.0f;
@@ -1587,17 +1805,22 @@ static void patch_mtx_vr_ui(uint32_t eyeIndex) {
         top = boundsCenterY + boundsHeight * 0.5f;
     }
 
+    // Every registered HUD/menu matrix uses the same head-locked plane for
+    // this eye. Build the orthographic projection once instead of repeating
+    // its divisions and matrix setup for every individual UI element.
+    Mtx projection;
+    guOrtho(
+        &projection,
+        left,
+        right,
+        bottom,
+        top,
+        -10.0f,
+        10.0f,
+        1.0f
+    );
     for (u32 i = 0; i < sVrUiMatrixCount; i++) {
-        guOrtho(
-            sVrUiMatrices[i],
-            left,
-            right,
-            bottom,
-            top,
-            -10.0f,
-            10.0f,
-            1.0f
-        );
+        memcpy(sVrUiMatrices[i], &projection, sizeof(projection));
     }
 }
 
@@ -1734,8 +1957,21 @@ void patch_mtx_vr_projection(
     f32 delta,
     uint32_t eyeIndex
 ) {
-    patch_mtx_perspective(delta, eyeIndex, true);
-    vr_patch_controller_hand_matrices(eyeIndex);
+    // Billboard orientation and tracked glove transforms are shared by both
+    // eyes. Only restore their flat-render state for the desktop fallback.
+    const bool desktopFallback = eyeIndex >= 2;
+    patch_mtx_perspective(delta, eyeIndex, desktopFallback);
+    if (desktopFallback) {
+        vr_patch_controller_hand_matrices(eyeIndex);
+    }
+}
+
+void patch_mtx_vr_shared(void) {
+    // OpenXR eye separation belongs entirely in the projection/view matrix.
+    // These model transforms are headset/controller-relative and therefore
+    // identical for both eyes, so prepare them once per submitted XR frame.
+    patch_mtx_vr_billboards(0);
+    vr_patch_controller_hand_matrices(0);
 }
 
 void patch_mtx_vr_ui_projection(uint32_t eyeIndex) {
@@ -1819,6 +2055,7 @@ void patch_mtx_interpolated(f32 delta) {
         mtxf_to_mtx(&camInterp, camInterp.m);
     }
 
+    const bool vrActive = vr_is_active();
     for (u32 i = 0; i < sMtxTbl->count; i++) {
         struct MtxInterp *interp = sMtxTbl->buffer[i];
         Gfx *pos = interp->pos;
@@ -1828,7 +2065,7 @@ void patch_mtx_interpolated(f32 delta) {
         if (interp->billboard &&
             interp->usingCamSpace &&
             translateCamSpace &&
-            vr_is_active()) {
+            vrActive) {
             // Reconstruct the billboard in world space before applying the
             // HMD camera. Keeping its old camera-space orientation would make
             // trees and other sprites bend or roll with the headset.
@@ -1836,6 +2073,7 @@ void patch_mtx_interpolated(f32 delta) {
             Mtx worldMtxPrev;
             Mtx worldInterp;
             Mtx cameraSpaceInterp;
+            Mtx facingInterp;
 
             mtxf_copy(worldMtx.m, srcMtx->m);
             mtxf_copy(worldMtxPrev.m, srcMtxPrev->m);
@@ -1856,6 +2094,25 @@ void patch_mtx_interpolated(f32 delta) {
                 worldInterp.m,
                 camInterp.m
             );
+
+            // Position must follow the interpolated VR camera, but a
+            // billboard's camera-space axes must remain camera-facing. If
+            // the reconstructed world axes are multiplied by the side-flip
+            // camera yaw, every flat model rotates edge-on and then becomes
+            // back-face culled. Preserve the normally interpolated billboard
+            // basis and take only the corrected translation from world space.
+            delta_interpolate_mtx(
+                &facingInterp,
+                srcMtxPrev,
+                srcMtx,
+                delta
+            );
+            for (s32 row = 0; row < 3; row++) {
+                for (s32 column = 0; column < 4; column++) {
+                    cameraSpaceInterp.m[row][column] =
+                        facingInterp.m[row][column];
+                }
+            }
 
             mtxf_copy(
                 interp->interp.m,
@@ -1878,8 +2135,10 @@ void patch_mtx_interpolated(f32 delta) {
             mtxf_mul(interp->interp.m, interp->interp.m, camInterp.m);
             }
         }
-        mtxf_copy(interp->vrBase.m, interp->interp.m);
-        interp->vrBaseReady = TRUE;
+        if (interp->billboard != VR_BILLBOARD_NONE) {
+            mtxf_copy(interp->vrBase.m, interp->interp.m);
+            interp->vrBaseReady = TRUE;
+        }
         gSPMatrix(pos++, VIRTUAL_TO_PHYSICAL(&interp->interp),
                   G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_NOPUSH);
     }
@@ -2140,7 +2399,15 @@ static bool vr_hide_local_first_person_mario_part(void) {
         return false;
     }
 
-    switch (gCurMarioBodyState->currAnimPart) {
+    const s32 animPart = gCurMarioBodyState->currAnimPart;
+    const u32 action = gMarioStates[0].action;
+    const bool hideMountedBody =
+        !configVrExperimentalMountedBody &&
+        (action == ACT_FLYING ||
+         (action & ACT_FLAG_SWIMMING) != 0 ||
+         (action & ACT_FLAG_RIDING_SHELL) != 0);
+
+    switch (animPart) {
         case MARIO_ANIM_PART_HEAD:
             return true;
         case MARIO_ANIM_PART_UPPER_LEFT:
@@ -2156,6 +2423,18 @@ static bool vr_hide_local_first_person_mario_part(void) {
             // The independently tracked floating gloves remain the hands in
             // both normal first person and Arms Mode.
             return true;
+        case MARIO_ANIM_PART_ROOT:
+        case MARIO_ANIM_PART_BUTT:
+        case MARIO_ANIM_PART_TORSO:
+        case MARIO_ANIM_PART_LOWER_LEFT:
+        case MARIO_ANIM_PART_LEFT_THIGH:
+        case MARIO_ANIM_PART_LEFT_LEG:
+        case MARIO_ANIM_PART_LEFT_FOOT:
+        case MARIO_ANIM_PART_LOWER_RIGHT:
+        case MARIO_ANIM_PART_RIGHT_THIGH:
+        case MARIO_ANIM_PART_RIGHT_LEG:
+        case MARIO_ANIM_PART_RIGHT_FOOT:
+            return !configVrFirstPersonBody || hideMountedBody;
         default:
             // True First Person and Arms Mode still traverse hidden skeletons
             // for their camera/IK anchors. The ordinary body visibility toggle
@@ -2188,11 +2467,12 @@ static void geo_append_display_list(void *displayList, s16 layer) {
         if (sUsingBillboard ||
             (gCurGraphNodeObject != NULL &&
              (gCurGraphNodeObject->node.flags & GRAPH_RENDER_BILLBOARD))) {
-            listNode->billboard =
-                vr_is_active() &&
-                configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON
-                    ? VR_BILLBOARD_CYLINDRICAL
-                    : VR_BILLBOARD_FULL;
+            // GEO_BILLBOARD body parts and ordinary billboard objects must
+            // face the complete HMD pose. Treating all of them as cylindrical
+            // kept trees upright, but flattened coins, bowling balls, and
+            // Bob-omb bodies when the player looked up or down. Trees already
+            // request GRAPH_RENDER_CYLBOARD explicitly in VR below.
+            listNode->billboard = VR_BILLBOARD_FULL;
         } else if (gCurGraphNodeObject != NULL &&
                    (gCurGraphNodeObject->node.flags & GRAPH_RENDER_CYLBOARD)) {
             listNode->billboard = VR_BILLBOARD_CYLINDRICAL;
@@ -3234,6 +3514,59 @@ static void vr_lock_local_mario_arm_to_controller(
     }
 }
 
+static f32 vr_get_local_mario_torso_alignment(
+    f32 manualHeightOffset
+) {
+    u8 characterIndex = gNetworkPlayers[0].overrideModelIndex;
+    if (characterIndex >= CT_MAX) {
+        characterIndex = CT_MARIO;
+    }
+
+    if (sVrTorsoAlignmentCharacter != characterIndex) {
+        // Do not calibrate a newly selected character from the preceding
+        // model's last stored head joint.
+        sVrTorsoAlignmentValid = false;
+        sVrTorsoAlignmentCharacter = characterIndex;
+        sVrTorsoAlignmentCharacterTimestamp = gGlobalTimer;
+        sVrTorsoAlignment = 0.0f;
+    }
+
+    struct MarioBodyState* bodyState = gMarioStates[0].marioBodyState;
+    if (!sVrTorsoAlignmentValid &&
+        gGlobalTimer > sVrTorsoAlignmentCharacterTimestamp &&
+        gMarioStates[0].action == ACT_IDLE &&
+        gMarioStates[0].marioObj != NULL &&
+        bodyState != NULL &&
+        (bodyState->updateHeadPosTime == gGlobalTimer ||
+         (gGlobalTimer > 0 &&
+          bodyState->updateHeadPosTime == gGlobalTimer - 1))) {
+        // animPartsPos contains the actual rendered head attachment, including
+        // model-pack scales and the manual torso-height adjustment. Compare
+        // its unadjusted position with the built-in character's intended top
+        // of torso. This corrects short-rendering tall models without moving
+        // the camera or lifting the legs away from the floor.
+        const f32 naturalTorsoTop =
+            bodyState->animPartsPos[MARIO_ANIM_PART_HEAD][1] -
+            manualHeightOffset;
+        const f32 intendedTorsoTop =
+            gMarioStates[0].marioObj->header.gfx.pos[1] +
+            (f32)config_vr_head_attachment_height_for_character(
+                characterIndex
+            );
+        const f32 correction = intendedTorsoTop - naturalTorsoTop;
+        if (isfinite(correction)) {
+            sVrTorsoAlignment = clamp(
+                correction,
+                -250.0f,
+                250.0f
+            );
+            sVrTorsoAlignmentValid = true;
+        }
+    }
+
+    return sVrTorsoAlignment;
+}
+
 static void vr_adjust_local_mario_body_transform(
     Mat4 matrix,
     bool previousFrame
@@ -3270,9 +3603,15 @@ static void vr_adjust_local_mario_body_transform(
             return;
     }
 
-    const f32 heightOffset =
+    f32 heightOffset =
         ((f32)clamp(heightValue, 0U, 200U) - 100.0f) *
         0.5f;
+    if (gCurMarioBodyState->currAnimPart ==
+        MARIO_ANIM_PART_TORSO) {
+        heightOffset += vr_get_local_mario_torso_alignment(
+            heightOffset
+        );
+    }
 
     // Animated part translations are local to their parent bone. Applying
     // the setting there causes a bent/rotated torso or leg to turn "height"

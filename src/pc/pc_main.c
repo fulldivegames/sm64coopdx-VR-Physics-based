@@ -149,6 +149,7 @@ extern void patch_mtx_vr_projection(
     f32 delta,
     uint32_t eyeIndex
 );
+extern void patch_mtx_vr_shared(void);
 extern void patch_mtx_vr_ui_projection(uint32_t eyeIndex);
 extern void patch_screen_transition_interpolated(f32 delta);
 extern void patch_title_screen_interpolated(f32 delta);
@@ -377,7 +378,9 @@ void produce_interpolation_frames_and_delay(void) {
             sVrDesktopMirrorNextTime = 0.0;
         }
 
-        if (!gSkipInterpolationTitleScreen) { patch_interpolations(delta); }
+        if (!gSkipInterpolationTitleScreen) {
+            patch_interpolations(delta);
+        }
 
         const struct GfxDimensions desktopDimensions =
             gfx_current_dimensions;
@@ -387,6 +390,7 @@ void produce_interpolation_frames_and_delay(void) {
             desktopDimensions.height;
         bool renderedVrEye = false;
         bool mirroredVrEye = false;
+        bool patchedVrSharedMatrices = false;
 
         for (uint32_t eye = 0; eye < 2; eye++) {
             uint32_t eyeWidth = 0;
@@ -401,6 +405,12 @@ void produce_interpolation_frames_and_delay(void) {
             }
 
             renderedVrEye = true;
+
+            if (!gSkipInterpolationTitleScreen &&
+                !patchedVrSharedMatrices) {
+                patch_mtx_vr_shared();
+                patchedVrSharedMatrices = true;
+            }
 
             gfx_current_dimensions.width = eyeWidth;
             gfx_current_dimensions.height = eyeHeight;

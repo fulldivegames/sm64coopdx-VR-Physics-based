@@ -371,6 +371,19 @@ static void newcam_update_values(void) {
     gNewCamera.yaw -= gNewCamera.yawAccel * newcam_ivrt(0) * (gNewCamera.sensitivityX / 10);
     gNewCamera.tilt = newcam_clamp(gNewCamera.tilt + gNewCamera.tiltAccel * newcam_ivrt(1) * (gNewCamera.sensitivityY / 10), -NEWCAM_TILT_LIMIT, +NEWCAM_TILT_LIMIT);
 
+    if (vr_first_person_locks_camera_input()) {
+        // In VR first person this yaw is the stable world-space basis shared
+        // by rendering, HMD-directed locomotion, and billboard correction.
+        // Puppycam's automatic follow logic centers behind Mario while flying,
+        // swimming, or riding a shell. Feeding that centered yaw back into
+        // Mario's HMD target creates an unbounded 360-degree steering loop and
+        // also rotates the billboard basis underneath the headset. Preserve
+        // only explicit smooth-turn input above; never auto-follow an action.
+        gNewCamera.turnWait = 10;
+        gNewCamera.centering = false;
+        return;
+    }
+
     // 10 frames after landing, progressively center the camera behind Mario when he's moving
     // This effect can be negated by setting `aggression` to 0
     if (gNewCamera.turnWait > 0 && gMarioState->vel[1] == 0) {

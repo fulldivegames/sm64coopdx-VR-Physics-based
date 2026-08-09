@@ -21,6 +21,7 @@
 #include "pc/configfile.h"
 
 #include "gfx_cc.h"
+#include "gfx.h"
 #include "gfx_window_manager_api.h"
 #include "gfx_rendering_api.h"
 #include "gfx_direct3d_common.h"
@@ -117,8 +118,8 @@ static struct {
     LightmapCB lightmap_cb_data;
 
     struct ShaderProgramD3D11 shader_program_pool[CC_MAX_SHADERS];
-    uint8_t shader_program_pool_size;
-    uint8_t shader_program_pool_index;
+    uint16_t shader_program_pool_size;
+    uint16_t shader_program_pool_index;
 
     std::vector<struct TextureData> textures;
     int current_tile;
@@ -334,6 +335,10 @@ static void gfx_d3d11_init(void) {
                   gfx_dxgi_get_h_wnd(), "Failed to create lightmap constant buffer.");
 
     d3d.context->PSSetConstantBuffers(2, 1, d3d.lightmap_cb.GetAddressOf());
+
+    // Avoid vector growth and pointer-storage churn while large mod packs
+    // discover textures during gameplay.
+    d3d.textures.reserve(MAX_CACHED_TEXTURES);
 
     controller_bind_init();
 }

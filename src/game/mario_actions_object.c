@@ -385,11 +385,13 @@ s32 act_holding_bowser(struct MarioState *m) {
     s16 spin;
     f32 vrTurnInput = 0.0f;
     bool vrGripReleased = false;
+    bool vrFullPowerImpulse = false;
     const bool vrBowserControls =
         vr_hand_interaction_get_bowser_controls(
             m,
             &vrTurnInput,
-            &vrGripReleased
+            &vrGripReleased,
+            &vrFullPowerImpulse
         );
 
     if (m->playerIndex == 0 &&
@@ -438,8 +440,14 @@ s32 act_holding_bowser(struct MarioState *m) {
                 50U,
                 150U
             ) + 50) / 100;
-
         m->actionArg = 0;
+        if (vrFullPowerImpulse &&
+            fabsf(vrTurnInput) > 0.0001f &&
+            absx(m->angleVel[1]) < maximumSpeed) {
+            m->angleVel[1] = vrTurnInput > 0.0f
+                ? maximumSpeed
+                : -maximumSpeed;
+        }
         if (fabsf(vrTurnInput) > 0.0001f) {
             const s32 inputAcceleration = MAX(
                 1,

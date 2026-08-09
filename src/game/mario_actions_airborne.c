@@ -358,6 +358,28 @@ void update_lava_boost_or_twirling(struct MarioState *m) {
 Calculates and applies a change in Mario's yaw while flying, based on horizontal stick input. Approaches a target yaw velocity
 and sets Mario's roll angle to simulate banking turns. This results in a more natural, curved flight path
 |descriptionEnd| */
+static bool vr_get_horizontal_view_yaw(
+    struct MarioState* m,
+    s16* yaw
+) {
+    Vec3f direction;
+    if (yaw == NULL ||
+        !vr_get_first_person_view_direction(m, direction)) {
+        return false;
+    }
+
+    const f32 horizontalLength = sqrtf(
+        direction[0] * direction[0] +
+        direction[2] * direction[2]
+    );
+    if (horizontalLength <= 0.0001f) {
+        return false;
+    }
+
+    *yaw = atan2s(direction[2], direction[0]);
+    return true;
+}
+
 void update_flying_yaw(struct MarioState *m) {
     if (!m) { return; }
     s16 targetYawVel = -(s16)(m->controller->stickX * (m->forwardVel / 4.0f));
@@ -386,6 +408,51 @@ void update_flying_yaw(struct MarioState *m) {
 
     m->faceAngle[1] += m->angleVel[1];
     m->faceAngle[2] = 20 * -m->angleVel[1];
+}
+
+static bool update_vr_headset_flying(struct MarioState* m) {
+    Vec3f direction;
+    if (!vr_get_first_person_view_direction(m, direction)) {
+        return false;
+    }
+
+    const f32 horizontalLength = sqrtf(
+        direction[0] * direction[0] +
+        direction[2] * direction[2]
+    );
+    if (horizontalLength > 0.0001f) {
+        m->faceAngle[1] = atan2s(direction[2], direction[0]);
+    }
+    m->faceAngle[0] = (s16)clamp(
+        (s32)atan2s(horizontalLength, direction[1]),
+        -0x2AAA,
+        0x2AAA
+    );
+
+    // The headset itself supplies the complete flight direction. Native
+    // stick angular velocity would fight that target and was the source of
+    // takeoff turns in the wrong direction. Keep the normal Wing Cap speed
+    // gain/loss so diving accelerates and climbing still costs momentum.
+    m->angleVel[0] = 0;
+    m->angleVel[1] = 0;
+    m->faceAngle[2] = 0;
+    m->forwardVel -=
+        2.0f * ((f32)m->faceAngle[0] / 0x4000) + 0.1f;
+    if (m->forwardVel < 4.0f) {
+        // Vanilla flight automatically noses down at this speed. A small
+        // floor keeps direct head steering from producing a permanent hover
+        // when the player continues looking upward instead.
+        m->forwardVel = 4.0f;
+    }
+
+    m->vel[0] = m->forwardVel *
+        coss(m->faceAngle[0]) * sins(m->faceAngle[1]);
+    m->vel[1] = m->forwardVel * sins(m->faceAngle[0]);
+    m->vel[2] = m->forwardVel *
+        coss(m->faceAngle[0]) * coss(m->faceAngle[1]);
+    m->slideVelX = m->vel[0];
+    m->slideVelZ = m->vel[2];
+    return true;
 }
 
 /* |description|
@@ -426,6 +493,10 @@ applies drag, and adjusts forward velocity. Also updates Mario's model angles fo
 void update_flying(struct MarioState *m) {
     if (!m) { return; }
     UNUSED u32 unused;
+
+    if (update_vr_headset_flying(m)) {
+        return;
+    }
 
     update_flying_pitch(m);
     update_flying_yaw(m);
@@ -769,6 +840,17 @@ s32 act_riding_shell_air(struct MarioState *m) {
     if (!m) { return 0; }
     play_mario_sound(m, SOUND_ACTION_TERRAIN_JUMP, 0);
     set_character_animation(m, CHAR_ANIM_JUMP_RIDING_SHELL);
+
+    s16 viewYaw;
+    if (vr_get_horizontal_view_yaw(m, &viewYaw)) {
+        m->intendedYaw = viewYaw;
+        m->faceAngle[1] = viewYaw - approach_s32(
+            (s16)(viewYaw - m->faceAngle[1]),
+            0,
+            0x800,
+            0x800
+        );
+    }
 
     update_air_without_turn(m);
 
@@ -2153,6 +2235,16 @@ s32 act_flying_triple_jump(struct MarioState *m) {
         return set_mario_action(m, ACT_GROUND_POUND, 0);
     }
 #endif
+
+    s16 viewYaw;
+    if (vr_get_horizontal_view_yaw(m, &viewYaw)) {
+        // Align the entire launch arc immediately. Waiting until ACT_FLYING
+        // begins leaves the rising half of the Wing Cap takeoff traveling in
+        // Mario's old ground direction even though the VR view faces forward.
+        m->faceAngle[1] = viewYaw;
+        m->intendedYaw = viewYaw;
+        mario_set_forward_vel(m, m->forwardVel);
+    }
 
     play_mario_sound(m, SOUND_ACTION_TERRAIN_JUMP, CHAR_SOUND_YAHOO);
     if (m->actionState == 0) {

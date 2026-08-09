@@ -25,7 +25,7 @@
 #define MAX_VERTICES 64
 #define MAX_TILES 8
 #define MAX_TEXTURES 2
-#define MAX_CACHED_TEXTURES 4096 // for preloading purposes
+#define MAX_CACHED_TEXTURES 16384 // for preloading and mod-heavy sessions
 #define MAX_GFX_STATES 8
 
 #define HASH_SHIFT 0

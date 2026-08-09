@@ -9,6 +9,8 @@
 #define VR_STICK_DEADZONE 0.18f
 #define VR_TRIGGER_THRESHOLD 0.55f
 #define VR_CAMERA_BUTTON_THRESHOLD 0.55f
+#define VR_PHYSICAL_CROUCH_HEIGHT_RATIO (2.0f / 3.0f)
+#define VR_PHYSICAL_CROUCH_RELEASE_HYSTERESIS 0.08f
 #define VR_PUNCH_MIN_RESET_SPEED 0.20f
 #define VR_PUNCH_RESET_SPEED_SCALE 0.35f
 #define VR_PUNCH_TRAVEL_SPEED_SCALE 0.60f
@@ -27,6 +29,8 @@ static float sVrPunchTravel[VR_CONTROLLER_COUNT] = {
     0.0f,
     0.0f
 };
+static bool sVrPhysicalCrouchActive = false;
+static uint32_t sVrPhysicalCrouchTrackingGeneration = 0;
 
 static float controller_vr_clampf(
     float value,
@@ -102,6 +106,127 @@ static void controller_vr_merge_stick(
         *destinationX = sourceX;
         *destinationY = sourceY;
     }
+}
+
+static bool controller_vr_binding_down(
+    unsigned int binding,
+    bool leftAvailable,
+    const struct VrControllerState* left,
+    bool rightAvailable,
+    const struct VrControllerState* right
+) {
+    const struct VrControllerState* state = NULL;
+
+    switch (binding) {
+        case VR_CONTROLLER_BINDING_LEFT_PRIMARY:
+        case VR_CONTROLLER_BINDING_LEFT_SECONDARY:
+        case VR_CONTROLLER_BINDING_LEFT_TRIGGER:
+        case VR_CONTROLLER_BINDING_LEFT_GRIP:
+        case VR_CONTROLLER_BINDING_LEFT_STICK_CLICK:
+        case VR_CONTROLLER_BINDING_LEFT_MENU:
+            if (leftAvailable) {
+                state = left;
+            }
+            break;
+        case VR_CONTROLLER_BINDING_RIGHT_PRIMARY:
+        case VR_CONTROLLER_BINDING_RIGHT_SECONDARY:
+        case VR_CONTROLLER_BINDING_RIGHT_TRIGGER:
+        case VR_CONTROLLER_BINDING_RIGHT_GRIP:
+        case VR_CONTROLLER_BINDING_RIGHT_STICK_CLICK:
+        case VR_CONTROLLER_BINDING_RIGHT_MENU:
+            if (rightAvailable) {
+                state = right;
+            }
+            break;
+        default:
+            return false;
+    }
+
+    if (state == NULL) {
+        return false;
+    }
+
+    switch (binding) {
+        case VR_CONTROLLER_BINDING_LEFT_PRIMARY:
+        case VR_CONTROLLER_BINDING_RIGHT_PRIMARY:
+            return state->primaryButton;
+        case VR_CONTROLLER_BINDING_LEFT_SECONDARY:
+        case VR_CONTROLLER_BINDING_RIGHT_SECONDARY:
+            return state->secondaryButton;
+        case VR_CONTROLLER_BINDING_LEFT_TRIGGER:
+        case VR_CONTROLLER_BINDING_RIGHT_TRIGGER:
+            return state->trigger >= VR_TRIGGER_THRESHOLD;
+        case VR_CONTROLLER_BINDING_LEFT_GRIP:
+        case VR_CONTROLLER_BINDING_RIGHT_GRIP:
+            return state->squeeze >= VR_TRIGGER_THRESHOLD;
+        case VR_CONTROLLER_BINDING_LEFT_STICK_CLICK:
+        case VR_CONTROLLER_BINDING_RIGHT_STICK_CLICK:
+            return state->thumbstickButton;
+        case VR_CONTROLLER_BINDING_LEFT_MENU:
+        case VR_CONTROLLER_BINDING_RIGHT_MENU:
+            return state->menuButton;
+        default:
+            return false;
+    }
+}
+
+static const float* controller_vr_select_stick(
+    unsigned int stick,
+    bool leftAvailable,
+    const struct VrControllerState* left,
+    bool rightAvailable,
+    const struct VrControllerState* right
+) {
+    if (stick == VR_CONTROLLER_STICK_LEFT && leftAvailable) {
+        return left->thumbstick;
+    }
+    if (stick == VR_CONTROLLER_STICK_RIGHT && rightAvailable) {
+        return right->thumbstick;
+    }
+    return NULL;
+}
+
+static bool controller_vr_update_physical_crouch(void) {
+    if (!vr_is_active() || !configVrPhysicalCrouching) {
+        sVrPhysicalCrouchActive = false;
+        return false;
+    }
+
+    const uint32_t trackingGeneration =
+        vr_get_tracking_origin_generation();
+    if (trackingGeneration !=
+        sVrPhysicalCrouchTrackingGeneration) {
+        sVrPhysicalCrouchTrackingGeneration = trackingGeneration;
+        sVrPhysicalCrouchActive = false;
+        return false;
+    }
+
+    float translation[3] = { 0 };
+    float calibratedHeight = 0.0f;
+    if (!vr_get_head_translation(translation) ||
+        !vr_get_calibrated_head_height(&calibratedHeight)) {
+        sVrPhysicalCrouchActive = false;
+        return false;
+    }
+
+    const float crouchDescent = calibratedHeight *
+        (1.0f - VR_PHYSICAL_CROUCH_HEIGHT_RATIO);
+    const float releaseDescent = fmaxf(
+        0.0f,
+        crouchDescent -
+            VR_PHYSICAL_CROUCH_RELEASE_HYSTERESIS
+    );
+    const float downwardTravel = -translation[1];
+
+    if (sVrPhysicalCrouchActive) {
+        if (downwardTravel <= releaseDescent) {
+            sVrPhysicalCrouchActive = false;
+        }
+    } else if (downwardTravel >= crouchDescent) {
+        sVrPhysicalCrouchActive = true;
+    }
+
+    return sVrPhysicalCrouchActive;
 }
 
 static bool controller_vr_update_physical_punch(
@@ -204,6 +329,7 @@ static bool controller_vr_update_physical_punch(
     }
 
     sVrPunchArmed[hand] = false;
+#ifdef DEBUG
     printf(
         "[VR] %s physical punch detected "
         "(%.2f m/s, %.2f m travel).\n",
@@ -211,6 +337,7 @@ static bool controller_vr_update_physical_punch(
         speed,
         sVrPunchTravel[hand]
     );
+#endif
     sVrPunchTravel[hand] = 0.0f;
     vr_apply_haptic(hand, 0.25f, 0.04f, -1.0f);
     return true;
@@ -236,9 +363,17 @@ static void controller_vr_init(void) {
 }
 
 static void controller_vr_read(OSContPad* pad) {
-    if (!vr_is_active() ||
-        !configVrMotionControllerInput ||
-        pad == NULL) {
+    if (!vr_is_active() || pad == NULL) {
+        controller_vr_reset_physical_punches();
+        sVrPhysicalCrouchActive = false;
+        return;
+    }
+
+    if (controller_vr_update_physical_crouch()) {
+        pad->button |= Z_TRIG;
+    }
+
+    if (!configVrMotionControllerInput) {
         controller_vr_reset_physical_punches();
         return;
     }
@@ -287,64 +422,110 @@ static void controller_vr_read(OSContPad* pad) {
         controller_vr_reset_physical_punches();
     }
 
-    if (leftAvailable) {
+    const float* movementStick = controller_vr_select_stick(
+        configVrMoveStick,
+        leftAvailable,
+        &left,
+        rightAvailable,
+        &right
+    );
+    if (movementStick != NULL) {
         controller_vr_merge_stick(
             &pad->stick_x,
             &pad->stick_y,
-            left.thumbstick
+            movementStick
         );
-
-        if (left.primaryButton ||
-            left.trigger >= VR_TRIGGER_THRESHOLD) {
-            pad->button |= Z_TRIG;
-        }
-        if (left.secondaryButton) {
-            pad->button |= R_TRIG;
-        }
-        if (left.thumbstickButton) {
-            pad->button |= L_TRIG;
-        }
-        if (left.menuButton) {
-            pad->button |= START_BUTTON;
-        }
     }
 
-    if (rightAvailable) {
+    if (controller_vr_binding_down(
+            configVrJumpBinding,
+            leftAvailable,
+            &left,
+            rightAvailable,
+            &right
+        )) {
+        pad->button |= A_BUTTON;
+    }
+    if (controller_vr_binding_down(
+            configVrAttackBinding,
+            leftAvailable,
+            &left,
+            rightAvailable,
+            &right
+        )) {
+        pad->button |= B_BUTTON;
+    }
+    if (controller_vr_binding_down(
+            configVrCrouchBinding,
+            leftAvailable,
+            &left,
+            rightAvailable,
+            &right
+        )) {
+        pad->button |= Z_TRIG;
+    }
+    if (controller_vr_binding_down(
+            configVrLBinding,
+            leftAvailable,
+            &left,
+            rightAvailable,
+            &right
+        )) {
+        pad->button |= L_TRIG;
+    }
+    if (controller_vr_binding_down(
+            configVrRBinding,
+            leftAvailable,
+            &left,
+            rightAvailable,
+            &right
+        )) {
+        pad->button |= R_TRIG;
+    }
+    if (controller_vr_binding_down(
+            configVrPauseBinding,
+            leftAvailable,
+            &left,
+            rightAvailable,
+            &right
+        )) {
+        pad->button |= START_BUTTON;
+    }
+
+    const float* cameraStick = controller_vr_select_stick(
+        configVrCameraStick,
+        leftAvailable,
+        &left,
+        rightAvailable,
+        &right
+    );
+    if (cameraStick != NULL) {
         controller_vr_merge_stick(
             &pad->ext_stick_x,
             &pad->ext_stick_y,
-            right.thumbstick
+            cameraStick
         );
 
-        if (right.primaryButton) {
-            pad->button |= A_BUTTON;
-        }
-        if (right.secondaryButton ||
-            (configVrPunchButton &&
-             right.trigger >= VR_TRIGGER_THRESHOLD)) {
-            pad->button |= B_BUTTON;
-        }
-        if (right.thumbstickButton) {
-            pad->button |= R_TRIG;
-        }
-        if (right.menuButton) {
-            pad->button |= START_BUTTON;
-        }
-
-        if (right.thumbstick[0] <=
+        if (cameraStick[0] <=
             -VR_CAMERA_BUTTON_THRESHOLD) {
             pad->button |= L_CBUTTONS;
-        } else if (right.thumbstick[0] >=
+        } else if (cameraStick[0] >=
                    VR_CAMERA_BUTTON_THRESHOLD) {
             pad->button |= R_CBUTTONS;
         }
-        if (right.thumbstick[1] >=
+        if (cameraStick[1] >=
             VR_CAMERA_BUTTON_THRESHOLD) {
             pad->button |= U_CBUTTONS;
-        } else if (right.thumbstick[1] <=
+        } else if (cameraStick[1] <=
                    -VR_CAMERA_BUTTON_THRESHOLD) {
             pad->button |= D_CBUTTONS;
         }
+    }
+
+    if (configVrPunchButton &&
+        rightAvailable &&
+        right.trigger >= VR_TRIGGER_THRESHOLD) {
+        pad->button |= B_BUTTON;
     }
 }
 

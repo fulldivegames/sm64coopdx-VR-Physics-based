@@ -87,18 +87,18 @@ struct CombineMode {
 #pragma pack()
 
 #define SHADER_CMD_LENGTH 16
-#define CC_MAX_SHADERS 64
+#define CC_MAX_SHADERS 1024
 
 struct ColorCombiner {
     struct CombineMode cm;
     struct ShaderProgram *prg;
     union {
         uint8_t shader_input_mapping[16];
-        uint64_t shader_input_mapping_as_u64[8];
+        uint64_t shader_input_mapping_as_u64[2];
     };
     union {
         uint8_t shader_commands[16];
-        uint64_t shader_commands_as_u64[8];
+        uint64_t shader_commands_as_u64[2];
     };
     uint64_t hash;
 };

@@ -340,12 +340,46 @@ static void update_swimming_pitch(struct MarioState *m) {
     }
 }
 
+static bool update_vr_swimming_direction(struct MarioState* m) {
+    Vec3f direction;
+    if (!vr_get_first_person_view_direction(m, direction)) {
+        return false;
+    }
+
+    const f32 horizontalLength = sqrtf(
+        direction[0] * direction[0] +
+        direction[2] * direction[2]
+    );
+    if (horizontalLength > 0.0001f) {
+        m->faceAngle[1] = atan2s(direction[2], direction[0]);
+    }
+    m->faceAngle[0] = (s16)clamp(
+        (s32)atan2s(horizontalLength, direction[1]),
+        -0x3F00,
+        0x3F00
+    );
+
+    // Headset direction replaces only the original stick yaw/pitch. Stroke
+    // timing, button requirements, forward speed, buoyancy, currents, water
+    // surface clamping, and collision all remain in their native paths.
+    m->angleVel[0] = 0;
+    m->angleVel[1] = 0;
+    m->faceAngle[2] = 0;
+    return true;
+}
+
+static void update_swimming_direction(struct MarioState* m) {
+    if (!update_vr_swimming_direction(m)) {
+        update_swimming_yaw(m);
+        update_swimming_pitch(m);
+    }
+}
+
 static void common_idle_step(struct MarioState *m, s32 animation, s32 arg) {
     if (!m) { return; }
     s16 *val = &m->marioBodyState->headAngle[0];
 
-    update_swimming_yaw(m);
-    update_swimming_pitch(m);
+    update_swimming_direction(m);
     update_swimming_speed(m, MIN_SWIM_SPEED);
     perform_water_step(m);
     update_water_pitch(m);
@@ -484,8 +518,7 @@ static void common_swimming_step(struct MarioState *m, s16 swimStrength) {
     s16 floorPitch;
     UNUSED struct Object *marioObj = m->marioObj;
 
-    update_swimming_yaw(m);
-    update_swimming_pitch(m);
+    update_swimming_direction(m);
     update_swimming_speed(m, swimStrength / 10.0f);
 
     switch (perform_water_step(m)) {
@@ -860,8 +893,7 @@ static s32 check_water_grab(struct MarioState *m) {
 
 static s32 act_water_throw(struct MarioState *m) {
     if (!m) { return 0; }
-    update_swimming_yaw(m);
-    update_swimming_pitch(m);
+    update_swimming_direction(m);
     update_swimming_speed(m, MIN_SWIM_SPEED);
     perform_water_step(m);
     update_water_pitch(m);
@@ -889,8 +921,7 @@ static s32 act_water_punch(struct MarioState *m) {
         m->forwardVel += 1.0f;
     }
 
-    update_swimming_yaw(m);
-    update_swimming_pitch(m);
+    update_swimming_direction(m);
     update_swimming_speed(m, MIN_SWIM_SPEED);
     perform_water_step(m);
     update_water_pitch(m);

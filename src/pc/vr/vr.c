@@ -194,6 +194,18 @@ bool vr_get_head_translation(float translation[3]) {
     return vr_openxr_get_head_translation(translation);
 }
 
+bool vr_get_calibrated_head_height(float* height) {
+    if (!sVrActive || height == NULL) {
+        return false;
+    }
+
+    return vr_openxr_get_calibrated_head_height(height);
+}
+
+uint32_t vr_get_tracking_origin_generation(void) {
+    return vr_openxr_get_tracking_origin_generation();
+}
+
 bool vr_get_controller_state(
     uint32_t handIndex,
     struct VrControllerState* state
@@ -306,6 +318,12 @@ bool vr_set_active(bool active) {
 
         return false;
     }
+
+    // Establish the application's neutral headset height and yaw from the
+    // first valid pose after OpenXR reaches FOCUSED. Valid poses can arrive
+    // earlier while the headset is still waking, which previously left a
+    // stale vertical offset until the player used the runtime's recenter.
+    vr_openxr_request_recenter();
 
     printf("[VR] VR mode state: ON\n");
 
