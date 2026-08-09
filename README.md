@@ -5,7 +5,7 @@ An experimental OpenXR VR fork of [SM64 Co-Op DX](https://github.com/coop-deluxe
 Version 0.3.0 adds tracked motion controllers, physical interactions, VR-focused movement, and a startup shader cache to the existing first- and third-person VR modes. Third Person Mode remains available and works with both the default camera and SM64 Co-Op DX's free camera.
 
 > [!IMPORTANT]
-> This is an early community project, not a finished VR port. It currently targets 64-bit Windows, OpenGL, and OpenXR. Solo hosting is tested; online co-op still needs broader testing. ROM hacks, Lua mods, model packs, and texture packs may work, but compatibility varies.
+> This is an early project, not a finished VR port. It currently targets 64-bit Windows, OpenGL, and OpenXR. Solo hosting is tested; online co-op still needs broader testing. ROM hacks, Lua mods, model packs, and texture packs may work, but compatibility varies.
 
 ## Download and play on Windows
 
