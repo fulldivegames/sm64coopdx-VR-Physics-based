@@ -287,6 +287,9 @@ static bool sVrDoorYawCompensationActive = false;
 static s16 sVrDoorYawReference = 0;
 static s16 sVrDoorYawStartCompensation = 0;
 static s16 sVrDoorYawCompensation = 0;
+static bool sVrPoleYawCompensationActive = false;
+static s16 sVrPoleYawReference = 0;
+static s16 sVrPoleYawCompensation = 0;
 static bool sVrLastCameraYawValid = false;
 static s16 sVrLastCameraYaw = 0;
 static bool sVrHeadRotationMatrixValid = false;
@@ -336,6 +339,9 @@ void vr_reset_first_person_calibration(void) {
     sVrDoorYawReference = 0;
     sVrDoorYawStartCompensation = 0;
     sVrDoorYawCompensation = 0;
+    sVrPoleYawCompensationActive = false;
+    sVrPoleYawReference = 0;
+    sVrPoleYawCompensation = 0;
     sVrLastCameraYawValid = false;
     sVrLastCameraYaw = 0;
 
@@ -401,6 +407,9 @@ static void vr_update_first_person_action_turn(s16 cameraYaw) {
         sVrActionTurnYaw = 0;
         sVrDoorYawCompensationActive = false;
         sVrDoorYawCompensation = 0;
+        sVrPoleYawCompensationActive = false;
+        sVrPoleYawReference = 0;
+        sVrPoleYawCompensation = 0;
         sVrLastCameraYawValid = false;
         return;
     }
@@ -414,6 +423,11 @@ static void vr_update_first_person_action_turn(s16 cameraYaw) {
         sVrActionTurnLastMarioAction = marioAction;
         sVrLastCameraYaw = cameraYaw;
         sVrLastCameraYawValid = true;
+        if ((marioAction & ACT_FLAG_ON_POLE) != 0) {
+            sVrPoleYawCompensationActive = true;
+            sVrPoleYawReference = cameraYaw;
+            sVrPoleYawCompensation = 0;
+        }
     }
 
     if (sVrActionTurnActive) {
@@ -447,8 +461,52 @@ static void vr_update_first_person_action_turn(s16 cameraYaw) {
         );
     }
 
+    if (sVrPoleYawCompensationActive) {
+        // Pole actions rotate Mario and may also rotate the hidden gameplay
+        // camera. Cancel that basis change so a stationary HMD keeps the same
+        // world heading while climbing, sliding, or handstanding on a pole.
+        sVrPoleYawCompensation = (s16)(
+            sVrPoleYawReference - cameraYaw
+        );
+    }
+
     if (marioAction != sVrActionTurnLastMarioAction) {
+        const u32 previousMarioAction =
+            sVrActionTurnLastMarioAction;
+        const bool wasOnPole =
+            (previousMarioAction & ACT_FLAG_ON_POLE) != 0;
+        const bool isOnPole =
+            (marioAction & ACT_FLAG_ON_POLE) != 0;
         sVrActionTurnLastMarioAction = marioAction;
+
+        if (!wasOnPole && isOnPole) {
+            // Use the preceding frame when available so grabbing a pole does
+            // not inherit a same-frame camera-mode snap. Stop any unfinished
+            // flip turn at its current heading before locking the pole view.
+            sVrActionTurnActive = false;
+            sVrActionTurnStartYaw = sVrActionTurnCurrentYaw;
+            sVrActionTurnTargetYaw = sVrActionTurnCurrentYaw;
+            sVrPoleYawCompensationActive = true;
+            sVrPoleYawReference = sVrLastCameraYawValid
+                ? sVrLastCameraYaw
+                : cameraYaw;
+            sVrPoleYawCompensation = (s16)(
+                sVrPoleYawReference - cameraYaw
+            );
+        } else if (wasOnPole && !isOnPole &&
+                   sVrPoleYawCompensationActive) {
+            // Fold the final pole correction into the persistent action yaw.
+            // The view therefore stays stable on the first airborne frame
+            // instead of snapping to the newly released gameplay camera.
+            const f32 poleYaw =
+                (f32)sVrPoleYawCompensation;
+            sVrActionTurnStartYaw += poleYaw;
+            sVrActionTurnTargetYaw += poleYaw;
+            sVrActionTurnCurrentYaw += poleYaw;
+            sVrPoleYawCompensationActive = false;
+            sVrPoleYawReference = 0;
+            sVrPoleYawCompensation = 0;
+        }
 
         if (marioAction == ACT_ENTERING_STAR_DOOR) {
             // Star/Bowser-door cutscenes can rotate the hidden free-camera
@@ -483,7 +541,11 @@ static void vr_update_first_person_action_turn(s16 cameraYaw) {
                 sVrActionTurnCurrentYaw + momentumDelta;
             sVrActionTurnActive = true;
         } else if (configVrExperimentalWallJumpTurn &&
-                   marioAction == ACT_WALL_KICK_AIR) {
+                   marioAction == ACT_WALL_KICK_AIR &&
+                   !wasOnPole) {
+            // A mid-pole dismount reuses ACT_WALL_KICK_AIR for its physics,
+            // but it is not a wall jump. Its launch is already aligned to the
+            // HMD, so the experimental half-turn must not rotate it again.
             sVrActionTurnStartFrame = renderFrame;
             sVrActionTurnStartYaw = sVrActionTurnCurrentYaw;
             sVrActionTurnTargetYaw =
@@ -498,7 +560,8 @@ static void vr_update_first_person_action_turn(s16 cameraYaw) {
 
     sVrActionTurnYaw = (s16)(
         (s16)((s32)roundf(sVrActionTurnCurrentYaw)) +
-        sVrDoorYawCompensation
+        sVrDoorYawCompensation +
+        sVrPoleYawCompensation
     );
     sVrLastCameraYaw = cameraYaw;
     sVrLastCameraYawValid = true;

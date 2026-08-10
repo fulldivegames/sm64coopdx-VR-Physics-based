@@ -24,6 +24,7 @@
 #include "pc/configfile.h"
 #include "pc/network/network.h"
 #include "pc/lua/smlua.h"
+#include "pc/vr/vr.h"
 
 #define POLE_NONE          0
 #define POLE_TOUCHED_FLOOR 1
@@ -70,6 +71,34 @@ void play_climbing_sounds(struct MarioState *m, s32 b) {
         play_sound(isOnTree ? SOUND_MOVING_SLIDE_DOWN_TREE : SOUND_MOVING_SLIDE_DOWN_POLE,
                    m->marioObj->header.gfx.cameraToObject);
     }
+}
+
+static s32 set_pole_jump_action(
+    struct MarioState* m,
+    u32 action,
+    bool reverseVanillaYaw
+) {
+    const bool vrFirstPerson =
+        m != NULL &&
+        m->playerIndex == 0 &&
+        vr_is_active() &&
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON;
+
+    if (vrFirstPerson) {
+        // A pole/tree dismount should go where the player is looking, not
+        // wherever Mario's hidden climbing animation happens to face. Keep
+        // intendedYaw aligned as well so held stick input cannot add an
+        // immediate sideways component on the first airborne frame.
+        const s16 viewYaw = vr_get_first_person_view_yaw();
+        m->faceAngle[1] = viewYaw;
+        m->intendedYaw = viewYaw;
+    } else if (reverseVanillaYaw) {
+        // Mid-pole jumps use the original wall-kick-style half turn outside
+        // VR first person. Top-of-pole jumps never applied this reversal.
+        m->faceAngle[1] += 0x8000;
+    }
+
+    return set_mario_action(m, action, 0);
 }
 
 /* |description|
@@ -153,8 +182,11 @@ s32 act_holding_pole(struct MarioState *m) {
 #ifdef VERSION_JP
     if (m->input & INPUT_A_PRESSED) {
         add_tree_leaf_particles(m);
-        m->faceAngle[1] += 0x8000;
-        return set_mario_action(m, ACT_WALL_KICK_AIR, 0);
+        return set_pole_jump_action(
+            m,
+            ACT_WALL_KICK_AIR,
+            true
+        );
     }
 
     if (m->input & INPUT_Z_PRESSED) {
@@ -171,8 +203,11 @@ s32 act_holding_pole(struct MarioState *m) {
 
     if (m->input & INPUT_A_PRESSED) {
         add_tree_leaf_particles(m);
-        m->faceAngle[1] += 0x8000;
-        return set_mario_action(m, ACT_WALL_KICK_AIR, 0);
+        return set_pole_jump_action(
+            m,
+            ACT_WALL_KICK_AIR,
+            true
+        );
     }
 #endif
 
@@ -237,8 +272,11 @@ s32 act_climbing_pole(struct MarioState *m) {
 
     if (m->input & INPUT_A_PRESSED) {
         add_tree_leaf_particles(m);
-        m->faceAngle[1] += 0x8000;
-        return set_mario_action(m, ACT_WALL_KICK_AIR, 0);
+        return set_pole_jump_action(
+            m,
+            ACT_WALL_KICK_AIR,
+            true
+        );
     }
 
     if (m->controller->stickY < 8.0f) {
@@ -328,7 +366,11 @@ s32 act_top_of_pole(struct MarioState *m) {
     if (m->usedObj == NULL) { m->usedObj = cur_obj_find_nearest_pole(); }
 
     if (m->input & INPUT_A_PRESSED) {
-        return set_mario_action(m, ACT_TOP_OF_POLE_JUMP, 0);
+        return set_pole_jump_action(
+            m,
+            ACT_TOP_OF_POLE_JUMP,
+            false
+        );
     }
     if (m->controller->stickY < -16.0f) {
         return set_mario_action(m, ACT_TOP_OF_POLE_TRANSITION, 1);
