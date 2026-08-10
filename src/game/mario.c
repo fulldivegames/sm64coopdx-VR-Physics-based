@@ -266,15 +266,29 @@ static s16 vr_get_first_person_view_yaw_from_head_yaw(
     );
 }
 
+static s16 vr_get_first_person_aim_yaw_from_head_yaw(
+    s16 headYaw
+) {
+    // Cannon aiming must match the rendered center of view exactly. Movement
+    // calibration deliberately rotates locomotion, but applying it here would
+    // make the cannon fire beside the headset reticle.
+    return (s16)(
+        -gNewCamera.yaw - 0x4000 +
+        headYaw +
+        vr_get_first_person_action_turn_yaw()
+    );
+}
+
 s16 vr_get_first_person_view_yaw(void) {
     return vr_get_first_person_view_yaw_from_head_yaw(
         vr_first_person_head_yaw_offset()
     );
 }
 
-bool vr_get_first_person_view_direction(
+static bool vr_get_first_person_direction(
     struct MarioState* m,
-    Vec3f direction
+    Vec3f direction,
+    bool applyMovementCalibration
 ) {
     float rotation[4] = { 0 };
 
@@ -288,9 +302,9 @@ bool vr_get_first_person_view_direction(
     }
 
     // Rotate OpenXR's local forward vector (0, 0, -1). Its vertical
-    // component supplies pitch, while vr_get_first_person_view_yaw supplies
-    // the matching world-space yaw after the free-camera base, recentering,
-    // action turns, and the player's movement calibration are applied.
+    // component supplies pitch; the matching world-space yaw uses the stable
+    // free-camera base and action turns, with locomotion calibration included
+    // only for callers that explicitly request it.
     const f32 localForwardY = 2.0f *
         (rotation[3] * rotation[0] -
          rotation[1] * rotation[2]);
@@ -315,13 +329,28 @@ bool vr_get_first_person_view_direction(
         rotation,
         &headYaw
     );
-    const s16 viewYaw =
-        vr_get_first_person_view_yaw_from_head_yaw(headYaw);
+    const s16 viewYaw = applyMovementCalibration
+        ? vr_get_first_person_view_yaw_from_head_yaw(headYaw)
+        : vr_get_first_person_aim_yaw_from_head_yaw(headYaw);
 
     direction[0] = horizontalLength * sins(viewYaw);
     direction[1] = normalizedY;
     direction[2] = horizontalLength * coss(viewYaw);
     return true;
+}
+
+bool vr_get_first_person_view_direction(
+    struct MarioState* m,
+    Vec3f direction
+) {
+    return vr_get_first_person_direction(m, direction, true);
+}
+
+bool vr_get_first_person_aim_direction(
+    struct MarioState* m,
+    Vec3f direction
+) {
+    return vr_get_first_person_direction(m, direction, false);
 }
 
 u32 unused80339F10;

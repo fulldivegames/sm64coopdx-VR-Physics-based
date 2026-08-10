@@ -103,6 +103,14 @@ static s16 sVrBowserPreviousHandYaw = 0;
 static s32 sVrBowserAccumulatedHandYaw = 0;
 static f32 sVrBowserPhysicalTurnInput = 0.0f;
 static bool sVrBowserFullPowerImpulse = false;
+static bool sVrInteractionTrackingActive = false;
+
+struct VrFistSweep {
+    Vec3f start;
+    Vec3f step;
+    f32 minimum[3];
+    f32 maximum[3];
+};
 
 static void vr_hand_interaction_clear_tracked_hold(void) {
     sVrTrackedHeldObject = NULL;
@@ -1401,8 +1409,7 @@ static bool vr_hand_interaction_object_is_attackable(
 }
 
 static bool vr_hand_interaction_sweep_overlaps_object(
-    const Vec3f start,
-    const Vec3f end,
+    const struct VrFistSweep* sweep,
     f32 fistRadius,
     f32 fistLength,
     struct Object* object
@@ -1426,14 +1433,25 @@ static bool vr_hand_interaction_sweep_overlaps_object(
         object->oPosY - object->hitboxDownOffset;
     const f32 objectTop = objectBottom + objectHeight;
 
+    // Reject distant objects before running the sampled sweep. A motion
+    // punch remains active for several frames, so this broad phase avoids
+    // doing five interpolated collision tests for nearly every object in
+    // the level while preserving the exact existing hit result.
+    if (object->oPosX < sweep->minimum[0] - collisionRadius ||
+        object->oPosX > sweep->maximum[0] + collisionRadius ||
+        object->oPosZ < sweep->minimum[2] - collisionRadius ||
+        object->oPosZ > sweep->maximum[2] + collisionRadius ||
+        objectTop < sweep->minimum[1] - fistLength ||
+        objectBottom > sweep->maximum[1] + fistRadius) {
+        return false;
+    }
+
     for (u32 sample = 0;
          sample <= VR_FIST_SWEEP_SAMPLES;
          sample++) {
-        const f32 amount =
-            (f32)sample / (f32)VR_FIST_SWEEP_SAMPLES;
-        const f32 x = start[0] + (end[0] - start[0]) * amount;
-        const f32 y = start[1] + (end[1] - start[1]) * amount;
-        const f32 z = start[2] + (end[2] - start[2]) * amount;
+        const f32 x = sweep->start[0] + sweep->step[0] * sample;
+        const f32 y = sweep->start[1] + sweep->step[1] * sample;
+        const f32 z = sweep->start[2] + sweep->step[2] * sample;
         const f32 deltaX = x - object->oPosX;
         const f32 deltaZ = z - object->oPosZ;
         const f32 fistTop = y + fistRadius;
@@ -1453,19 +1471,17 @@ static bool vr_hand_interaction_sweep_overlaps_object(
 static bool vr_hand_interaction_attack_object(
     struct MarioState* mario,
     u32 hand,
-    const Vec3f start,
-    const Vec3f end,
+    const struct VrFistSweep* sweep,
     const Vec3f velocity,
-    struct Object* object
+    struct Object* object,
+    f32 fistRadius,
+    f32 fistLength
 ) {
-    const f32 fistRadius =
-        vr_hand_interaction_fist_radius();
     if (!vr_hand_interaction_object_is_attackable(mario, object) ||
         !vr_hand_interaction_sweep_overlaps_object(
-            start,
-            end,
+            sweep,
             fistRadius,
-            vr_hand_interaction_fist_length(fistRadius),
+            fistLength,
             object
         )) {
         return false;
@@ -1534,6 +1550,21 @@ static bool vr_hand_interaction_process_lists(
         return false;
     }
 
+    // These settings cannot change during a single fist sweep. Compute them
+    // once instead of repeating the clamps and divisions for every object.
+    const f32 fistRadius = vr_hand_interaction_fist_radius();
+    const f32 fistLength =
+        vr_hand_interaction_fist_length(fistRadius);
+    struct VrFistSweep sweep;
+    for (u32 axis = 0; axis < 3; axis++) {
+        sweep.start[axis] = start[axis];
+        sweep.step[axis] =
+            (end[axis] - start[axis]) /
+            (f32)VR_FIST_SWEEP_SAMPLES;
+        sweep.minimum[axis] = fminf(start[axis], end[axis]);
+        sweep.maximum[axis] = fmaxf(start[axis], end[axis]);
+    }
+
     for (s32 listIndex = 0;
          listIndex < NUM_OBJ_LISTS;
          listIndex++) {
@@ -1547,10 +1578,11 @@ static bool vr_hand_interaction_process_lists(
             if (vr_hand_interaction_attack_object(
                     mario,
                     hand,
-                    start,
-                    end,
+                    &sweep,
                     velocity,
-                    object
+                    object,
+                    fistRadius,
+                    fistLength
                 )) {
                 return true;
             }
@@ -1567,22 +1599,32 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         return;
     }
 
-    const bool interactionAvailable =
+    const bool trackingAvailable =
         vr_is_active() &&
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
         configVrMotionControllerInput &&
-        mario->marioObj != NULL &&
+        mario->marioObj != NULL;
+    const bool canStartInteraction =
+        trackingAvailable &&
         (mario->action & ACT_FLAG_INTANGIBLE) == 0;
-    if (!interactionAvailable) {
-        if (sVrTrackedHeldObject != NULL) {
-            vr_hand_interaction_release_grab(mario, false);
+    if (!trackingAvailable) {
+        if (sVrInteractionTrackingActive ||
+            sVrTrackedHeldObject != NULL ||
+            sVrTrackedAnchorObject != NULL ||
+            sVrTrackedHootObject != NULL) {
+            if (sVrTrackedHeldObject != NULL) {
+                vr_hand_interaction_release_grab(mario, false);
+            }
+            if (sVrTrackedAnchorObject != NULL) {
+                vr_hand_interaction_release_player_anchor(mario);
+            }
+            vr_hand_interaction_force_release_hoot(mario);
+            vr_hand_interaction_reset();
         }
-        if (sVrTrackedAnchorObject != NULL) {
-            vr_hand_interaction_release_player_anchor(mario);
-        }
-        vr_hand_interaction_force_release_hoot(mario);
-        vr_hand_interaction_reset();
+        sVrInteractionTrackingActive = false;
         return;
     }
+    sVrInteractionTrackingActive = true;
 
     if (sVrTrackedHeldObject != NULL &&
         (mario->heldObj != sVrTrackedHeldObject ||
@@ -1592,6 +1634,18 @@ void vr_hand_interaction_update(struct MarioState* mario) {
             mario->heldObj = NULL;
         }
         vr_hand_interaction_clear_tracked_hold();
+    }
+
+    if (sVrTrackedHeldObject != NULL &&
+        mario->heldObj == sVrTrackedHeldObject &&
+        (sVrTrackedHeldObject->oInteractionSubtype &
+            INT_SUBTYPE_DROP_IMMEDIATELY) != 0) {
+        // Mips, Ukiki, and the baby penguin use this native flag to end a
+        // scripted hold. Physical ownership must honor it even though VR
+        // bypasses Mario's ACT_HOLD_IDLE animation/state.
+        sVrTrackedHeldObject->oInteractionSubtype &=
+            ~INT_SUBTYPE_DROP_IMMEDIATELY;
+        vr_hand_interaction_release_grab(mario, false);
     }
 
     if (!vr_hand_interaction_is_bowser_sequence(mario)) {
@@ -1723,7 +1777,8 @@ void vr_hand_interaction_update(struct MarioState* mario) {
                     mario
                 );
             }
-        } else if (configVrPhysicalGrabbing &&
+        } else if (canStartInteraction &&
+                   configVrPhysicalGrabbing &&
                    sVrGripPressed[hand] &&
                    positionValid) {
             const bool grabbedObject =
@@ -1759,6 +1814,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
             sVrBowserGripHand == hand;
 
         if (punchStarted &&
+            canStartInteraction &&
             configVrPhysicalPunching &&
             !handIsHoldingObject) {
             vr_hand_interaction_update_punch_sound(mario);
@@ -1768,7 +1824,8 @@ void vr_hand_interaction_update(struct MarioState* mario) {
             );
         }
 
-        if (!positionValid ||
+        if (!canStartInteraction ||
+            !positionValid ||
             !configVrPhysicalPunching ||
             handIsHoldingObject) {
             sVrFistActiveFrames[hand] = 0;
@@ -1781,25 +1838,30 @@ void vr_hand_interaction_update(struct MarioState* mario) {
                 VR_FIST_ACTIVE_FRAMES;
         }
 
-        Vec3f sweepStart;
-        vec3f_copy(sweepStart, position);
-        if (sVrFistPreviousPositionValid[hand]) {
-            Vec3f displacement;
-            vec3f_dif(
-                displacement,
-                position,
-                sVrFistPreviousPosition[hand]
-            );
-            if (vec3f_length(displacement) <=
-                VR_FIST_MAX_SWEEP_DISTANCE) {
-                vec3f_copy(
-                    sweepStart,
+        if (sVrFistActiveFrames[hand] > 0) {
+            Vec3f sweepStart;
+            vec3f_copy(sweepStart, position);
+            if (sVrFistPreviousPositionValid[hand]) {
+                Vec3f displacement;
+                vec3f_dif(
+                    displacement,
+                    position,
                     sVrFistPreviousPosition[hand]
                 );
+                const f32 displacementSquared =
+                    displacement[0] * displacement[0] +
+                    displacement[1] * displacement[1] +
+                    displacement[2] * displacement[2];
+                if (displacementSquared <=
+                    VR_FIST_MAX_SWEEP_DISTANCE *
+                        VR_FIST_MAX_SWEEP_DISTANCE) {
+                    vec3f_copy(
+                        sweepStart,
+                        sVrFistPreviousPosition[hand]
+                    );
+                }
             }
-        }
 
-        if (sVrFistActiveFrames[hand] > 0) {
             const bool hit = vr_hand_interaction_process_lists(
                 mario,
                 hand,

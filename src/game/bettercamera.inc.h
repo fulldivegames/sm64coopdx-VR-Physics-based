@@ -649,6 +649,13 @@ static void newcam_apply_values(struct Camera *c) {
 
 // The ingame cutscene system is such a spaghetti mess I actually have to resort to something as stupid as this to cover every base.
 static void newcam_update_camera_yaw(struct Camera *c, bool useMarioYaw) {
+    if (vr_first_person_locks_camera_input()) {
+        // Dialogue, doors, Bowser introductions, and other scripted cameras
+        // still run so their timers and gameplay events complete, but they
+        // must not overwrite the player-controlled first-person VR yaw.
+        return;
+    }
+
     if (useMarioYaw) {
         gNewCamera.yaw = -gMarioState->statusForCamera->faceAngle[1] - 0x4000;
     } else {

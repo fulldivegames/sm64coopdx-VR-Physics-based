@@ -18,6 +18,7 @@
 #include "rumble_init.h"
 #include "object_helpers.h"
 #include "obj_behaviors.h"
+#include "rendering_graph_node.h"
 #include "level_update.h"
 #include "mario_step.h"
 #include "pc/debuglog.h"
@@ -822,9 +823,181 @@ s32 act_grabbed(struct MarioState *m) {
     return FALSE;
 }
 
+#define VR_CANNON_AIM_SOUND_MIN_DELTA       0x40
+#define VR_CANNON_YAW_LIMIT                 0x4000
+#define VR_CANNON_PITCH_LIMIT               0x38E3
+#define VR_CANNON_YAW_FADE_RANGE            0x1555
+#define VR_CANNON_PITCH_DOWN_FADE_RANGE     0x1555
+#define VR_CANNON_PITCH_UP_FADE_RANGE       0x071D
+#define VR_CANNON_FADE_TO_BLACK_STEP        12
+#define VR_CANNON_FADE_FROM_BLACK_STEP      18
+
+static u8 sVrCannonVisionFadeAlpha = 0;
+static s16 sVrCannonGuidanceAngle = 0;
+static bool sVrCannonGuidanceActive = false;
+
+static s32 vr_cannon_fade_alpha_from_excess(
+    s32 excess,
+    s32 fadeRange
+) {
+    if (excess <= 0 || fadeRange <= 0) {
+        return 0;
+    }
+    return clamp(excess * 255 / fadeRange, 0, 255);
+}
+
+static void update_vr_cannon_vision_fade(
+    s32 desiredPitch,
+    s32 desiredYawOffset
+) {
+    const s32 clampedPitch = clamp(
+        desiredPitch,
+        0,
+        VR_CANNON_PITCH_LIMIT
+    );
+    const s32 clampedYawOffset = clamp(
+        desiredYawOffset,
+        -VR_CANNON_YAW_LIMIT,
+        VR_CANNON_YAW_LIMIT
+    );
+    const s32 yawExcess = MAX(
+        ABS(desiredYawOffset) - VR_CANNON_YAW_LIMIT,
+        0
+    );
+    const s32 pitchDownExcess = MAX(-desiredPitch, 0);
+    const s32 pitchUpExcess = MAX(
+        desiredPitch - VR_CANNON_PITCH_LIMIT,
+        0
+    );
+    const s32 targetAlpha = MAX(
+        vr_cannon_fade_alpha_from_excess(
+            yawExcess,
+            VR_CANNON_YAW_FADE_RANGE
+        ),
+        MAX(
+            vr_cannon_fade_alpha_from_excess(
+                pitchDownExcess,
+                VR_CANNON_PITCH_DOWN_FADE_RANGE
+            ),
+            vr_cannon_fade_alpha_from_excess(
+                pitchUpExcess,
+                VR_CANNON_PITCH_UP_FADE_RANGE
+            )
+        )
+    );
+    const s32 correctionX = clampedYawOffset - desiredYawOffset;
+    const s32 correctionY = clampedPitch - desiredPitch;
+
+    sVrCannonGuidanceActive =
+        correctionX != 0 || correctionY != 0;
+    if (sVrCannonGuidanceActive) {
+        // Angle zero is screen-up, matching Mario's camera-arrow texture.
+        // Positive X points right and positive Y points up.
+        sVrCannonGuidanceAngle = atan2s(
+            (f32)-correctionX,
+            (f32)correctionY
+        );
+    }
+
+    if (sVrCannonVisionFadeAlpha < targetAlpha) {
+        sVrCannonVisionFadeAlpha = (u8)MIN(
+            (s32)sVrCannonVisionFadeAlpha +
+                VR_CANNON_FADE_TO_BLACK_STEP,
+            targetAlpha
+        );
+    } else if (sVrCannonVisionFadeAlpha > targetAlpha) {
+        sVrCannonVisionFadeAlpha = (u8)MAX(
+            (s32)sVrCannonVisionFadeAlpha -
+                VR_CANNON_FADE_FROM_BLACK_STEP,
+            targetAlpha
+        );
+    }
+}
+
+u8 vr_get_cannon_vision_fade_alpha(void) {
+    if (!vr_is_active() ||
+        configVrCameraMode != VR_CAMERA_MODE_FIRST_PERSON ||
+        gMarioStates[0].action != ACT_IN_CANNON) {
+        return 0;
+    }
+    return sVrCannonVisionFadeAlpha;
+}
+
+bool vr_get_cannon_vision_guidance(
+    s16* screenAngle,
+    u8* alpha
+) {
+    if (screenAngle == NULL ||
+        alpha == NULL ||
+        !sVrCannonGuidanceActive ||
+        !vr_is_active() ||
+        configVrCameraMode != VR_CAMERA_MODE_FIRST_PERSON ||
+        gMarioStates[0].action != ACT_IN_CANNON) {
+        return false;
+    }
+
+    *screenAngle = sVrCannonGuidanceAngle;
+    *alpha = (u8)clamp(
+        144 + (s32)sVrCannonVisionFadeAlpha / 2,
+        144,
+        255
+    );
+    return true;
+}
+
+static bool update_vr_headset_cannon_aim(
+    struct MarioState* m,
+    struct Object* marioObj
+) {
+    Vec3f direction;
+    if (m == NULL ||
+        marioObj == NULL ||
+        m->usedObj == NULL ||
+        !vr_get_first_person_aim_direction(m, direction)) {
+        return false;
+    }
+
+    const f32 horizontalLength = sqrtf(
+        direction[0] * direction[0] +
+        direction[2] * direction[2]
+    );
+    const s16 desiredYaw = horizontalLength > 0.0001f
+        ? atan2s(direction[2], direction[0])
+        : m->faceAngle[1];
+    const s32 desiredPitch = (s32)atan2s(
+        direction[1],
+        horizontalLength
+    );
+    const s32 desiredYawOffset = (s32)(s16)(
+        desiredYaw - marioObj->oMarioCannonObjectYaw
+    );
+    const s32 clampedYawOffset = clamp(
+        desiredYawOffset,
+        -VR_CANNON_YAW_LIMIT,
+        VR_CANNON_YAW_LIMIT
+    );
+
+    m->faceAngle[0] = (s16)clamp(
+        desiredPitch,
+        0,
+        VR_CANNON_PITCH_LIMIT
+    );
+    m->faceAngle[1] = (s16)(
+        marioObj->oMarioCannonObjectYaw + clampedYawOffset
+    );
+
+    // Head rotation remains completely free, but firing stays inside the
+    // physical cannon's native cone. The headset view darkens progressively
+    // beyond that boundary instead of snapping or forcing the view back.
+    marioObj->oMarioCannonInputYaw = (s16)clampedYawOffset;
+    update_vr_cannon_vision_fade(desiredPitch, desiredYawOffset);
+    return true;
+}
+
 s32 act_in_cannon(struct MarioState *m) {
     if (!m) { return 0; }
     struct Object *marioObj = m->marioObj;
+    const bool localPlayer = m == &gMarioStates[0];
     s16 startFacePitch = m->faceAngle[0];
     s16 startFaceYaw = m->faceAngle[1];
 
@@ -833,6 +1006,10 @@ s32 act_in_cannon(struct MarioState *m) {
     if (m->usedObj != NULL) {
         switch (m->actionState) {
             case 0:
+                if (localPlayer) {
+                    sVrCannonVisionFadeAlpha = 0;
+                    sVrCannonGuidanceActive = false;
+                }
                 m->marioObj->header.gfx.node.flags &= ~GRAPH_RENDER_ACTIVE;
                 m->usedObj->oInteractStatus = INT_STATUS_INTERACTED;
 
@@ -858,13 +1035,36 @@ s32 act_in_cannon(struct MarioState *m) {
                     marioObj->oMarioCannonObjectYaw = m->usedObj->oMoveAngleYaw;
                     marioObj->oMarioCannonInputYaw = 0;
 
+                    // Make the direction the player is physically facing the
+                    // cannon's initial forward direction. This is a one-time
+                    // virtual yaw alignment, not a tracking recenter or lock.
+                    if (localPlayer) {
+                        vr_align_first_person_camera_yaw(
+                            marioObj->oMarioCannonObjectYaw
+                        );
+                    }
+
                     m->actionState = 2;
                 }
                 break;
 
-            case 2:
-                m->faceAngle[0] -= (s16)(m->controller->stickY * cannonSensitivity);
-                marioObj->oMarioCannonInputYaw -= (s16)(m->controller->stickX * cannonSensitivity);
+            case 2: {
+                const bool vrHeadsetAim =
+                    update_vr_headset_cannon_aim(m, marioObj);
+
+                if (!vrHeadsetAim && localPlayer) {
+                    sVrCannonVisionFadeAlpha = 0;
+                    sVrCannonGuidanceActive = false;
+                }
+
+                if (!vrHeadsetAim) {
+                    m->faceAngle[0] -= (s16)(
+                        m->controller->stickY * cannonSensitivity
+                    );
+                    marioObj->oMarioCannonInputYaw -= (s16)(
+                        m->controller->stickX * cannonSensitivity
+                    );
+                }
 
                 if (m->faceAngle[0] > 0x38E3) {
                     m->faceAngle[0] = 0x38E3;
@@ -873,17 +1073,20 @@ s32 act_in_cannon(struct MarioState *m) {
                     m->faceAngle[0] = 0;
                 }
 
-                if (marioObj->oMarioCannonInputYaw > 0x4000) {
-                    marioObj->oMarioCannonInputYaw = 0x4000;
-                }
-                if (marioObj->oMarioCannonInputYaw < -0x4000) {
-                    marioObj->oMarioCannonInputYaw = -0x4000;
+                if (!vrHeadsetAim) {
+                    if (marioObj->oMarioCannonInputYaw > 0x4000) {
+                        marioObj->oMarioCannonInputYaw = 0x4000;
+                    }
+                    if (marioObj->oMarioCannonInputYaw < -0x4000) {
+                        marioObj->oMarioCannonInputYaw = -0x4000;
+                    }
+
+                    m->faceAngle[1] =
+                        marioObj->oMarioCannonObjectYaw +
+                        marioObj->oMarioCannonInputYaw;
                 }
 
-                m->faceAngle[1] = marioObj->oMarioCannonObjectYaw + marioObj->oMarioCannonInputYaw;
-
-                extern struct MarioState gMarioStates[];
-                if (m->input & INPUT_A_PRESSED && m == &gMarioStates[0]) {
+                if (m->input & INPUT_A_PRESSED && localPlayer) {
                     m->forwardVel = 100.0f * coss(m->faceAngle[0]);
 
                     m->vel[1] = 100.0f * sins(m->faceAngle[0]);
@@ -897,16 +1100,30 @@ s32 act_in_cannon(struct MarioState *m) {
 
                     m->marioObj->header.gfx.node.flags |= GRAPH_RENDER_ACTIVE;
 
+                    sVrCannonVisionFadeAlpha = 0;
+                    sVrCannonGuidanceActive = false;
                     set_mario_action(m, ACT_SHOT_FROM_CANNON, 0);
                     queue_rumble_data_mario(m, 60, 70);
                     m->usedObj->oAction = 2;
                     return FALSE;
                 } else {
-                    if (m->faceAngle[0] != startFacePitch || m->faceAngle[1] != startFaceYaw) {
+                    const s32 pitchDelta = ABS((s32)(s16)(
+                        m->faceAngle[0] - startFacePitch
+                    ));
+                    const s32 yawDelta = ABS((s32)(s16)(
+                        m->faceAngle[1] - startFaceYaw
+                    ));
+                    const bool aimMoved = vrHeadsetAim
+                        ? pitchDelta >= VR_CANNON_AIM_SOUND_MIN_DELTA ||
+                            yawDelta >= VR_CANNON_AIM_SOUND_MIN_DELTA
+                        : pitchDelta != 0 || yawDelta != 0;
+                    if (aimMoved) {
                         play_sound(SOUND_MOVING_AIM_CANNON, m->marioObj->header.gfx.cameraToObject);
                         reset_rumble_timers_2(m, 0);
                     }
                 }
+                break;
+            }
         }
     }
 

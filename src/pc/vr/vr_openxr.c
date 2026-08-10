@@ -2329,6 +2329,19 @@ static void vr_openxr_update_controller_states(
         return;
     }
 
+    // Motion-controller input can be disabled while VR remains active. Avoid
+    // synchronizing and querying an otherwise unused action set every frame;
+    // clear the last sample so re-enabling input cannot replay stale buttons.
+    if (!configVrMotionControllerInput) {
+        memset(sControllerStates, 0, sizeof(sControllerStates));
+        memset(
+            sControllerPreviousGripValid,
+            0,
+            sizeof(sControllerPreviousGripValid)
+        );
+        return;
+    }
+
     XrActiveActionSet activeActionSet = {
         sControllerActionSet,
         XR_NULL_PATH
@@ -2367,6 +2380,8 @@ static void vr_openxr_update_controller_states(
     }
 
     sControllerSyncErrorLogged = false;
+    const bool trackControllerPoses =
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON;
     for (uint32_t hand = 0;
          hand < VR_CONTROLLER_COUNT;
          hand++) {
@@ -2379,7 +2394,8 @@ static void vr_openxr_update_controller_states(
             sizeof(sControllerStates[hand])
         );
 
-        if (vr_openxr_controller_pose_is_active(
+        if (trackControllerPoses &&
+            vr_openxr_controller_pose_is_active(
                 sGripPoseAction,
                 sControllerHandPaths[hand]
             )) {
@@ -2396,12 +2412,18 @@ static void vr_openxr_update_controller_states(
                 );
         }
 
-        vr_openxr_apply_controller_velocity_fallback(
-            hand,
-            displayTime
-        );
+        if (trackControllerPoses) {
+            vr_openxr_apply_controller_velocity_fallback(
+                hand,
+                displayTime
+            );
+        } else {
+            sControllerPreviousGripValid[hand] = false;
+            sControllerPreviousGripTime[hand] = 0;
+        }
 
-        if (vr_openxr_controller_pose_is_active(
+        if (trackControllerPoses &&
+            vr_openxr_controller_pose_is_active(
                 sAimPoseAction,
                 sControllerHandPaths[hand]
             )) {
@@ -3261,30 +3283,32 @@ bool vr_openxr_mirror_eye(
         return false;
     }
 
-    GLint sourceX = 0;
-    GLint sourceY = 0;
-    GLint sourceWidth = (GLint)
+    const GLint sourceWidth = (GLint)
         vr_openxr_scaled_dimension(swapchain->width);
-    GLint sourceHeight = (GLint)
+    const GLint sourceHeight = (GLint)
         vr_openxr_scaled_dimension(swapchain->height);
     const float sourceAspect =
         (float)sourceWidth / (float)sourceHeight;
     const float destinationAspect =
         (float)width / (float)height;
+    GLint destinationX = 0;
+    GLint destinationY = 0;
+    GLint destinationWidth = (GLint)width;
+    GLint destinationHeight = (GLint)height;
 
-    // Fill the desktop window without stretching the headset image. A
-    // single eye is taller than a typical capture window, so this normally
-    // center-crops the top and bottom while preserving the correct aspect.
+    // Fit the complete eye image without stretching or cropping. A headset
+    // eye is much taller than a normal desktop window, so this normally adds
+    // black pillar-box bars instead of cutting off the top and bottom.
     if (sourceAspect > destinationAspect) {
-        const GLint croppedWidth =
-            (GLint)((float)sourceHeight * destinationAspect);
-        sourceX = (sourceWidth - croppedWidth) / 2;
-        sourceWidth = croppedWidth;
+        destinationHeight =
+            (GLint)((float)width / sourceAspect);
+        destinationY =
+            ((GLint)height - destinationHeight) / 2;
     } else {
-        const GLint croppedHeight =
-            (GLint)((float)sourceWidth / destinationAspect);
-        sourceY = (sourceHeight - croppedHeight) / 2;
-        sourceHeight = croppedHeight;
+        destinationWidth =
+            (GLint)((float)height * sourceAspect);
+        destinationX =
+            ((GLint)width - destinationWidth) / 2;
     }
 
     glDisable(GL_SCISSOR_TEST);
@@ -3300,15 +3324,22 @@ bool vr_openxr_mirror_eye(
         (GLuint)sPreviousDrawFramebuffer
     );
     glDrawBuffer((GLenum)sPreviousDrawBuffer);
+    const GLfloat mirrorClearColor[4] = {
+        0.0f,
+        0.0f,
+        0.0f,
+        1.0f
+    };
+    glClearBufferfv(GL_COLOR, 0, mirrorClearColor);
     glBlitFramebuffer(
-        sourceX,
-        sourceY,
-        sourceX + sourceWidth,
-        sourceY + sourceHeight,
         0,
         0,
-        (GLint)width,
-        (GLint)height,
+        sourceWidth,
+        sourceHeight,
+        destinationX,
+        destinationY,
+        destinationX + destinationWidth,
+        destinationY + destinationHeight,
         GL_COLOR_BUFFER_BIT,
         GL_LINEAR
     );
@@ -3333,7 +3364,7 @@ bool vr_openxr_mirror_eye(
 
     if (!sDesktopMirrorLogged) {
         printf(
-            "[VR] Desktop mirror is displaying the "
+            "[VR] Desktop mirror is displaying the complete "
             "left OpenXR eye.\n"
         );
         sDesktopMirrorLogged = true;
@@ -3461,10 +3492,7 @@ bool vr_openxr_begin_frame(void) {
         sCachedTrackingValid = false;
         sVrEnterRecenterPending = false;
         sTrackingOriginGeneration++;
-        printf(
-            "[VR] Headset automatically recalibrated "
-            "on VR entry.\n"
-        );
+        printf("[VR] Headset tracking origin recalibrated.\n");
     }
 
     if (sFrameViewsLocated &&

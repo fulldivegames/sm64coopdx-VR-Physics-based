@@ -691,6 +691,7 @@ void bhv_ukiki_loop(void) {
             } else {
                 cage_ukiki_held_loop();
             }
+            vr_hand_interaction_apply_held_object_transform(o);
             break;
 
         case HELD_THROWN:

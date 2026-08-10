@@ -51,16 +51,17 @@ static void controller_vr_convert_stick(
     s8* outputX,
     s8* outputY
 ) {
-    const float magnitude = sqrtf(
+    const float magnitudeSquared =
         input[0] * input[0] +
-        input[1] * input[1]
-    );
+        input[1] * input[1];
 
     *outputX = 0;
     *outputY = 0;
-    if (magnitude <= VR_STICK_DEADZONE) {
+    if (magnitudeSquared <=
+        VR_STICK_DEADZONE * VR_STICK_DEADZONE) {
         return;
     }
+    const float magnitude = sqrtf(magnitudeSquared);
 
     const float normalizedMagnitude = controller_vr_clampf(
         (magnitude - VR_STICK_DEADZONE) /
@@ -187,7 +188,9 @@ static const float* controller_vr_select_stick(
 }
 
 static bool controller_vr_update_physical_crouch(void) {
-    if (!vr_is_active() || !configVrPhysicalCrouching) {
+    if (!vr_is_active() ||
+        configVrCameraMode != VR_CAMERA_MODE_FIRST_PERSON ||
+        !configVrPhysicalCrouching) {
         sVrPhysicalCrouchActive = false;
         return false;
     }
@@ -245,15 +248,6 @@ static bool controller_vr_update_physical_punch(
         return false;
     }
 
-    const float speed = sqrtf(
-        state->gripLinearVelocity[0] *
-            state->gripLinearVelocity[0] +
-        state->gripLinearVelocity[1] *
-            state->gripLinearVelocity[1] +
-        state->gripLinearVelocity[2] *
-            state->gripLinearVelocity[2]
-    );
-
     const float gripAmount = state->squeeze;
     const float gripThreshold = controller_vr_clampf(
         (float)configVrPunchGripThreshold,
@@ -266,6 +260,16 @@ static bool controller_vr_update_physical_punch(
         sVrPunchTravel[hand] = 0.0f;
         return false;
     }
+
+    // Most frames have an open hand. Avoid the velocity square root and all
+    // gesture-threshold work until the grip has armed a physical punch.
+    const float speedSquared =
+        state->gripLinearVelocity[0] *
+            state->gripLinearVelocity[0] +
+        state->gripLinearVelocity[1] *
+            state->gripLinearVelocity[1] +
+        state->gripLinearVelocity[2] *
+            state->gripLinearVelocity[2];
 
     const float requiredSpeed = controller_vr_clampf(
         (float)configVrPunchSpeed,
@@ -300,36 +304,37 @@ static bool controller_vr_update_physical_punch(
         sVrPunchLastPosition[hand][1];
     const float deltaZ = state->gripPosition[2] -
         sVrPunchLastPosition[hand][2];
-    const float frameTravel = sqrtf(
-        deltaX * deltaX +
-        deltaY * deltaY +
-        deltaZ * deltaZ
-    );
     for (uint32_t axis = 0; axis < 3; axis++) {
         sVrPunchLastPosition[hand][axis] =
             state->gripPosition[axis];
     }
 
-    if (speed <= resetSpeed) {
+    if (speedSquared <= resetSpeed * resetSpeed) {
         sVrPunchArmed[hand] = true;
         sVrPunchTravel[hand] = 0.0f;
         return false;
     }
 
-    if (speed >= travelSpeed) {
+    if (speedSquared >= travelSpeed * travelSpeed) {
+        const float frameTravel = sqrtf(
+            deltaX * deltaX +
+            deltaY * deltaY +
+            deltaZ * deltaZ
+        );
         sVrPunchTravel[hand] += frameTravel;
     } else {
         sVrPunchTravel[hand] = 0.0f;
     }
 
     if (!sVrPunchArmed[hand] ||
-        speed < requiredSpeed ||
+        speedSquared < requiredSpeed * requiredSpeed ||
         sVrPunchTravel[hand] < requiredDistance) {
         return false;
     }
 
     sVrPunchArmed[hand] = false;
 #ifdef DEBUG
+    const float speed = sqrtf(speedSquared);
     printf(
         "[VR] %s physical punch detected "
         "(%.2f m/s, %.2f m travel).\n",
@@ -401,7 +406,8 @@ static void controller_vr_read(OSContPad* pad) {
         controller_vr_reset_physical_punch(VR_CONTROLLER_RIGHT);
     }
 
-    if (configVrPhysicalPunching) {
+    if (configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
+        configVrPhysicalPunching) {
         if (leftAvailable) {
             if (controller_vr_update_physical_punch(
                     VR_CONTROLLER_LEFT,

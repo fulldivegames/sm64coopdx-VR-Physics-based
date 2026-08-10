@@ -184,6 +184,7 @@ extern bool         configVrExperimentalSideFlipFollow;
 extern bool         configVrExperimentalWallJumpTurn;
 extern bool         configVrExperimentalFlatFirstPerson;
 extern bool         configVrExperimentalTrueFirstPerson;
+extern bool         configVrExperimentalTrueDiving;
 extern bool         configVrExperimentalArmsMode;
 extern bool         configVrExperimentalMountedBody;
 extern bool         configVrPhysicalCrouching;

@@ -60,6 +60,7 @@ void bhv_jumping_box_loop(void) {
             }
             cur_obj_set_model(smlua_model_util_load(E_MODEL_BREAKABLE_BOX_SMALL));
             cur_obj_unrender_and_reset_state(-1, 0);
+            vr_hand_interaction_apply_held_object_transform(o);
             break;
         case HELD_THROWN:
             cur_obj_get_thrown_or_placed(40.0f, 20.0f, 1);

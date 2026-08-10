@@ -14,6 +14,10 @@ bool vr_get_first_person_view_direction(
     struct MarioState* m,
     Vec3f direction
 );
+bool vr_get_first_person_aim_direction(
+    struct MarioState* m,
+    Vec3f direction
+);
 bool vr_first_person_backpedal_active(struct MarioState* m);
 bool vr_first_person_backpedal_grace_active(struct MarioState* m);
 bool vr_first_person_side_flip_ready(struct MarioState* m);

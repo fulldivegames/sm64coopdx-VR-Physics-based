@@ -19,6 +19,7 @@
 #include "print.h"
 #include "hardcoded.h"
 #include "bettercamera.h"
+#include "mario_actions_automatic.h"
 #include "pc/configfile.h"
 #include "pc/vr/vr.h"
 #include "pc/network/network.h"
@@ -422,6 +423,59 @@ static void render_hud_radar(struct MarioState *m, struct Object *target, const 
     print_text_fmt_int(x + 24, y - 12, "%d", dist);
 }
 
+static void render_vr_cannon_guidance_arrow(void) {
+    s16 angle = 0;
+    u8 alpha = 0;
+    if (!vr_get_cannon_vision_guidance(&angle, &alpha)) {
+        return;
+    }
+
+    const f32 centerX = (f32)SCREEN_WIDTH * 0.5f;
+    const f32 centerY = (f32)SCREEN_HEIGHT * 0.5f;
+    const f32 distanceFromReticle = 48.0f;
+    const f32 halfDiagonal = 12.0f * sqrtf(2.0f);
+    Vtx *vtx = alloc_display_list(sizeof(*vtx) * 4);
+    if (vtx == NULL) {
+        return;
+    }
+
+    for (s32 i = 0; i < 4; i++) {
+        const s16 cornerAngle = (s16)(
+            angle + i * 0x4000 - 0x6000
+        );
+        vtx[i] = (Vtx) { { {
+            centerX +
+                distanceFromReticle * coss(angle + 0x4000) +
+                halfDiagonal * coss(cornerAngle),
+            centerY +
+                distanceFromReticle * sins(angle + 0x4000) +
+                halfDiagonal * sins(cornerAngle),
+            0,
+        }, 0, {
+            256 * (((i + 1) / 2) % 2),
+            256 * (((i + 2) / 2) % 2),
+        }, { 0xFF, 0xFF, 0xFF, 0xFF } } };
+    }
+
+    gDPSetEnvColor(gDisplayListHead++, 0xFF, 0xFF, 0xFF, alpha);
+    render_hud_icon(
+        vtx,
+        texture_hud_char_arrow_up,
+        G_IM_FMT_RGBA,
+        G_IM_SIZ_16b,
+        8,
+        8,
+        0,
+        0,
+        8,
+        8,
+        0,
+        0,
+        8,
+        8
+    );
+}
+
 /**
  * Renders the direction and distance to the nearest red coin.
  */
@@ -647,6 +701,7 @@ void render_hud(void) {
 
         if (gCurrentArea != NULL && gCurrentArea->camera != NULL && gCurrentArea->camera->mode == CAMERA_MODE_INSIDE_CANNON) {
             render_hud_cannon_reticle();
+            render_vr_cannon_guidance_arrow();
         }
 
         if (hudDisplayFlags & HUD_DISPLAY_FLAG_LIVES && showHud) {

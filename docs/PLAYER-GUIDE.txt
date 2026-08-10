@@ -1,4 +1,4 @@
-SM64 CO-OP DX VR v0.3.0 - WINDOWS PLAYER GUIDE
+SM64 CO-OP DX VR v0.4.0 - WINDOWS PLAYER GUIDE
 ================================================
 
 WHAT YOU NEED
@@ -38,8 +38,22 @@ CAMERA MODES
   a steerable reverse jog, and a short forward-to-back side-flip window.
 - Swimming, Wing Cap flight, and shell riding follow the direction you look.
   Normal action buttons are still used for swimming strokes and other moves.
+- Tunnels, conversations, doors, and other scripted camera events continue
+  running without pulling the first-person headset view away from the player.
 - The character's head and normal arms are hidden in first person. Tracked,
   player-colored gloves remain visible. Torso and legs can be toggled.
+
+
+CANNONS
+
+1. Enter a cannon normally.
+2. When aiming begins, the virtual view aligns horizontally with the cannon's
+   forward firing angle.
+3. Move your head to aim and press Jump (Right Primary by default) to fire.
+
+Head movement remains free, but the shot stays inside the cannon's original
+firing cone. Looking outside that cone gradually darkens the view. A rotating
+Mario camera-arrow points back toward the nearest valid firing direction.
 
 
 DEFAULT VR CONTROLS
@@ -119,10 +133,12 @@ HUD Settings
 
 Experimental
   Side-flip camera follow, 180-degree wall-jump turns, flat first person,
-  True First Person, Arms Mode, mounted-action body visibility, physical
-  crouching, original Mario movement, and backpedal speed.
+  True First Person, True Diving, Arms Mode, mounted-action body visibility,
+  physical crouching, original Mario movement, and backpedal speed.
 
 True First Person follows animated body movement and might cause sickness.
+True Diving follows the animated dive position only during dives and may also
+be uncomfortable. Both options are disabled by default.
 Every submenu has a Set to Defaults button.
 
 
@@ -137,7 +153,7 @@ KNOWN LIMITATIONS
 
 - Windows and OpenGL are the only implemented OpenXR graphics path.
 - Motion controls, online co-op, mods, and other headsets need more testing.
-- True First Person and Arms Mode are experimental.
+- True First Person, True Diving, and Arms Mode are experimental.
 - The 3D star models do not currently appear on the Star Select screen in VR.
 - Some original flat billboard objects can look unusual in stereo VR.
 

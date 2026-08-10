@@ -417,6 +417,7 @@ void bhv_king_bobomb_loop(void) {
             break;
         case HELD_HELD:
             cur_obj_unrender_and_reset_state(6, 1);
+            vr_hand_interaction_apply_held_object_transform(o);
             break;
         case HELD_THROWN:
         case HELD_DROPPED:

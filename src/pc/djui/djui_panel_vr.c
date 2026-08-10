@@ -6,6 +6,7 @@
 
 #include "pc/configfile.h"
 #include "pc/vr/vr.h"
+#include "game/rendering_graph_node.h"
 
 static bool sVrMode = false;
 
@@ -72,6 +73,13 @@ static void djui_panel_vr_camera_defaults(struct DjuiBase* caller) {
         *config_vr_camera_height_for_character(character) =
             config_vr_camera_default_height_for_character(character);
     }
+
+    vr_handle_camera_mode_change();
+}
+
+static void djui_panel_vr_camera_mode_changed(struct DjuiBase* caller) {
+    (void)caller;
+    vr_handle_camera_mode_change();
 }
 
 static void djui_panel_vr_performance_defaults(struct DjuiBase* caller) {
@@ -89,6 +97,7 @@ static void djui_panel_vr_experimental_defaults(struct DjuiBase* caller) {
     configVrExperimentalWallJumpTurn = true;
     configVrExperimentalFlatFirstPerson = false;
     configVrExperimentalTrueFirstPerson = false;
+    configVrExperimentalTrueDiving = false;
     configVrExperimentalArmsMode = false;
     configVrExperimentalMountedBody = false;
     configVrPhysicalCrouching = true;
@@ -204,7 +213,7 @@ static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
             cameraModes,
             VR_CAMERA_MODE_COUNT,
             &configVrCameraMode,
-            NULL
+            djui_panel_vr_camera_mode_changed
         );
 
         djui_slider_create(
@@ -365,6 +374,13 @@ static void djui_panel_vr_experimental_create(struct DjuiBase* caller) {
             body,
             "True First Person (Might Cause Sickness)",
             &configVrExperimentalTrueFirstPerson,
+            NULL
+        );
+
+        djui_checkbox_create(
+            body,
+            "True Diving",
+            &configVrExperimentalTrueDiving,
             NULL
         );
 

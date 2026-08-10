@@ -2,7 +2,7 @@
 
 An experimental OpenXR VR fork of [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx).
 
-Version 0.3.0 adds tracked motion controllers, physical interactions, VR-focused movement, and a startup shader cache to the existing first- and third-person VR modes. Third Person Mode remains available and works with both the default camera and SM64 Co-Op DX's free camera.
+Version 0.4.0 improves first-person camera stability, physical object handling, cannon play, desktop capture, and VR performance. It builds on the tracked motion controls and first- and third-person modes introduced in earlier releases. Third Person Mode remains available and works with both the default camera and SM64 Co-Op DX's free camera.
 
 > [!IMPORTANT]
 > This is an early project, not a finished VR port. It currently targets 64-bit Windows, OpenGL, and OpenXR. Solo hosting is tested; online co-op still needs broader testing. ROM hacks, Lua mods, model packs, and texture packs may work, but compatibility varies.
@@ -35,12 +35,13 @@ If Windows SmartScreen appears, confirm that the ZIP came from this repository's
 
 The current build has been tested with a Meta Quest 3 using Virtual Desktop's OpenXR runtime. Other conformant OpenXR headsets and runtimes may work, but have not all been tested.
 
-## What is included in v0.3.0
+## What is included in v0.4.0
 
 - Native stereoscopic rendering through separate left- and right-eye OpenXR swapchains
 - Full 6DoF headset tracking for looking, leaning, and positional movement
 - Third-person and first-person VR camera modes
 - Head-directed first-person walking, swimming, Wing Cap flight, and shell riding
+- Head-directed cannon aiming with automatic entry alignment, firing-cone comfort fade, and directional Mario HUD arrows
 - Smooth horizontal turning with the camera stick
 - Tracked, player-colored floating gloves with hand poses and haptics
 - Physical punches, grabs, throws, dives, crouching, and ground pounds
@@ -51,9 +52,13 @@ The current build has been tested with a Meta Quest 3 using Virtual Desktop's Op
 - Automatic tracking recalibration when VR starts and camera/body reset on level changes
 - Adjustable camera, movement, glove, body, HUD, and performance settings
 - Head-locked menus, HUD, text boxes, and Star Select interface
+- First-person camera isolation from tunnels, doors, conversations, and other scripted camera pulls
 - Corrected stereo skybox, lighting, terrain, billboard, and culling behavior
-- Optional left-eye desktop mirror for recording or streaming
+- Stable live switching between first- and third-person modes
+- Optional complete left-eye desktop mirror for recording or streaming without cropping
 - Startup shader precompilation and a learned shader cache to reduce gameplay stutters
+- Faster shader lookup, billboard processing, controller tracking, and physical-hit detection
+- Improved physical handling for Mips and other supported carryable actors
 - Flat-screen play remains available whenever VR Mode is off
 
 ## Camera and movement
@@ -69,6 +74,8 @@ First Person Mode is the default VR camera. The headset controls the view and Ma
 The default VR locomotion allows normal forward movement and steering up to 90 degrees left or right without making Mario turn his back to the player. Pulling backward produces a steerable reverse jog. Moving forward and then pulling backward preserves a short skid window so a side flip can still be performed. **Experimental > Original Mario Movement** restores Mario's original movement rules.
 
 Swimming, active Wing Cap flight, and turtle-shell riding follow the headset's look direction. Look up or down to change vertical direction while flying or swimming; the normal gameplay buttons still provide swimming strokes and other actions.
+
+Cannons align the virtual view horizontally with the barrel when aiming begins. Move your head to aim and press the normal Jump input to fire. Your head remains free, but the shot stays inside the cannon's original firing limits. Looking outside those limits gradually darkens the view and displays a Mario-style arrow pointing back toward the usable firing cone.
 
 First-person mode removes the local character's head and normal arms so they do not block the view. Player-colored tracked gloves remain visible. The torso and legs can be shown or hidden under **Model Settings**.
 
@@ -112,17 +119,17 @@ Physical punches can play Mario's one-two punch voice sequence, and supported in
 | Model Settings | First-person torso/legs, torso and leg placement, glove size, rotation, and position |
 | Performance | Headset render scale, desktop mirror on/off, and desktop mirror frame rate |
 | HUD Settings | HUD opacity |
-| Experimental | Side-flip camera follow, 180-degree wall-jump turns, flat first person, True First Person, Arms Mode, body visibility during mounted actions, physical crouching, original movement, and reverse speed |
+| Experimental | Side-flip camera follow, 180-degree wall-jump turns, flat first person, True First Person, True Diving, Arms Mode, body visibility during mounted actions, physical crouching, original movement, and reverse speed |
 
 Every VR submenu includes a **Set to Defaults** button.
 
-Lowering **Render Scale** can improve performance while still filling the headset display. Turning off **Desktop View** removes the spectator mirror and can save additional GPU work. On startup, the game prebuilds common shaders and stores newly discovered shader definitions in `gfx_shader_cache.txt`; later launches can prepare those shaders before gameplay.
+Lowering **Render Scale** can improve performance while still filling the headset display. Turning off **Desktop View** removes the spectator mirror and can save additional GPU work. When enabled, the desktop mirror fits the complete left-eye image into the window and may show black bars to preserve the full frame. On startup, the game prebuilds common shaders and stores newly discovered shader definitions in `gfx_shader_cache.txt`; later launches can prepare those shaders before gameplay.
 
 ## Current limitations
 
 - Windows/OpenGL is the only implemented OpenXR graphics path.
 - Motion controls are still under active development and may have action-specific edge cases.
-- **True First Person** and **Arms Mode** are experimental. True First Person follows animated body motion and may cause discomfort or motion sickness.
+- **True First Person**, **True Diving**, and **Arms Mode** are experimental. True First Person follows animated body motion and may cause discomfort or motion sickness. True Diving temporarily follows the animated dive pose and may also be uncomfortable.
 - The 3D star models currently do not appear on the Star Select screen in VR. The screen remains usable.
 - Original flat billboard objects, such as some 2D trees, can make their camera-facing rotation more noticeable in VR. True 3D replacement models can improve this.
 - Some levels, actions, Lua mods, character models, texture packs, and ROM hacks may still have camera, visual, or performance problems.

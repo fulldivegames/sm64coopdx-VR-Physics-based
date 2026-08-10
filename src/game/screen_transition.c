@@ -14,6 +14,7 @@
 #include "sm64.h"
 #include "pc/utils/misc.h"
 #include "hud.h"
+#include "mario_actions_automatic.h"
 
 u8 sTransitionColorFadeCount[4] = { 0 };
 u16 sTransitionTextureFadeCount[2] = { 0 };
@@ -347,8 +348,10 @@ s32 render_screen_transition(s8 fadeTimer, s8 transType, u8 transTime, struct Wa
 }
 
 Gfx *render_cannon_circle_base(void) {
-    Vtx *verts = alloc_display_list(8 * sizeof(*verts));
-    Gfx *dlist = alloc_display_list(20 * sizeof(*dlist));
+    const u8 visionFadeAlpha =
+        vr_get_cannon_vision_fade_alpha();
+    Vtx *verts = alloc_display_list(12 * sizeof(*verts));
+    Gfx *dlist = alloc_display_list(28 * sizeof(*dlist));
     Gfx *g = dlist;
 
     if (verts != NULL && dlist != NULL) {
@@ -362,6 +365,15 @@ Gfx *render_cannon_circle_base(void) {
         make_vertex(verts, 5, GFX_DIMENSIONS_FROM_RIGHT_EDGE(0), 0, -1, 0, 0, 0, 0, 0, 255);
         make_vertex(verts, 6, GFX_DIMENSIONS_FROM_RIGHT_EDGE(0), SCREEN_HEIGHT, -1, 0, 0, 0, 0, 0, 255);
         make_vertex(verts, 7, GFX_DIMENSIONS_FROM_LEFT_EDGE(0), SCREEN_HEIGHT, -1, 0, 0, 0, 0, 0, 255);
+
+        // The HMD is never constrained to the barrel. Once the player looks
+        // outside the cannon's real firing cone, this translucent fullscreen
+        // layer provides a gradual comfort fade while aim remains clamped at
+        // the nearest valid firing angle.
+        make_vertex(verts, 8, GFX_DIMENSIONS_FROM_LEFT_EDGE(0), 0, -1, 0, 0, 0, 0, 0, visionFadeAlpha);
+        make_vertex(verts, 9, GFX_DIMENSIONS_FROM_RIGHT_EDGE(0), 0, -1, 0, 0, 0, 0, 0, visionFadeAlpha);
+        make_vertex(verts, 10, GFX_DIMENSIONS_FROM_RIGHT_EDGE(0), SCREEN_HEIGHT, -1, 0, 0, 0, 0, 0, visionFadeAlpha);
+        make_vertex(verts, 11, GFX_DIMENSIONS_FROM_LEFT_EDGE(0), SCREEN_HEIGHT, -1, 0, 0, 0, 0, 0, visionFadeAlpha);
 
         gSPDisplayList(g++, dl_proj_mtx_fullscreen);
         gDPSetCombineMode(g++, G_CC_MODULATEIDECALA, G_CC_MODULATEIDECALA);
@@ -377,6 +389,12 @@ Gfx *render_cannon_circle_base(void) {
         gSPVertexNonGlobal(g++, VIRTUAL_TO_PHYSICAL(verts + 4), 4, 4);
         gSP2Triangles(g++, 4, 0, 3, 0, 4, 3, 7, 0);
         gSP2Triangles(g++, 1, 5, 6, 0, 1, 6, 2, 0);
+
+        if (visionFadeAlpha > 0) {
+            gDPSetRenderMode(g++, G_RM_AA_XLU_SURF, G_RM_AA_XLU_SURF2);
+            gSPVertexNonGlobal(g++, VIRTUAL_TO_PHYSICAL(verts + 8), 4, 0);
+            gSPDisplayList(g++, dl_draw_quad_verts_0123);
+        }
 
         gSPDisplayList(g++, dl_screen_transition_end);
         gSPEndDisplayList(g);

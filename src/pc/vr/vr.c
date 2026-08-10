@@ -323,9 +323,17 @@ bool vr_set_active(bool active) {
     // first valid pose after OpenXR reaches FOCUSED. Valid poses can arrive
     // earlier while the headset is still waking, which previously left a
     // stale vertical offset until the player used the runtime's recenter.
-    vr_openxr_request_recenter();
+    vr_request_recenter();
 
     printf("[VR] VR mode state: ON\n");
 
     return true;
+}
+
+void vr_request_recenter(void) {
+    if (!sVrActive) {
+        return;
+    }
+
+    vr_openxr_request_recenter();
 }

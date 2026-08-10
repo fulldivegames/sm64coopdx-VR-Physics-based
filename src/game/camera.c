@@ -2882,9 +2882,27 @@ s32 mode_c_up_camera(struct Camera *c) {
  * Used when Mario is in a cannon.
  */
 s32 update_in_cannon(UNUSED struct Camera *c, Vec3f focus, Vec3f pos) {
+    s16 cameraPitch = sMarioCamState->faceAngle[0];
+    s16 cameraYaw = sMarioCamState->faceAngle[1];
+
+    if (vr_is_active() &&
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON) {
+        // Mario's cannon angles follow the HMD for launch physics, but the
+        // hidden gameplay camera must not follow them too: doing both applies
+        // the head turn to camera-facing sprites before the VR billboard pass
+        // and makes coins, trees, and other flat objects slide while aiming.
+        Vec3f stableDirection = { 0.0f, 0.0f, 1.0f };
+        vr_adjust_first_person_camera_direction(stableDirection);
+        cameraPitch = 0;
+        cameraYaw = atan2s(
+            stableDirection[2],
+            stableDirection[0]
+        );
+    }
+
     focus_on_mario(pos, focus, 125.f + sCannonYOffset, 125.f, 800.f,
-                                    sMarioCamState->faceAngle[0], sMarioCamState->faceAngle[1]);
-    return sMarioCamState->faceAngle[1];
+                                    cameraPitch, cameraYaw);
+    return cameraYaw;
 }
 
 /**

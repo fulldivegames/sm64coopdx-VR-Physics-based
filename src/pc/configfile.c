@@ -144,6 +144,7 @@ bool         configVrExperimentalSideFlipFollow   = true;
 bool         configVrExperimentalWallJumpTurn     = true;
 bool         configVrExperimentalFlatFirstPerson  = false;
 bool         configVrExperimentalTrueFirstPerson  = false;
+bool         configVrExperimentalTrueDiving       = false;
 bool         configVrExperimentalArmsMode         = false;
 bool         configVrExperimentalMountedBody      = false;
 bool         configVrPhysicalCrouching             = true;
@@ -437,6 +438,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_experimental_wall_jump_turn", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalWallJumpTurn},
     {.name = "vr_experimental_flat_first_person", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalFlatFirstPerson},
     {.name = "vr_experimental_true_first_person", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalTrueFirstPerson},
+    {.name = "vr_experimental_true_diving",      .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalTrueDiving},
     {.name = "vr_experimental_arms_mode",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalArmsMode},
     {.name = "vr_experimental_mounted_body",    .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalMountedBody},
     {.name = "vr_physical_crouching",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrPhysicalCrouching},

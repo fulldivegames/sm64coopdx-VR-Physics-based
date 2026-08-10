@@ -26,6 +26,7 @@ void bhv_koopa_shell_underwater_loop(void) {
             break;
         case HELD_HELD:
             cur_obj_unrender_and_reset_state(-1, 0);
+            vr_hand_interaction_apply_held_object_transform(o);
             break;
         case HELD_THROWN:
         case HELD_DROPPED:

@@ -151,6 +151,7 @@ void bhv_heave_ho_loop(void) {
             break;
         case HELD_HELD:
             cur_obj_unrender_and_reset_state(0, 0);
+            vr_hand_interaction_apply_held_object_transform(o);
             break;
         case HELD_THROWN:
             cur_obj_get_dropped();

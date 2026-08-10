@@ -275,6 +275,11 @@ void bhv_mips_held(void) {
     cur_obj_set_pos_relative(player, 0, 60.0f, 100.0f);
     cur_obj_become_intangible();
 
+    // Vanilla hides Mips here because Mario's hand geo normally renders the
+    // held copy. Physical VR suppresses that copy, so restore Mips at the
+    // tracked glove after preserving all native held/dialogue state above.
+    vr_hand_interaction_apply_held_object_transform(o);
+
     // If MIPS hasn't spawned his star yet...
     if (o->oMipsStarStatus == MIPS_STAR_STATUS_HAVENT_SPAWNED_STAR) {
         // Choose dialog based on which MIPS encounter this is.

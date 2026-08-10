@@ -49,6 +49,10 @@ static struct TextureCache gfx_texture_cache = { 0 };
 static struct ColorCombiner color_combiner_pool[CC_MAX_SHADERS] = { 0 };
 static uint16_t color_combiner_pool_size = 0;
 static uint16_t color_combiner_pool_index = 0;
+#define CC_LOOKUP_BUCKET_COUNT (CC_MAX_SHADERS * 2)
+// Store pool indices plus one so zero remains the empty-chain sentinel.
+static uint16_t sColorCombinerBucketHeads[CC_LOOKUP_BUCKET_COUNT] = { 0 };
+static uint16_t sColorCombinerNext[CC_MAX_SHADERS] = { 0 };
 static uint16_t sBuiltInColorCombinerCount = 0;
 static bool sShaderStartupWarmupComplete = false;
 static FILE *sShaderCacheAppendFile = NULL;
@@ -336,6 +340,37 @@ static void gfx_generate_cc(struct ColorCombiner *cc) {
     gfx_cc_print(cc);
 }
 
+static uint16_t gfx_color_combiner_bucket(uint64_t hash) {
+    return (uint16_t)(hash & (CC_LOOKUP_BUCKET_COUNT - 1));
+}
+
+static void gfx_color_combiner_index_remove(uint16_t poolIndex) {
+    const uint16_t bucket = gfx_color_combiner_bucket(
+        color_combiner_pool[poolIndex].cm.hash
+    );
+    uint16_t* link = &sColorCombinerBucketHeads[bucket];
+
+    while (*link != 0) {
+        const uint16_t index = (uint16_t)(*link - 1);
+        if (index == poolIndex) {
+            *link = sColorCombinerNext[index];
+            sColorCombinerNext[index] = 0;
+            return;
+        }
+        link = &sColorCombinerNext[index];
+    }
+}
+
+static void gfx_color_combiner_index_insert(uint16_t poolIndex) {
+    const uint16_t bucket = gfx_color_combiner_bucket(
+        color_combiner_pool[poolIndex].cm.hash
+    );
+    sColorCombinerNext[poolIndex] =
+        sColorCombinerBucketHeads[bucket];
+    sColorCombinerBucketHeads[bucket] =
+        (uint16_t)(poolIndex + 1);
+}
+
 static struct ColorCombiner *gfx_lookup_or_create_color_combiner(struct CombineMode* cm) {
     combine_mode_update_hash(cm);
 
@@ -344,20 +379,29 @@ static struct ColorCombiner *gfx_lookup_or_create_color_combiner(struct CombineM
         return prev_combiner;
     }
 
-    for (size_t i = 0; i < color_combiner_pool_size; i++) {
-        if (color_combiner_pool[i].cm.hash == cm->hash) {
-            return prev_combiner = &color_combiner_pool[i];
+    const uint16_t bucket = gfx_color_combiner_bucket(cm->hash);
+    for (uint16_t link = sColorCombinerBucketHeads[bucket];
+         link != 0;
+         link = sColorCombinerNext[link - 1]) {
+        const uint16_t index = (uint16_t)(link - 1);
+        if (color_combiner_pool[index].cm.hash == cm->hash) {
+            return prev_combiner = &color_combiner_pool[index];
         }
     }
 
     gfx_flush();
 
-    struct ColorCombiner *comb = &color_combiner_pool[color_combiner_pool_index];
+    const uint16_t newIndex = color_combiner_pool_index;
+    struct ColorCombiner *comb = &color_combiner_pool[newIndex];
+    if (color_combiner_pool_size == CC_MAX_SHADERS) {
+        gfx_color_combiner_index_remove(newIndex);
+    }
     color_combiner_pool_index = (color_combiner_pool_index + 1) % CC_MAX_SHADERS;
     if (color_combiner_pool_size < CC_MAX_SHADERS) { color_combiner_pool_size++; }
 
     memcpy(&comb->cm, cm, sizeof(struct CombineMode));
     gfx_generate_cc(comb);
+    gfx_color_combiner_index_insert(newIndex);
 
     if (sShaderStartupWarmupComplete &&
         sShaderCacheAppendFile != NULL) {

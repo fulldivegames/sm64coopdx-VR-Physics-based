@@ -65,6 +65,7 @@ void bhv_beta_holdable_object_loop(void) {
         case HELD_HELD:
             // Disable rendering to hide the object while it's held
             cur_obj_disable_rendering();
+            vr_hand_interaction_apply_held_object_transform(o);
             break;
 
         case HELD_THROWN:
