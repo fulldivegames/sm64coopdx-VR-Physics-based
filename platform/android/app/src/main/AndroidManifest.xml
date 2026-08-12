@@ -17,7 +17,7 @@
     <application
         android:allowBackup="false"
         android:hasCode="true"
-        android:label="SM64 Co-Op DX VR (Android Dev)"
+        android:label="SM64 Co-Op DX VR Standalone"
         android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
 
         <meta-data
