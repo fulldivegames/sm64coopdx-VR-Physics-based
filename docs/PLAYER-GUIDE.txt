@@ -1,29 +1,23 @@
-SM64 CO-OP DX VR v0.4.0 - WINDOWS PLAYER GUIDE
+SM64 CO-OP DX VR STANDALONE v0.5.0 - QUEST PLAYER GUIDE
 ================================================
 
 WHAT YOU NEED
 
-- A 64-bit Windows PC
-- A PC VR headset and controllers with an active OpenXR runtime
+- A Meta Quest 3 with Developer Mode enabled
 - Your own legally obtained, unmodified Super Mario 64 US ROM
-- Optional: a standard gamepad
+- A PC or Android phone for installing the APK
 
 Nintendo ROMs and game assets are not included in this download.
-The OpenXR loader and its license are included. Required MinGW runtime
-libraries and their license notices are in the licenses folder.
+The ROM and extracted Nintendo assets are never included in the APK.
 
 
 FIRST-TIME SETUP
 
-1. Extract the entire ZIP to a normal folder. Do not run the game from
-   inside the ZIP.
-2. Start your headset software and make sure your preferred OpenXR runtime
-   is active.
-3. Launch SM64-Co-Op-DX-VR.exe.
-4. When asked, drag your legally obtained, unmodified US .z64 ROM onto the
-   game window.
-5. Open Settings > VR and enable VR Mode.
-6. Open Camera Settings and select Third Person Mode or First Person Mode.
+1. Install the APK with SideQuest or ADB.
+2. Launch SM64 Co-Op DX VR Standalone from Unknown Sources.
+3. Use the system file picker to select your legally obtained US .z64 ROM.
+4. Wait for validation and asset preparation to finish.
+5. Open Camera Settings if you want to adjust first-person height or comfort.
 
 The game remembers the validated ROM in its user-data folder.
 
@@ -35,7 +29,15 @@ CAMERA MODES
 - First Person Mode is the default. The headset controls the view and Mario's
   forward direction. The camera stick provides smooth horizontal turning.
 - First-person movement supports normal forward steering up to 90 degrees,
-  a steerable reverse jog, and a short forward-to-back side-flip window.
+  full-speed direction-locked movement around the complete stick circle, a
+  steerable reverse jog, and a short forward-to-back side-flip window. Mario's
+  body stays locked to the selected HMD/controller direction while horizontal
+  travel steers smoothly at Mario's native turning rate and landing momentum
+  remains independent.
+  The forward prime lasts 12 gameplay simulation ticks and the backpedal
+  side-flip grace lasts 10 gameplay simulation ticks. These are Mario's
+  30 Hz updates, not headset render frames, so Quest refresh rate does not
+  shorten either window.
 - Swimming, Wing Cap flight, and shell riding follow the direction you look.
   Normal action buttons are still used for swimming strokes and other moves.
 - Tunnels, conversations, doors, and other scripted camera events continue
@@ -106,6 +108,13 @@ Grip a supported interaction point to attach to it. Release the grip to let
 go. Physical interactions use the game's normal interaction and networking
 paths where possible.
 
+PHYSICAL CLIMBING
+Close a grip while the matching glove touches a native pole, tree, or
+hangable surface. Pull or move your hands to climb. For a ledge, physically
+lift or move your headset over the top of the ledge, then let go of the grip
+to climb up onto it. The optional cheat permits deliberate fresh-grip wall
+and ceiling contacts, but does not turn empty air or boxes into climbables.
+
 
 VR SETTINGS
 
@@ -122,24 +131,51 @@ Motion Control Settings
   collider length, and Bowser spin tuning.
 
 Model Settings
-  Torso and legs, glove size, glove rotation, and glove/body positions.
+  Body Settings and Hand Settings. Body Settings includes torso/legs, the
+  optional Feet Only view, crawling and mounted-action visibility, and body
+  placement. Hand Settings contains glove size, rotation, and positions.
 
 Performance
-  Render scale, desktop view on/off, and desktop mirror frame rate. Lower
-  render scale or disable Desktop View if more performance is needed.
+  Headset render scale. Lower it if a dense level cannot maintain a
+  comfortable frame rate; menus remain at full resolution.
+
+Cheats
+  Flying Speed (%) scales VR Wing Cap flight from 100% to 300%. The multiplier
+  is applied to the native flight velocity and does not accumulate each frame.
+  Swimming Speed also ranges from 100% to 300%; Running Speed is capped at
+  200%. Both remain at their native 100% defaults.
 
 HUD Settings
   HUD opacity.
 
 Experimental
-  Side-flip camera follow, 180-degree wall-jump turns, flat first person,
-  True First Person, True Diving, Arms Mode, mounted-action body visibility,
-  physical crouching, original Mario movement, and backpedal speed.
+  Flat first person, True First Person, True Diving (Camera Effect), Arms
+  Mode, and original Mario movement.
+
+Immersion
+  Crouch / Sand Camera, Face-Stuck Blackout, Cannon Aim Direction Cone,
+  Head-Tracked 3D Sound, Side-Flip Camera Follow, 180 Degree Wall-Jump Camera
+  Turn, Physical Crouching / Ground Pounds, and optional Camera on Body During
+  Climb Up. The climb-up camera option is disabled by default.
+
+Effects
+  Twirl Tornado Effect is enabled by default. During Shy Guy, Spindrift, and
+  Tweester twirls, a small collisionless rotating white tornado remains at the
+  character's feet for the full action. It is 25% transparent and scales to
+  roughly 75% of the selected character.
 
 True First Person follows animated body movement and might cause sickness.
 True Diving follows the animated dive position only during dives and may also
 be uncomfortable. Both options are disabled by default.
 Every submenu has a Set to Defaults button.
+
+
+SUCCESSFUL-EXIT CAP GESTURE
+
+During a successful star exit, bring either tracked glove to the headset or
+just above it and hold that hand's Grip + Trigger. Either hand can pull off the
+cap and hold it for about one minute. Let go to drop the cap onto level
+geometry; it rests briefly and fades. Death and Exit Course do not activate it.
 
 
 STARTUP SHADER CACHE
@@ -151,8 +187,8 @@ This is intended to reduce repeat stutters in levels and mods you have used.
 
 KNOWN LIMITATIONS
 
-- Windows and OpenGL are the only implemented OpenXR graphics path.
-- Motion controls, online co-op, mods, and other headsets need more testing.
+- This build targets Quest 3 standalone and remains experimental.
+- Online co-op, mods, and long play sessions need more standalone testing.
 - True First Person, True Diving, and Arms Mode are experimental.
 - The 3D star models do not currently appear on the Star Select screen in VR.
 - Some original flat billboard objects can look unusual in stereo VR.
@@ -160,14 +196,8 @@ KNOWN LIMITATIONS
 
 TROUBLESHOOTING
 
-- Make sure the headset's OpenXR runtime is active before enabling VR.
-- If Windows SmartScreen appears, confirm that the ZIP came from the official
-  fulldivegames GitHub release page. This build is not currently code-signed.
-- Windows Firewall may ask about network access because the game includes
-  online multiplayer. Only allow the networks you intend to use.
-- For diagnostic output, open PowerShell in the extracted folder and run:
-
-    .\SM64-Co-Op-DX-VR.exe --console
+- If the app cannot find its files after reinstalling, select the ROM again.
+- For diagnostics, connect the Quest with ADB and capture Android logcat.
 
 - Include your headset, OpenXR runtime, GPU, reproduction steps, and relevant
   [VR] or [GFX] console lines when reporting a problem.

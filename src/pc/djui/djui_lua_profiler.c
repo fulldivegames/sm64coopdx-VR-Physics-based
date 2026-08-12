@@ -5,6 +5,7 @@
 #include "pc/mods/mod.h"
 #include "pc/mods/mods.h"
 #include "pc/cliopts.h"
+#include "pc/utils/misc.h"
 
 #define MAX_PROFILED_MODS 16
 #define REFRESH_RATE 30
@@ -35,9 +36,7 @@ void lua_profiler_start_counter(UNUSED struct Mod *mod) {
 
     for (s32 i = 0; i != MIN(MAX_PROFILED_MODS, gActiveMods.entryCount); ++i) {
         if (gActiveMods.entries[i] == mod) {
-            f64 freq = SDL_GetPerformanceFrequency();
-            f64 curr = SDL_GetPerformanceCounter();
-            sPrfDisplay->entries[i].counter.start = curr / freq;
+            sPrfDisplay->entries[i].counter.start = clock_elapsed_f64();
             return;
         }
     }
@@ -48,11 +47,8 @@ void lua_profiler_stop_counter(UNUSED struct Mod *mod) {
 
     for (s32 i = 0; i != MIN(MAX_PROFILED_MODS, gActiveMods.entryCount); ++i) {
         if (gActiveMods.entries[i] == mod) {
-            f64 freq = SDL_GetPerformanceFrequency();
-            f64 curr = SDL_GetPerformanceCounter();
-
             struct DjuiPrfCounter *counter = &sPrfDisplay->entries[i].counter;
-            counter->end = curr / freq;
+            counter->end = clock_elapsed_f64();
             counter->sum += counter->end - counter->start;
             return;
         }

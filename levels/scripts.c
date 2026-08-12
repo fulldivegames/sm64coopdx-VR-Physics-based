@@ -144,6 +144,7 @@ const LevelScript level_main_scripts_entry[] = {
     LOAD_MODEL_FROM_GEO(MODEL_WARIOS_WINGED_METAL_CAP,   warios_winged_metal_cap_geo),
 
     LOAD_MODEL_FROM_GEO(MODEL_ERROR_MODEL,               error_model_geo),
+    LOAD_MODEL_FROM_GEO(MODEL_VR_TWIRL_TORNADO,          vr_twirl_tornado_geo),
 
     // CUSTOM MODELS END
 

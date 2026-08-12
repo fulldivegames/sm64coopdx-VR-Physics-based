@@ -506,6 +506,16 @@ static void controller_vr_read(OSContPad* pad) {
         &right
     );
     if (cameraStick != NULL) {
+#ifdef __ANDROID__
+        // OpenXR Touch X and the port's camera yaw use opposite signs on
+        // Quest. Invert only the selected camera stick, leaving locomotion
+        // and user stick remapping unchanged.
+        const float questCameraStick[2] = {
+            -cameraStick[0],
+            cameraStick[1]
+        };
+        cameraStick = questCameraStick;
+#endif
         controller_vr_merge_stick(
             &pad->ext_stick_x,
             &pad->ext_stick_y,

@@ -44,14 +44,24 @@ void djui_panel_controls_create(struct DjuiBase* caller) {
 
         djui_checkbox_create(body, DLANG(CONTROLS, EXTENDED_REPORTS), &configExtendedReports, NULL);
 
-        int numJoys = SDL_NumJoysticks();
+        int numJoys =
+#ifdef __ANDROID__
+            1;
+#else
+            SDL_NumJoysticks();
+#endif
         if (numJoys == 0) { numJoys = 1; }
 
         char** gamepadChoices = calloc(numJoys, sizeof(char *));
 
         // Get the names of all connected gamepads, if none is provided, use "Unknown"
         for (int i = 0; i < numJoys; i++) {
-            const char* joystickName = SDL_JoystickNameForIndex(i);
+            const char* joystickName =
+#ifdef __ANDROID__
+                "Quest Controllers";
+#else
+                SDL_JoystickNameForIndex(i);
+#endif
             if (joystickName == NULL) {
                 joystickName = "Unknown";
             }

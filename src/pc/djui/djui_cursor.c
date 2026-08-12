@@ -60,6 +60,10 @@ void djui_cursor_input_controlled_center(struct DjuiBase* base) {
     }
 }
 
+struct DjuiBase* djui_cursor_get_input_controlled_base(void) {
+    return sInputControlledBase;
+}
+
 static f32 djui_cursor_base_distance(struct DjuiBase* base, f32 xScale, f32 yScale) {
     f32 x, y;
     djui_cursor_base_hover_location(base, &x, &y);

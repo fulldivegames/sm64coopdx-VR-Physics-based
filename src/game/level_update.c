@@ -49,6 +49,7 @@
 #include "pc/lua/smlua_hooks.h"
 #include "pc/mods/mods.h"
 #include "pc/nametags.h"
+#include "pc/vr/vr.h"
 
 #include "game/screen_transition.h"
 
@@ -830,11 +831,16 @@ static void initiate_painting_warp_node(struct WarpNode *pWarpNode) {
     initiate_warp(warpNode.destLevel & 0x7F, warpNode.destArea, warpNode.destNode, 0);
     check_if_should_set_warp_checkpoint(&warpNode);
 
+    const bool vrPaintingFade = vr_is_active();
     extern s16 gMenuMode;
     if (gMenuMode == -1) {
-        play_transition_after_delay(WARP_TRANSITION_FADE_INTO_COLOR, 30, 255, 255, 255, 45);
+        if (vrPaintingFade) {
+            play_transition(WARP_TRANSITION_FADE_INTO_COLOR, 6, 255, 255, 255);
+        } else {
+            play_transition_after_delay(WARP_TRANSITION_FADE_INTO_COLOR, 30, 255, 255, 255, 45);
+        }
     }
-    level_set_transition(74, basic_update);
+    level_set_transition(vrPaintingFade ? 45 : 74, basic_update);
 
     play_sound(SOUND_MENU_STAR_SOUND, gGlobalSoundSource);
     fadeout_music(398);

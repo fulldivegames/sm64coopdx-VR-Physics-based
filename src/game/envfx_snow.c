@@ -1,4 +1,5 @@
 #include <ultra64.h>
+#include <math.h>
 
 #include "sm64.h"
 #include "game_init.h"
@@ -63,9 +64,17 @@ static Vtx*  sSnowInternalGfxPos[140 / 5];
 static Vec3s sSnowGfxCamFrom;
 static Vec3s sSnowGfxCamTo;
 static Vec3s sSnowGfxMarioPos;
+static Vec3s sSnowGfxPrevCamFrom;
+static Vec3s sSnowGfxPrevCamTo;
+static Vec3s sSnowGfxPrevMarioPos;
+static bool sSnowGfxHistoryValid;
 
 void patch_snow_particles_before(void) {
     if (sSnowGfxPos) {
+        vec3s_copy(sSnowGfxPrevCamFrom, sSnowGfxCamFrom);
+        vec3s_copy(sSnowGfxPrevCamTo, sSnowGfxCamTo);
+        vec3s_copy(sSnowGfxPrevMarioPos, sSnowGfxMarioPos);
+        sSnowGfxHistoryValid = true;
         for (s32 i = 0; i < gSnowParticleCount; i++) {
             vec3s_set((gEnvFxBuffer + i)->prevPos, (gEnvFxBuffer + i)->xPos, (gEnvFxBuffer + i)->yPos, (gEnvFxBuffer + i)->zPos);
         }
@@ -73,9 +82,41 @@ void patch_snow_particles_before(void) {
     }
 }
 
-void patch_snow_particles_interpolated(UNUSED f32 delta) {
+void patch_snow_particles_interpolated(f32 delta) {
     if (sSnowGfxPos) {
-        envfx_update_snow_internal(sSnowGfxMode, sSnowGfxMarioPos, sSnowGfxCamFrom, sSnowGfxCamTo, true);
+        Vec3s marioPos;
+        Vec3s camFrom;
+        Vec3s camTo;
+        if (!sSnowGfxHistoryValid) {
+            vec3s_copy(sSnowGfxPrevMarioPos, sSnowGfxMarioPos);
+            vec3s_copy(sSnowGfxPrevCamFrom, sSnowGfxCamFrom);
+            vec3s_copy(sSnowGfxPrevCamTo, sSnowGfxCamTo);
+            sSnowGfxHistoryValid = true;
+        }
+        for (u32 axis = 0; axis < 3; axis++) {
+            marioPos[axis] = (s16)delta_interpolate_s32(
+                sSnowGfxPrevMarioPos[axis],
+                sSnowGfxMarioPos[axis],
+                delta
+            );
+            camFrom[axis] = (s16)delta_interpolate_s32(
+                sSnowGfxPrevCamFrom[axis],
+                sSnowGfxCamFrom[axis],
+                delta
+            );
+            camTo[axis] = (s16)delta_interpolate_s32(
+                sSnowGfxPrevCamTo[axis],
+                sSnowGfxCamTo[axis],
+                delta
+            );
+        }
+        envfx_update_snow_internal(
+            sSnowGfxMode,
+            marioPos,
+            camFrom,
+            camTo,
+            true
+        );
     }
 }
 
@@ -84,6 +125,7 @@ void patch_snow_particles_interpolated(UNUSED f32 delta) {
  * and setting a start amount.
  */
 s32 envfx_init_snow(s32 mode) {
+    sSnowGfxHistoryValid = false;
     switch (mode) {
         case ENVFX_MODE_NONE:
             return 0;
@@ -160,6 +202,7 @@ void envfx_cleanup_snow(UNUSED void *snowParticleArray) {
     if (gEnvFxMode) {
         gEnvFxMode = ENVFX_MODE_NONE;
     }
+    sSnowGfxHistoryValid = false;
 }
 
 /**
@@ -367,6 +410,23 @@ void rotate_triangle_vertices(Vec3s vertex1, Vec3s vertex2, Vec3s vertex3, s16 p
  * around (0,0,0) that will be translated to snowflake positions to draw the
  * snowflake image.
  */
+static s32 envfx_interpolate_snow_y(
+    s32 previous,
+    s32 current,
+    f32 delta,
+    s32 particleIndex
+) {
+    const f32 phase =
+        (f32)((particleIndex * 37) & 63) / 64.0f;
+    return (s32)floorf(
+        delta_interpolate_f32(
+            (f32)previous,
+            (f32)current,
+            delta
+        ) + phase
+    );
+}
+
 void append_snowflake_vertex_buffer(Gfx *gfx, s32 index, Vec3s vertex1, Vec3s vertex2, Vec3s vertex3, u8 interpolated) {
     s32 i = 0;
     Vtx *vertBuf;
@@ -394,7 +454,12 @@ void append_snowflake_vertex_buffer(Gfx *gfx, s32 index, Vec3s vertex1, Vec3s ve
         if (interpolated) {
             extern f32 gRenderingDelta;
             xPos = delta_interpolate_s32(particle->prevPos[0], particle->xPos, gRenderingDelta);
-            yPos = delta_interpolate_s32(particle->prevPos[1], particle->yPos, gRenderingDelta);
+            yPos = envfx_interpolate_snow_y(
+                particle->prevPos[1],
+                particle->yPos,
+                gRenderingDelta,
+                particleIndex
+            );
             zPos = delta_interpolate_s32(particle->prevPos[2], particle->zPos, gRenderingDelta);
         } else {
             xPos = particle->prevPos[0];
@@ -438,6 +503,9 @@ Gfx *envfx_update_snow_internal(s32 snowMode, Vec3s marioPos, Vec3s camFrom, Vec
     } else {
         gfxStart = (Gfx *) alloc_display_list((gSnowParticleCount * 6 + 3) * sizeof(Gfx));
         sSnowGfxPos = gfxStart;
+        if (sSnowGfxMode != snowMode) {
+            sSnowGfxHistoryValid = false;
+        }
         sSnowGfxMode = snowMode;
         vec3s_copy(sSnowGfxMarioPos, marioPos);
         vec3s_copy(sSnowGfxCamFrom, camFrom);

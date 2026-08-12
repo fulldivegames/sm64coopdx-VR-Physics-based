@@ -119,6 +119,17 @@ ROM_ASSET_LOAD_VTX(castle_grounds_seg7_vertex_07005150, 0x0044abc0, 39442, 0x000
 // 0x07005240 - 0x07005340
 ROM_ASSET_LOAD_VTX(castle_grounds_seg7_vertex_07005240, 0x0044abc0, 39442, 0x00005240, 256);
 
+void castle_grounds_fix_exterior_corner_seam(void) {
+    // The original right-side wall ends at x=3484 while the adjoining front
+    // facade ends at x=3482. At N64 resolution the two-unit wedge is hidden,
+    // but a close stereoscopic view exposes a sky-colored vertical crack.
+    // Weld only the three duplicated wall-corner vertices; collision and the
+    // rest of the original level geometry remain untouched.
+    castle_grounds_seg7_vertex_07005150[7].v.ob[0] = 3482;
+    castle_grounds_seg7_vertex_07005240[6].v.ob[0] = 3482;
+    castle_grounds_seg7_vertex_07005240[8].v.ob[0] = 3482;
+}
+
 // 0x07005340 - 0x07005440
 ROM_ASSET_LOAD_VTX(castle_grounds_seg7_vertex_07005340, 0x0044abc0, 39442, 0x00005340, 256);
 

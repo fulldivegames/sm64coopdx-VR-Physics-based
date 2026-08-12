@@ -2166,7 +2166,13 @@ void gfx_init(struct GfxWindowManagerAPI *wapi, struct GfxRenderingAPI *rapi, co
     gfx_rapi->init();
 
     printf("[GFX] Building quick startup shader cache...\n");
+#ifndef __ANDROID__
     gfx_cc_precomp();
+#else
+    // Quest's GLES compiler rejects some optional desktop-only combinations
+    // in the bulk warm-up set. Compile only shaders actually used by the game.
+    printf("[GFX] Android GLES uses on-demand shader compilation.\n");
+#endif
     sBuiltInColorCombinerCount = color_combiner_pool_size;
 
     uint32_t loadedCount = 0;

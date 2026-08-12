@@ -14,9 +14,13 @@
 // moved these from sdl controller implementations
 
 static struct ControllerAPI *controller_implementations[] = {
+#ifdef __ANDROID__
+    &controller_vr,
+#else
     &controller_sdl,
     &controller_keyboard,
     &controller_vr,
+#endif
 };
 
 s32 osContInit(UNUSED OSMesgQueue *mq, u8 *controllerBits, UNUSED OSContStatus *status) {

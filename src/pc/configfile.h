@@ -46,8 +46,22 @@
 #define VR_BACKPEDAL_SPEED_MIN      8U
 #define VR_BACKPEDAL_SPEED_MAX     32U
 #define VR_BACKPEDAL_SPEED_DEFAULT 20U
+#define VR_FLYING_SPEED_MIN       100U
+#define VR_FLYING_SPEED_MAX       300U
+#define VR_FLYING_SPEED_DEFAULT   100U
+#define VR_SWIMMING_SPEED_MIN     100U
+#define VR_SWIMMING_SPEED_MAX     300U
+#define VR_SWIMMING_SPEED_DEFAULT 100U
+#define VR_RUNNING_SPEED_MIN      100U
+#define VR_RUNNING_SPEED_MAX      200U
+#define VR_RUNNING_SPEED_DEFAULT  100U
+#ifdef __ANDROID__
+#define VR_RENDER_SCALE_MIN        10U
+#define VR_RENDER_SCALE_MAX       100U
+#else
 #define VR_RENDER_SCALE_MIN        25U
 #define VR_RENDER_SCALE_MAX       100U
+#endif
 
 typedef struct {
     unsigned int x, y, w, h;
@@ -87,6 +101,13 @@ enum VrCameraMode {
     VR_CAMERA_MODE_THIRD_PERSON,
     VR_CAMERA_MODE_FIRST_PERSON,
     VR_CAMERA_MODE_COUNT
+};
+
+enum VrFacingSource {
+    VR_FACING_SOURCE_HEADSET,
+    VR_FACING_SOURCE_LEFT_CONTROLLER,
+    VR_FACING_SOURCE_RIGHT_CONTROLLER,
+    VR_FACING_SOURCE_COUNT
 };
 
 // Logical OpenXR controls used by the VR controller remapper. OpenXR maps
@@ -138,11 +159,16 @@ unsigned int config_vr_head_attachment_height_for_character(
     unsigned int characterIndex
 );
 extern unsigned int configVrMovementCalibration;
+extern unsigned int configVrFacingSource;
 extern unsigned int configVrFov;
+extern unsigned int configVrBrightness;
+extern unsigned int configVrSaturation;
+extern unsigned int configVrContrast;
 extern unsigned int configVrRenderScale;
 extern bool         configVrDesktopMirror;
 extern unsigned int configVrDesktopMirrorFps;
 extern unsigned int configVrHudOpacity;
+extern unsigned int configVrHudSpread;
 extern bool         configVrMotionControllerInput;
 extern bool         configVrPunchButton;
 extern unsigned int configVrMoveStick;
@@ -155,9 +181,25 @@ extern unsigned int configVrRBinding;
 extern unsigned int configVrPauseBinding;
 extern bool         configVrPhysicalPunching;
 extern bool         configVrPhysicalGrabbing;
+extern bool         configVrPhysicalClimbing;
+extern bool         configVrStandardGrabbing;
+extern bool         configVrStandardClimbing;
+extern bool         configVrSwingClimbRelease;
+extern bool         configVrCheatSurfaceClimbing;
+extern unsigned int configVrFlyingSpeed;
+extern unsigned int configVrSwimmingSpeed;
+extern unsigned int configVrRunningSpeed;
+extern bool         configVrImmersiveCameraMotion;
+extern bool         configVrImmersiveFaceStuck;
+extern bool         configVrImmersiveCannonCone;
+extern bool         configVrImmersive3dSound;
+extern bool         configVrImmersiveLedgeCamera;
+extern bool         configVrImmersiveUnderwaterFilter;
+extern bool         configVrMovementOverhaul;
 extern bool         configVrMarioPunchSound;
 extern bool         configVrMotionControlledDive;
 extern bool         configVrMotionControlledGroundDive;
+extern bool         configVrTurnDuringJumps;
 extern unsigned int configVrPunchSpeed;
 extern unsigned int configVrPunchDistance;
 extern unsigned int configVrPunchGripThreshold;
@@ -178,6 +220,8 @@ extern unsigned int configVrRightGlovePositionX;
 extern unsigned int configVrRightGlovePositionY;
 extern unsigned int configVrRightGlovePositionZ;
 extern bool         configVrFirstPersonBody;
+extern bool         configVrHideTorsoWhileCrawling;
+extern bool         configVrFeetOnlyBody;
 extern unsigned int configVrTorsoHeight;
 extern unsigned int configVrLegHeight;
 extern bool         configVrExperimentalSideFlipFollow;
@@ -187,6 +231,7 @@ extern bool         configVrExperimentalTrueFirstPerson;
 extern bool         configVrExperimentalTrueDiving;
 extern bool         configVrExperimentalArmsMode;
 extern bool         configVrExperimentalMountedBody;
+extern bool         configVrTwirlTornadoEffect;
 extern bool         configVrPhysicalCrouching;
 extern bool         configVrOriginalMarioMovement;
 extern unsigned int configVrBackpedalSpeed;

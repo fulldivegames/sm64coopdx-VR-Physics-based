@@ -18,6 +18,20 @@ void tuxies_mother_act_2(void) {
     f32 sp24;
     UNUSED s32 unused;
     struct Object *sp1C = cur_obj_find_nearest_object_with_behavior(bhvSmallPenguin, &sp24);
+    if (sp1C == NULL) {
+        // A physically grabbed baby can spend its first held update under its
+        // spawn behavior before adopting bhvSmallPenguin.
+        sp1C = cur_obj_find_nearest_object_with_behavior(
+            bhvPenguinBaby,
+            &sp24
+        );
+    }
+    if (sp1C != NULL &&
+        vr_hand_interaction_is_tracked_held_object(sp1C)) {
+        // Physical carrying places the baby at the hand. Accept either that
+        // native object distance or Mario's body distance for the handoff.
+        sp24 = fminf(sp24, lateral_dist_between_objects(o, player));
+    }
 
     if (cur_obj_find_nearby_held_actor(bhvUnused20E0, 1000.0f) != NULL) {
         if (o->oSubAction == 0) {

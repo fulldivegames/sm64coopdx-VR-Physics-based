@@ -19,10 +19,15 @@
 
 #define GL_GLEXT_PROTOTYPES 1
 
+#if defined(__ANDROID__)
+#include <GLES3/gl3.h>
+#include <GLES3/gl3ext.h>
+#include <android/log.h>
+#elif defined(USE_GLES)
 #include <SDL2/SDL.h>
-#ifdef USE_GLES
 #include <SDL2/SDL_opengles2.h>
 #else
+#include <SDL2/SDL.h>
 #include <SDL2/SDL_opengl.h>
 #endif
 
@@ -31,6 +36,7 @@
 #include "gfx_cc.h"
 #include "gfx_rendering_api.h"
 #include "gfx_pc.h"
+#include "../vr/vr.h"
 
 #define TEX_CACHE_STEP 512
 
@@ -90,8 +96,42 @@ static inline void gfx_opengl_set_shader_uniforms(struct ShaderProgram *prg) {
     if (prg->used_noise) { glUniform1f(prg->uniform_locations[4], (float)frame_count); }
     if (prg->used_lightmap) { glUniform3f(prg->uniform_locations[5], gVertexColor[0] / 255.0f, gVertexColor[1] / 255.0f, gVertexColor[2] / 255.0f); }
     if (prg->world_geometry) {
-        glUniform1iv(prg->uniform_locations[6], SHADER_FLAG_MAX, gShaderFlags);
-        glUniform1fv(prg->uniform_locations[7], SHADER_FLAG_MAX, gShaderFlagValues);
+        if (vr_is_active() && (configVrBrightness != 100U
+                              || configVrSaturation != 100U
+                              || configVrContrast != 100U)) {
+            int vrShaderFlags[SHADER_FLAG_MAX];
+            float vrShaderValues[SHADER_FLAG_MAX];
+            for (int i = 0; i < SHADER_FLAG_MAX; ++i) {
+                vrShaderFlags[i] = gShaderFlags[i];
+                vrShaderValues[i] = gShaderFlagValues[i];
+            }
+            vrShaderFlags[SHADER_FLAG_BRIGHTNESS] = 1;
+            const float baseBrightness =
+                gShaderFlags[SHADER_FLAG_BRIGHTNESS]
+                    ? gShaderFlagValues[SHADER_FLAG_BRIGHTNESS]
+                    : 1.0f;
+            vrShaderValues[SHADER_FLAG_BRIGHTNESS] =
+                baseBrightness * (float)configVrBrightness / 100.0f;
+            vrShaderFlags[SHADER_FLAG_SATURATION] = 1;
+            const float baseSaturation =
+                gShaderFlags[SHADER_FLAG_SATURATION]
+                    ? gShaderFlagValues[SHADER_FLAG_SATURATION]
+                    : 1.0f;
+            vrShaderValues[SHADER_FLAG_SATURATION] =
+                baseSaturation * (float)configVrSaturation / 100.0f;
+            vrShaderFlags[SHADER_FLAG_CONTRAST] = 1;
+            const float baseContrast =
+                gShaderFlags[SHADER_FLAG_CONTRAST]
+                    ? gShaderFlagValues[SHADER_FLAG_CONTRAST]
+                    : 1.0f;
+            vrShaderValues[SHADER_FLAG_CONTRAST] =
+                baseContrast * (float)configVrContrast / 100.0f;
+            glUniform1iv(prg->uniform_locations[6], SHADER_FLAG_MAX, vrShaderFlags);
+            glUniform1fv(prg->uniform_locations[7], SHADER_FLAG_MAX, vrShaderValues);
+        } else {
+            glUniform1iv(prg->uniform_locations[6], SHADER_FLAG_MAX, gShaderFlags);
+            glUniform1fv(prg->uniform_locations[7], SHADER_FLAG_MAX, gShaderFlagValues);
+        }
     }
 
     glUniform1i(prg->uniform_locations[8], configFiltering);
@@ -506,7 +546,7 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
 
         // exposure
         append_line(fs_buf, &fs_len, "if (uShaderFlags[4] == 1) {");
-        append_line(fs_buf, &fs_len, "texel.rgb = texel.rgb + (uShaderFlagValues[4] - 2) * texel.rgb + texel.rgb;");
+        append_line(fs_buf, &fs_len, "texel.rgb = texel.rgb + (uShaderFlagValues[4] - 2.0) * texel.rgb + texel.rgb;");
         append_line(fs_buf, &fs_len, "}");
 
         // dithering
@@ -516,7 +556,7 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
 
         // posterization
         append_line(fs_buf, &fs_len, "if (uShaderFlags[6] == 1) {");
-        append_line(fs_buf, &fs_len, "int levels = int(max(1.0, uShaderFlagValues[6]));");
+        append_line(fs_buf, &fs_len, "float levels = max(1.0, uShaderFlagValues[6]);");
         append_line(fs_buf, &fs_len, "texel.rgb = floor(texel.rgb * levels) / levels;");
         append_line(fs_buf, &fs_len, "}");
 
@@ -574,7 +614,11 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
             error_log
         );
         fprintf(stderr, "%s\n", error_log);
+#ifdef __ANDROID__
+        sys_fatal("Vertex shader compilation failed: %s\nSource:\n%s", error_log, vs_buf);
+#else
         sys_fatal("vertex shader compilation failed (see terminal)");
+#endif
     }
 
     GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
@@ -592,7 +636,11 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
             error_log
         );
         fprintf(stderr, "%s\n", error_log);
+#ifdef __ANDROID__
+        sys_fatal("Fragment shader compilation failed: %s\nSource:\n%s", error_log, fs_buf);
+#else
         sys_fatal("fragment shader compilation failed (see terminal)");
+#endif
     }
 
     GLuint shader_program = glCreateProgram();
@@ -802,11 +850,41 @@ static void gfx_opengl_set_zmode_decal(bool zmode_decal) {
 }
 
 static void gfx_opengl_set_viewport(int x, int y, int width, int height) {
+#ifdef __ANDROID__
+    // Some title/menu display lists begin with an empty N64 viewport and rely
+    // on the desktop window's existing full viewport until the scene viewport
+    // arrives. Applying that empty viewport to an OpenXR framebuffer makes
+    // every subsequent 3D draw rasterize zero pixels. The eye target was
+    // already set to its full dimensions by the Quest host, so preserve it.
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+#endif
     glViewport(x, y, width, height);
+#ifdef __ANDROID__
+    static bool logged = false;
+    if (!logged) {
+        const GLenum error = glGetError();
+        __android_log_print(error == GL_NO_ERROR ? ANDROID_LOG_INFO : ANDROID_LOG_ERROR,
+            "SM64CoopDXVR", "GLES viewport %d,%d %dx%d -> 0x%04x.",
+            x, y, width, height, error);
+        logged = true;
+    }
+#endif
 }
 
 static void gfx_opengl_set_scissor(int x, int y, int width, int height) {
     glScissor(x, y, width, height);
+#ifdef __ANDROID__
+    static bool logged = false;
+    if (!logged) {
+        const GLenum error = glGetError();
+        __android_log_print(error == GL_NO_ERROR ? ANDROID_LOG_INFO : ANDROID_LOG_ERROR,
+            "SM64CoopDXVR", "GLES scissor %d,%d %dx%d -> 0x%04x.",
+            x, y, width, height, error);
+        logged = true;
+    }
+#endif
 }
 
 static void gfx_opengl_set_use_alpha(bool use_alpha) {
@@ -819,8 +897,71 @@ static void gfx_opengl_set_use_alpha(bool use_alpha) {
 
 static void gfx_opengl_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
     //printf("flushing %d tris\n", buf_vbo_num_tris);
+#ifdef __ANDROID__
+    static bool logged_world = false;
+    static bool logged_overlay = false;
+    bool *logged = opengl_prg != NULL && opengl_prg->world_geometry
+        ? &logged_world : &logged_overlay;
+    if (!*logged && opengl_prg != NULL && opengl_prg->num_floats >= 4) {
+        const size_t vertices = buf_vbo_num_tris * 3;
+        size_t clip_visible = 0;
+        float min_x = 1e30f, max_x = -1e30f;
+        float min_y = 1e30f, max_y = -1e30f;
+        float min_z = 1e30f, max_z = -1e30f;
+        for (size_t vertex = 0; vertex < vertices; ++vertex) {
+            const float *p = buf_vbo + vertex * opengl_prg->num_floats;
+            const float w = p[3];
+            if (w != 0.0f) {
+                const float x = p[0] / w;
+                const float y = p[1] / w;
+                const float z = p[2] / w;
+                if (x < min_x) min_x = x; if (x > max_x) max_x = x;
+                if (y < min_y) min_y = y; if (y > max_y) max_y = y;
+                if (z < min_z) min_z = z; if (z > max_z) max_z = z;
+                if (x >= -1.0f && x <= 1.0f && y >= -1.0f && y <= 1.0f &&
+                    z >= -1.0f && z <= 1.0f) ++clip_visible;
+            }
+        }
+        __android_log_print(ANDROID_LOG_INFO, "SM64CoopDXVR",
+            "%s draw reached GLES: %zu tris, %zu/%zu vertices in clip; NDC x %.2f..%.2f y %.2f..%.2f z %.2f..%.2f.",
+            opengl_prg->world_geometry ? "World" : "Overlay",
+            buf_vbo_num_tris, clip_visible, vertices,
+            min_x, max_x, min_y, max_y, min_z, max_z);
+        *logged = true;
+    }
+#endif
+#ifdef __ANDROID__
+    static bool completed_draw_diagnostics = false;
+    if (!completed_draw_diagnostics) {
+        const GLenum pending_error = glGetError();
+        if (pending_error != GL_NO_ERROR) {
+            __android_log_print(ANDROID_LOG_ERROR, "SM64CoopDXVR",
+                                "GLES error before vertex upload: 0x%04x.", pending_error);
+        }
+    }
+#endif
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) * buf_vbo_len, buf_vbo, GL_STREAM_DRAW);
+#ifdef __ANDROID__
+    if (!completed_draw_diagnostics) {
+        const GLenum upload_error = glGetError();
+        if (upload_error != GL_NO_ERROR) {
+            __android_log_print(ANDROID_LOG_ERROR, "SM64CoopDXVR",
+                                "GLES vertex upload error: 0x%04x (%zu floats).",
+                                upload_error, buf_vbo_len);
+        }
+    }
+#endif
     glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
+#ifdef __ANDROID__
+    if (!completed_draw_diagnostics) {
+        const GLenum error = glGetError();
+        if (error != GL_NO_ERROR) {
+            __android_log_print(ANDROID_LOG_ERROR, "SM64CoopDXVR",
+                                "First GLES draw error: 0x%04x.", error);
+        }
+        completed_draw_diagnostics = true;
+    }
+#endif
 }
 
 static inline bool gl_version_is_supported(int major, int minor, bool is_es) {

@@ -1,0 +1,69 @@
+plugins {
+    id "com.android.application"
+}
+
+def generatedResourceAssets = layout.buildDirectory.dir("generated/sm64Resources/assets")
+
+tasks.register("syncSm64ResourceAssets", Sync) {
+    from("../../../lang") {
+        into("lang")
+    }
+    into(generatedResourceAssets)
+}
+
+android {
+    namespace "com.fulldivegames.sm64coopdxvr"
+    compileSdk 35
+    ndkVersion "27.0.12077973"
+
+    defaultConfig {
+        applicationId "com.fulldivegames.sm64coopdxvr"
+        minSdk 26
+        targetSdk 32
+        versionCode 1
+        versionName "0.1.0"
+
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_STL=c++_shared"
+                targets "sm64coopdxvr"
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            debuggable true
+        }
+        release {
+            minifyEnabled false
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path file("src/main/cpp/CMakeLists.txt")
+            version "3.22.1"
+        }
+    }
+
+    buildFeatures {
+        prefab true
+    }
+
+    sourceSets {
+        main.assets.srcDir(generatedResourceAssets)
+    }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn("syncSm64ResourceAssets")
+}
+
+dependencies {
+    implementation "org.khronos.openxr:openxr_loader_for_android:1.1.60"
+}

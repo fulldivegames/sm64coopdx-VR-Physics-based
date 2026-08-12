@@ -6,6 +6,10 @@
 #include "macros.h"
 #include "types.h"
 
+// Marks the short-lived, non-interactive cap used by the VR painting-exit
+// gesture. It shares the normal cap model/physics without becoming a pickup.
+#define VR_PAINTING_EXIT_HAT_BEH_PARAM 0xFE
+
 extern u16 gLocalBubbleCounter;
 struct WallCollisionData;
 
@@ -20,7 +24,14 @@ bool vr_get_first_person_aim_direction(
 );
 bool vr_first_person_backpedal_active(struct MarioState* m);
 bool vr_first_person_backpedal_grace_active(struct MarioState* m);
+bool vr_first_person_assisted_skid_active(struct MarioState* m);
+void vr_finish_first_person_assisted_skid(void);
 bool vr_first_person_side_flip_ready(struct MarioState* m);
+bool vr_first_person_movement_overhaul_active(struct MarioState* m);
+bool vr_first_person_lateral_side_flip_requested(struct MarioState* m);
+void vr_consume_first_person_lateral_side_flip(void);
+bool vr_first_person_lateral_skid_active(struct MarioState* m);
+void vr_finish_first_person_lateral_skid(void);
 bool vr_first_person_forward_recovery_active(struct MarioState* m);
 void vr_finish_first_person_forward_recovery(void);
 

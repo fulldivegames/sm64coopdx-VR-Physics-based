@@ -3,6 +3,14 @@
 
 #define SM64COOPDX_VERSION "v1.5.1"
 
+// Public release version for the VR fork. Keep this separate from
+// SM64COOPDX_VERSION because the latter is part of multiplayer compatibility.
+#if defined(__ANDROID__)
+#define SM64COOPDX_VR_VERSION "v0.5.0"
+#else
+#define SM64COOPDX_VR_VERSION "v0.4.0"
+#endif
+
 // internal version
 #define VERSION_TEXT "v"
 #define VERSION_NUMBER 42
@@ -34,6 +42,7 @@
 #define MAX_VERSION_LENGTH 128
 
 const char* get_version(void);
+const char* get_vr_version(void);
 #ifdef COMPILE_TIME
 const char* get_version_with_build_date(void);
 #endif

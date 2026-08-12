@@ -1,0 +1,8 @@
+.gradle/
+.idea/
+local.properties
+**/build/
+**/.cxx/
+captures/
+.reference-sm64ex-android/
+.debug/

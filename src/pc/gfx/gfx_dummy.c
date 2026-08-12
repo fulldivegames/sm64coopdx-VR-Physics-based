@@ -61,8 +61,17 @@ static void gfx_dummy_wm_main_loop(void (*run_one_game_iter)(void)) {
 }
 
 static void gfx_dummy_wm_get_dimensions(uint32_t *width, uint32_t *height) {
+#ifdef __ANDROID__
+    // DJUI is authored as a 4:3 logical canvas. OpenXR eye swapchains
+    // are tall, per-eye render targets and must not be used as the menu layout
+    // size; doing so (or retaining the old 320x240 dummy size) clips the
+    // language panel footer and makes its Back/page buttons invisible.
+    *width = 960;
+    *height = 720;
+#else
     *width = 320;
     *height = 240;
+#endif
 }
 
 static void gfx_dummy_wm_handle_events(void) {

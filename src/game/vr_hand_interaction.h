@@ -9,6 +9,25 @@ struct MarioState;
 struct Object;
 
 void vr_hand_interaction_update(struct MarioState* mario);
+void vr_hand_interaction_update_headset_collider(
+    struct MarioState* mario
+);
+bool vr_hand_interaction_get_climb_camera_offset(Vec3f offset);
+bool vr_hand_interaction_is_physical_climb_active(
+    struct MarioState* mario
+);
+bool vr_hand_interaction_is_physical_pole_climb_active(
+    struct MarioState* mario
+);
+void vr_hand_interaction_apply_moving_pole_displacement(
+    struct MarioState* mario
+);
+bool vr_hand_interaction_is_at_physical_pole_top(
+    struct MarioState* mario
+);
+bool vr_hand_interaction_is_physical_surface_climb_active(
+    struct MarioState* mario
+);
 bool vr_hand_interaction_apply_player_anchor(
     struct MarioState* mario
 );
@@ -25,6 +44,10 @@ bool vr_hand_interaction_blocks_native_held_object_release(
     struct MarioState* mario
 );
 bool vr_hand_interaction_get_held_object_position(
+    struct Object* object,
+    Vec3f position
+);
+bool vr_hand_interaction_get_late_held_object_position(
     struct Object* object,
     Vec3f position
 );

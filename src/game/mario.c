@@ -35,6 +35,7 @@
 #include "object_list_processor.h"
 #include "print.h"
 #include "rendering_graph_node.h"
+#include "vr_hand_interaction.h"
 #include "save_file.h"
 #include "sound_init.h"
 #include "rumble_init.h"
@@ -51,15 +52,101 @@
 #define MAX_HANG_PREVENTION 64
 #define VR_FIRST_PERSON_FORWARD_STEER_LIMIT 0x4000
 #define VR_FIRST_PERSON_BACKPEDAL_SIDE_LIMIT 0x4000
-#define VR_FIRST_PERSON_BACKPEDAL_GRACE_FRAMES 120U
+#define VR_FIRST_PERSON_FORWARD_TO_BACK_BUFFER_FRAMES 18U
+#define VR_FIRST_PERSON_SIDE_FLIP_PRIME_RATIO 0.40f
+#define VR_FIRST_PERSON_FORWARD_REVERSAL_LATERAL_LIMIT 0.35f
+#define VR_FIRST_PERSON_LATERAL_REVERSAL_FRAMES 16U
+#define VR_FIRST_PERSON_LATERAL_AXIS_RATIO 0.45f
+#define VR_FIRST_PERSON_LATERAL_FORWARD_BAND 0.55f
+#define VR_FIRST_PERSON_LATERAL_REQUEST_FRAMES 16U
 #define VR_FIRST_PERSON_BACKPEDAL_ENTER_RATIO -0.08f
 #define VR_FIRST_PERSON_BACKPEDAL_EXIT_RATIO   0.08f
 #define VR_FIRST_PERSON_SIDE_FLIP_MIN_SPEED 6.0f
+#define VR_FIRST_PERSON_GROUND_SPEED_LIMIT 48.0f
 
 static bool sVrBackpedalRequested = false;
 static bool sVrBackpedalGraceActive = false;
+static bool sVrAssistedSkidActive = false;
+static bool sVrForwardSideFlipPrimed = false;
 static bool sVrForwardRecoveryActive = false;
-static u32 sVrBackpedalGraceEndFrame = 0;
+static bool sVrLateralSkidActive = false;
+static s8 sVrLateralSideFlipPrimeSign = 0;
+static u8 sVrBackpedalGraceTicks = 0;
+static u8 sVrForwardSideFlipPrimeTicks = 0;
+static u8 sVrLateralSideFlipPrimeTicks = 0;
+static u8 sVrLateralSideFlipRequestTicks = 0;
+static struct Object *sVrTwirlTornado = NULL;
+
+static void vr_update_twirl_tornado_effect(struct MarioState *m) {
+    if (m == NULL || m->playerIndex != 0) {
+        return;
+    }
+
+    const bool twirling =
+        vr_is_active() &&
+        configVrTwirlTornadoEffect &&
+        (m->action == ACT_TWIRLING ||
+         m->action == ACT_TORNADO_TWIRLING);
+
+    if (!twirling) {
+        if (sVrTwirlTornado != NULL &&
+            sVrTwirlTornado->activeFlags != ACTIVE_FLAG_DEACTIVATED &&
+            sVrTwirlTornado->behavior ==
+                segmented_to_virtual(bhvStaticObject)) {
+            obj_mark_for_deletion(sVrTwirlTornado);
+        }
+        sVrTwirlTornado = NULL;
+        return;
+    }
+
+    if (sVrTwirlTornado == NULL ||
+        sVrTwirlTornado->activeFlags == ACTIVE_FLAG_DEACTIVATED ||
+        sVrTwirlTornado->behavior !=
+            segmented_to_virtual(bhvStaticObject) ||
+        sVrTwirlTornado->parentObj != m->marioObj) {
+        sVrTwirlTornado = spawn_object(
+            m->marioObj,
+            MODEL_VR_TWIRL_TORNADO,
+            bhvStaticObject
+        );
+        if (sVrTwirlTornado == NULL) {
+            return;
+        }
+        sVrTwirlTornado->oFaceAngleYaw = 0;
+        sVrTwirlTornado->oInteractType = 0;
+        sVrTwirlTornado->oIntangibleTimer = -1;
+    }
+
+    const unsigned int character =
+        (m->character != NULL && m->character->type < CT_MAX)
+            ? m->character->type
+            : CT_MARIO;
+    const f32 characterScale =
+        (f32)config_vr_head_attachment_height_for_character(character) /
+        (f32)VR_HEAD_ATTACHMENT_HEIGHT_MARIO;
+
+    Vec3f headsetPosition;
+    const bool headsetPositionValid =
+        vr_get_stabilized_headset_world_position(
+            headsetPosition,
+            false
+        );
+
+    // Keep the visual shell directly beneath the player's tracked head in
+    // X/Z, while its base remains planted at Mario's actual foot height.
+    // Falling back to Mario's root preserves the effect during brief tracking
+    // loss and in camera modes without a stabilized first-person head sample.
+    sVrTwirlTornado->oPosX = headsetPositionValid
+        ? headsetPosition[0]
+        : m->pos[0];
+    sVrTwirlTornado->oPosY = m->pos[1];
+    sVrTwirlTornado->oPosZ = headsetPositionValid
+        ? headsetPosition[2]
+        : m->pos[2];
+    sVrTwirlTornado->oFaceAngleYaw += 0x1800;
+    obj_scale(sVrTwirlTornado, 0.0315f * characterScale);
+    obj_update_gfx_pos_and_angle(sVrTwirlTornado);
+}
 
 static bool vr_get_first_person_raw_head_yaw_from_rotation(
     const float rotation[4],
@@ -97,15 +184,56 @@ static bool vr_get_first_person_raw_head_yaw(s16* yaw) {
         );
 }
 
-static s16 vr_first_person_head_yaw_offset(void) {
+static bool vr_get_first_person_facing_rotation(
+    float rotation[4]
+) {
+    if (rotation == NULL) {
+        return false;
+    }
+
+    unsigned int source = configVrFacingSource;
+    if (source == VR_FACING_SOURCE_LEFT_CONTROLLER ||
+        source == VR_FACING_SOURCE_RIGHT_CONTROLLER) {
+        const u32 hand = source == VR_FACING_SOURCE_LEFT_CONTROLLER
+            ? VR_CONTROLLER_LEFT
+            : VR_CONTROLLER_RIGHT;
+        struct VrControllerState state = { 0 };
+        if (vr_get_controller_state(hand, &state)) {
+            // Aim poses are standardized by OpenXR for pointing. Fall back
+            // to the grip pose only on runtimes that do not expose aim.
+            const float* sourceRotation = state.aimPoseValid
+                ? state.aimRotation
+                : (state.gripPoseValid ? state.gripRotation : NULL);
+            if (sourceRotation != NULL) {
+                memcpy(rotation, sourceRotation, sizeof(state.aimRotation));
+                return true;
+            }
+        }
+    }
+
+    // Headset is both the default and a safe fallback if the selected hand
+    // temporarily loses tracking or motion-controller input is disabled.
+    return vr_get_head_rotation(rotation);
+}
+
+static bool vr_get_first_person_raw_facing_yaw(s16* yaw) {
+    float rotation[4] = { 0 };
+
+    return vr_get_first_person_facing_rotation(rotation) &&
+        vr_get_first_person_raw_head_yaw_from_rotation(
+            rotation,
+            yaw
+        );
+}
+
+static s16 vr_first_person_facing_yaw_offset(void) {
     s16 rawYaw = 0;
-    if (!vr_get_first_person_raw_head_yaw(&rawYaw)) {
+    if (!vr_get_first_person_raw_facing_yaw(&rawYaw)) {
         return 0;
     }
-    // OpenXR already reports rotation relative to the session/recentered
-    // tracking origin. Zeroing it a second time on each level transition made
-    // whichever direction the player happened to look during loading become
-    // the new body-forward direction.
+    // Headset and controller poses are both reported relative to the same
+    // recentered OpenXR origin. Do not zero the selected source again on a
+    // level transition; doing so would redefine forward during loading.
     return rawYaw;
 }
 
@@ -137,6 +265,13 @@ static bool vr_first_person_locomotion_available(
         !configVrOriginalMarioMovement;
 }
 
+bool vr_first_person_movement_overhaul_active(
+    struct MarioState* m
+) {
+    (void)m;
+    return false;
+}
+
 static bool vr_first_person_backpedal_requested(
     struct MarioState* m
 ) {
@@ -144,14 +279,247 @@ static bool vr_first_person_backpedal_requested(
         sVrBackpedalRequested;
 }
 
+static bool vr_first_person_skid_transition_action(u32 action) {
+    switch (action) {
+        case ACT_WALKING:
+        case ACT_TURNING_AROUND:
+        case ACT_FINISH_TURNING_AROUND:
+        case ACT_BRAKING:
+        case ACT_DECELERATING:
+        case ACT_SIDE_FLIP_LAND:
+        case ACT_SIDE_FLIP_LAND_STOP:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool vr_first_person_skid_landing_action(u32 action) {
+    return action == ACT_SIDE_FLIP_LAND ||
+        action == ACT_SIDE_FLIP_LAND_STOP;
+}
+
+static void vr_reset_first_person_lateral_reversal(void) {
+    sVrLateralSideFlipPrimeSign = 0;
+    sVrLateralSideFlipPrimeTicks = 0;
+    sVrLateralSideFlipRequestTicks = 0;
+}
+
+static void vr_update_first_person_lateral_reversal(
+    struct MarioState* m
+) {
+    if (sVrLateralSideFlipPrimeTicks > 0) {
+        sVrLateralSideFlipPrimeTicks--;
+    }
+    if (sVrLateralSideFlipPrimeTicks == 0) {
+        sVrLateralSideFlipPrimeSign = 0;
+    }
+    if (sVrLateralSideFlipRequestTicks > 0) {
+        sVrLateralSideFlipRequestTicks--;
+    }
+
+    if (!vr_first_person_movement_overhaul_active(m) ||
+        !vr_first_person_skid_transition_action(m->action)) {
+        sVrLateralSkidActive = false;
+        vr_reset_first_person_lateral_reversal();
+        return;
+    }
+
+    if (m->controller->stickMag <= 0.0f) {
+        // Preserve the prime briefly across the neutral samples produced by
+        // a real stick during a quick left/right reversal.
+        return;
+    }
+
+    const f32 forwardAxis =
+        m->controller->stickY / m->controller->stickMag;
+    const f32 lateralAxis =
+        m->controller->stickX / m->controller->stickMag;
+
+    // A circular stick motion necessarily passes through a strong forward or
+    // rear sector. Clear the lateral prime there so circling the stick cannot
+    // accidentally enter ACT_TURNING_AROUND and stop Mario at east or west.
+    if (fabsf(forwardAxis) >
+        VR_FIRST_PERSON_LATERAL_FORWARD_BAND) {
+        vr_reset_first_person_lateral_reversal();
+        return;
+    }
+
+    if (fabsf(lateralAxis) <
+        VR_FIRST_PERSON_LATERAL_AXIS_RATIO) {
+        return;
+    }
+
+    const s8 lateralSign = lateralAxis > 0.0f ? 1 : -1;
+    if (sVrLateralSideFlipPrimeSign != 0 &&
+        lateralSign != sVrLateralSideFlipPrimeSign &&
+        sVrLateralSideFlipPrimeTicks > 0 &&
+        fabsf(m->forwardVel) >=
+            VR_FIRST_PERSON_SIDE_FLIP_MIN_SPEED) {
+        sVrLateralSideFlipRequestTicks =
+            VR_FIRST_PERSON_LATERAL_REQUEST_FRAMES;
+        sVrLateralSkidActive = true;
+        sVrLateralSideFlipPrimeSign = 0;
+        sVrLateralSideFlipPrimeTicks = 0;
+        return;
+    }
+
+    if (sVrLateralSideFlipRequestTicks == 0) {
+        sVrLateralSideFlipPrimeSign = lateralSign;
+        sVrLateralSideFlipPrimeTicks =
+            VR_FIRST_PERSON_LATERAL_REVERSAL_FRAMES;
+    }
+}
+
+static void vr_clamp_first_person_horizontal_vector(
+    f32* velocityX,
+    f32* velocityZ
+) {
+    if (velocityX == NULL || velocityZ == NULL) {
+        return;
+    }
+
+    if (!isfinite(*velocityX) || !isfinite(*velocityZ)) {
+        *velocityX = 0.0f;
+        *velocityZ = 0.0f;
+        return;
+    }
+
+    const f32 speedSquared =
+        *velocityX * *velocityX +
+        *velocityZ * *velocityZ;
+    const f32 speedLimitSquared =
+        VR_FIRST_PERSON_GROUND_SPEED_LIMIT *
+        VR_FIRST_PERSON_GROUND_SPEED_LIMIT;
+    if (speedSquared > speedLimitSquared) {
+        const f32 scale =
+            VR_FIRST_PERSON_GROUND_SPEED_LIMIT /
+            sqrtf(speedSquared);
+        *velocityX *= scale;
+        *velocityZ *= scale;
+    }
+}
+
+static void vr_stabilize_first_person_skid_speed(
+    struct MarioState* m
+) {
+    if (!vr_first_person_locomotion_available(m) ||
+        !vr_first_person_skid_transition_action(m->action)) {
+        return;
+    }
+
+    const bool landingAction =
+        vr_first_person_skid_landing_action(m->action);
+    const bool invalidHorizontalVector =
+        !isfinite(m->vel[0]) ||
+        !isfinite(m->vel[2]) ||
+        !isfinite(m->slideVelX) ||
+        !isfinite(m->slideVelZ);
+
+    if (vr_first_person_movement_overhaul_active(m)) {
+        // Movement Overhaul deliberately separates Mario's body yaw from his
+        // world-space travel vector. Never repair that valid separation by
+        // calling mario_set_forward_vel(), because that function rebuilds the
+        // vector from faceAngle and was reintroducing the circular-stick stop.
+        if (invalidHorizontalVector) {
+            m->vel[0] = 0.0f;
+            m->vel[2] = 0.0f;
+            m->slideVelX = 0.0f;
+            m->slideVelZ = 0.0f;
+        } else {
+            vr_clamp_first_person_horizontal_vector(&m->vel[0], &m->vel[2]);
+            vr_clamp_first_person_horizontal_vector(
+                &m->slideVelX,
+                &m->slideVelZ
+            );
+        }
+        if (!isfinite(m->forwardVel)) {
+            m->forwardVel = 0.0f;
+        } else {
+            m->forwardVel = clamp(
+                m->forwardVel,
+                -VR_FIRST_PERSON_GROUND_SPEED_LIMIT,
+                VR_FIRST_PERSON_GROUND_SPEED_LIMIT
+            );
+        }
+        return;
+    }
+
+    const f32 previousSpeed = m->forwardVel;
+    const bool invalidForwardSpeed = !isfinite(previousSpeed);
+    if (invalidForwardSpeed) {
+        m->forwardVel = 0.0f;
+    } else {
+        m->forwardVel = clamp(
+            previousSpeed,
+            -VR_FIRST_PERSON_GROUND_SPEED_LIMIT,
+            VR_FIRST_PERSON_GROUND_SPEED_LIMIT
+        );
+    }
+
+    const bool assistedTransitionActive =
+        sVrBackpedalRequested ||
+        sVrBackpedalGraceActive ||
+        sVrForwardSideFlipPrimed ||
+        sVrForwardRecoveryActive;
+    const f32 forwardDot =
+        m->vel[0] * sins(m->faceAngle[1]) +
+        m->vel[2] * coss(m->faceAngle[1]);
+    const bool vectorHasOppositeSign =
+        isfinite(forwardDot) &&
+        fabsf(m->forwardVel) > 0.01f &&
+        m->forwardVel * forwardDot < -0.01f;
+
+    if (invalidForwardSpeed ||
+        invalidHorizontalVector ||
+        (!landingAction &&
+         (m->forwardVel != previousSpeed ||
+          assistedTransitionActive ||
+          vectorHasOppositeSign))) {
+        // The custom skid changes both Mario's facing direction and the sign
+        // of forwardVel. Rebuild every authoritative assisted-ground vector,
+        // not just an out-of-range scalar, so stale slide/velocity components
+        // cannot survive an action handoff and launch Mario across the floor.
+        mario_set_forward_vel(m, m->forwardVel);
+        if (m->forwardVel != previousSpeed) {
+            sVrForwardRecoveryActive = false;
+        }
+        return;
+    }
+
+    // Landing may intentionally rotate Mario without rotating his existing
+    // momentum. Preserve that direction, but still reject corrupt or runaway
+    // horizontal vector magnitudes in both movement representations.
+    vr_clamp_first_person_horizontal_vector(
+        &m->vel[0],
+        &m->vel[2]
+    );
+    vr_clamp_first_person_horizontal_vector(
+        &m->slideVelX,
+        &m->slideVelZ
+    );
+}
+
 static void vr_update_first_person_backpedal_state(
     struct MarioState* m
 ) {
+    // These are gameplay-tick windows, not rendered-frame windows. Using
+    // gGlobalTimer made the same nominal window several times shorter on a
+    // 90/120 Hz headset than at the engine's 30 Hz simulation rate.
+    if (sVrBackpedalGraceTicks > 0) {
+        sVrBackpedalGraceTicks--;
+    }
     if (!vr_first_person_locomotion_available(m) ||
         m->controller->stickMag <= 0.0f) {
         sVrBackpedalRequested = false;
         sVrBackpedalGraceActive = false;
+        sVrAssistedSkidActive = false;
+        sVrForwardSideFlipPrimed = false;
         sVrForwardRecoveryActive = false;
+        sVrLateralSkidActive = false;
+        sVrBackpedalGraceTicks = 0;
+        sVrForwardSideFlipPrimeTicks = 0;
+        vr_reset_first_person_lateral_reversal();
         return;
     }
 
@@ -159,7 +527,6 @@ static void vr_update_first_person_backpedal_state(
     const f32 forwardAxis =
         m->controller->stickY /
         m->controller->stickMag;
-
     // Classify the stick by normalized direction rather than a fixed raw-Y
     // value. Partial diagonal deflections now register as reliably as a fully
     // tilted stick, while separate enter/exit angles still reject axis noise.
@@ -177,16 +544,16 @@ static void vr_update_first_person_backpedal_state(
         sVrBackpedalRequested &&
         m->action == ACT_WALKING &&
         m->forwardVel >= VR_FIRST_PERSON_SIDE_FLIP_MIN_SPEED) {
-        // Preserve Mario's native skid/turnaround action long enough for its
-        // side-flip input. If the player keeps holding backward, locomotion
-        // switches directly to the reverse jog when this window expires.
         sVrBackpedalGraceActive = true;
-        sVrBackpedalGraceEndFrame =
-            gGlobalTimer + VR_FIRST_PERSON_BACKPEDAL_GRACE_FRAMES;
+        sVrAssistedSkidActive = false;
+        sVrBackpedalGraceTicks =
+            VR_FIRST_PERSON_FORWARD_TO_BACK_BUFFER_FRAMES;
     }
 
     if (wasRequested && !sVrBackpedalRequested) {
         sVrBackpedalGraceActive = false;
+        sVrAssistedSkidActive = false;
+        sVrBackpedalGraceTicks = 0;
         sVrForwardRecoveryActive =
             m->action == ACT_WALKING &&
             m->forwardVel < 0.0f;
@@ -195,9 +562,33 @@ static void vr_update_first_person_backpedal_state(
     }
 
     if (m->action == ACT_SIDE_FLIP ||
-        (s32)(gGlobalTimer - sVrBackpedalGraceEndFrame) >= 0) {
+        sVrBackpedalGraceTicks == 0) {
         sVrBackpedalGraceActive = false;
+        sVrAssistedSkidActive = false;
+        sVrBackpedalGraceTicks = 0;
     }
+}
+
+bool vr_first_person_lateral_side_flip_requested(
+    struct MarioState* m
+) {
+    return vr_first_person_movement_overhaul_active(m) &&
+        sVrLateralSideFlipRequestTicks > 0;
+}
+
+void vr_consume_first_person_lateral_side_flip(void) {
+    sVrLateralSkidActive = false;
+    vr_reset_first_person_lateral_reversal();
+}
+
+bool vr_first_person_lateral_skid_active(struct MarioState* m) {
+    return vr_first_person_movement_overhaul_active(m) &&
+        sVrLateralSkidActive;
+}
+
+void vr_finish_first_person_lateral_skid(void) {
+    sVrLateralSkidActive = false;
+    vr_reset_first_person_lateral_reversal();
 }
 
 bool vr_first_person_backpedal_grace_active(
@@ -205,6 +596,23 @@ bool vr_first_person_backpedal_grace_active(
 ) {
     return vr_first_person_backpedal_requested(m) &&
         sVrBackpedalGraceActive;
+}
+
+bool vr_first_person_assisted_skid_active(struct MarioState* m) {
+    (void)m;
+    return false;
+}
+
+void vr_finish_first_person_assisted_skid(void) {
+    // This is a one-way phase latch. The held backward stick cannot re-arm it;
+    // a new skid is only armed after the stick first leaves the back region.
+    sVrAssistedSkidActive = false;
+    if (sVrBackpedalGraceActive) {
+        // Count the slightly tighter post-skid jump opportunity from the
+        // beginning of actual reverse motion, not from the visible skid.
+        sVrBackpedalGraceTicks =
+            VR_FIRST_PERSON_FORWARD_TO_BACK_BUFFER_FRAMES;
+    }
 }
 
 bool vr_first_person_side_flip_ready(struct MarioState* m) {
@@ -226,10 +634,9 @@ bool vr_first_person_backpedal_active(struct MarioState* m) {
         return false;
     }
 
-    // The grace timer controls side-flip eligibility, not the entire reverse
-    // movement state. Suppress backpedaling only while entering or actively
-    // playing Mario's real skid; once that skid ends, the reverse jog begins
-    // even if some of the 120-frame side-flip window remains.
+    // Side-flip eligibility and the visible skid are separate states. Once the
+    // bounded skid explicitly finishes, reverse movement starts immediately
+    // even though the jump window can remain open.
     return !(sVrBackpedalGraceActive &&
         ((m->action == ACT_WALKING &&
           m->forwardVel >= VR_FIRST_PERSON_SIDE_FLIP_MIN_SPEED) ||
@@ -281,7 +688,7 @@ static s16 vr_get_first_person_aim_yaw_from_head_yaw(
 
 s16 vr_get_first_person_view_yaw(void) {
     return vr_get_first_person_view_yaw_from_head_yaw(
-        vr_first_person_head_yaw_offset()
+        vr_first_person_facing_yaw_offset()
     );
 }
 
@@ -297,7 +704,9 @@ static bool vr_get_first_person_direction(
         m->playerIndex != 0 ||
         !vr_is_active() ||
         configVrCameraMode != VR_CAMERA_MODE_FIRST_PERSON ||
-        !vr_get_head_rotation(rotation)) {
+        !(applyMovementCalibration
+            ? vr_get_first_person_facing_rotation(rotation)
+            : vr_get_head_rotation(rotation))) {
         return false;
     }
 
@@ -351,6 +760,69 @@ bool vr_get_first_person_aim_direction(
     Vec3f direction
 ) {
     return vr_get_first_person_direction(m, direction, false);
+}
+
+static bool vr_is_normal_jump_landing_action(u32 action) {
+    switch (action) {
+        case ACT_JUMP_LAND:
+        case ACT_JUMP_LAND_STOP:
+        case ACT_DOUBLE_JUMP_LAND:
+        case ACT_DOUBLE_JUMP_LAND_STOP:
+        case ACT_TRIPLE_JUMP_LAND:
+        case ACT_TRIPLE_JUMP_LAND_STOP:
+        case ACT_BACKFLIP_LAND:
+        case ACT_BACKFLIP_LAND_STOP:
+        case ACT_SIDE_FLIP_LAND:
+        case ACT_SIDE_FLIP_LAND_STOP:
+        case ACT_LONG_JUMP_LAND:
+        case ACT_LONG_JUMP_LAND_STOP:
+        case ACT_FREEFALL_LAND:
+        case ACT_FREEFALL_LAND_STOP:
+        case ACT_HOLD_JUMP_LAND:
+        case ACT_HOLD_JUMP_LAND_STOP:
+        case ACT_HOLD_FREEFALL_LAND:
+        case ACT_HOLD_FREEFALL_LAND_STOP:
+        case ACT_QUICKSAND_JUMP_LAND:
+        case ACT_HOLD_QUICKSAND_JUMP_LAND:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static void vr_turn_toward_headset_on_jump_landing(
+    struct MarioState* m,
+    u32 landingAction
+) {
+    Vec3f headsetDirection;
+
+    if (m == NULL ||
+        !configVrTurnDuringJumps ||
+        !(m->action & ACT_FLAG_AIR) ||
+        !vr_is_normal_jump_landing_action(landingAction) ||
+        !vr_get_first_person_aim_direction(m, headsetDirection)) {
+        return;
+    }
+
+    const f32 horizontalLengthSquared =
+        headsetDirection[0] * headsetDirection[0] +
+        headsetDirection[2] * headsetDirection[2];
+    if (horizontalLengthSquared <= 0.0001f) {
+        return;
+    }
+
+    const s16 headsetYaw = atan2s(
+        headsetDirection[2],
+        headsetDirection[0]
+    );
+
+    // Only change the direction Mario faces. In particular, do not call
+    // mario_set_forward_vel here: the horizontal velocity vector, scalar
+    // speed, landing timers, and jump-combo state must survive unchanged.
+    // The next chained jump will begin from this new heading while the
+    // just-completed jump retains its exact landing momentum.
+    m->faceAngle[1] = headsetYaw;
+    m->intendedYaw = headsetYaw;
 }
 
 u32 unused80339F10;
@@ -1303,8 +1775,21 @@ static u32 set_mario_action_airborne(struct MarioState *m, u32 action, u32 actio
 
         case ACT_SIDE_FLIP:
             set_mario_y_vel_based_on_fspeed(m, 62.0f, 0.0f);
-            m->forwardVel = 8.0f;
-            m->faceAngle[1] = m->intendedYaw;
+            if (vr_first_person_movement_overhaul_active(m)) {
+                const s16 travelYaw = m->intendedYaw;
+                m->faceAngle[1] = vr_get_first_person_view_yaw();
+                m->forwardVel = 8.0f;
+                m->slideYaw = travelYaw;
+                m->vel[0] = m->slideVelX =
+                    m->forwardVel * sins(travelYaw);
+                m->vel[2] = m->slideVelZ =
+                    m->forwardVel * coss(travelYaw);
+            } else {
+                m->faceAngle[1] = m->intendedYaw;
+                // Changing the side-flip facing angle without rebuilding the
+                // horizontal vectors can carry a stale skid vector into the jump.
+                mario_set_forward_vel(m, 8.0f);
+            }
             break;
 
         case ACT_STEEP_JUMP:
@@ -1493,6 +1978,8 @@ u32 set_mario_action(struct MarioState *m, u32 action, u32 actionArg) {
             action = set_mario_action_cutscene(m, action, actionArg);
             break;
     }
+
+    vr_turn_toward_headset_on_jump_landing(m, action);
 
     // Resets the sound played flags, meaning Mario can play those sound types again.
     m->flags &= ~(MARIO_ACTION_SOUND_PLAYED | MARIO_MARIO_SOUND_PLAYED);
@@ -1861,7 +2348,6 @@ void update_mario_joystick_inputs(struct MarioState *m) {
                     const f32 curvedLateralInput =
                         lateralInput *
                         lateralMagnitude *
-                        lateralMagnitude *
                         lateralMagnitude;
                     const s16 backpedalSteer = (s16)roundf(
                         curvedLateralInput *
@@ -1869,10 +2355,12 @@ void update_mario_joystick_inputs(struct MarioState *m) {
                     );
 
                     // Meet the full 90-degree side direction continuously at
-                    // the front/rear boundary, then use a quartic curve to
+                    // the front/rear boundary, then use a cubic curve to
                     // settle quickly toward mostly straight backpedaling.
-                    // A normal down-left/down-right diagonal remains roughly
-                    // 22.5 degrees off backward instead of becoming a strafe.
+                    // A normal down-left/down-right diagonal reaches roughly
+                    // 32 degrees off backward. This slightly wider reverse
+                    // steering range removes the weak lateral/dead feeling
+                    // without turning diagonal backpedaling into a full strafe.
                     m->intendedYaw =
                         viewYaw + 0x8000 + backpedalSteer;
                 } else {
@@ -1901,7 +2389,7 @@ void update_mario_joystick_inputs(struct MarioState *m) {
                 // Preserve the original First Person Mario movement path
                 // when the player explicitly selects it.
                 m->intendedYaw += compressedStickYaw - stickYaw;
-                m->intendedYaw += vr_first_person_head_yaw_offset();
+                m->intendedYaw += vr_first_person_facing_yaw_offset();
                 m->intendedYaw +=
                     vr_get_first_person_action_turn_yaw();
 
@@ -1913,7 +2401,27 @@ void update_mario_joystick_inputs(struct MarioState *m) {
         }
         m->input |= INPUT_NONZERO_ANALOG;
     } else {
-        m->intendedYaw = m->faceAngle[1];
+        const f32 horizontalSpeedSquared =
+            m->vel[0] * m->vel[0] +
+            m->vel[2] * m->vel[2];
+        const bool stableVrStand =
+            m->playerIndex == 0 &&
+            vr_is_active() &&
+            configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
+            (m->action & ACT_GROUP_MASK) == ACT_GROUP_STATIONARY &&
+            (m->action & (ACT_FLAG_INTANGIBLE |
+                          ACT_FLAG_SWIMMING |
+                          ACT_FLAG_ON_POLE |
+                          ACT_FLAG_HANGING)) == 0 &&
+            fabsf(m->forwardVel) <= 0.5f &&
+            horizontalSpeedSquared <= 0.25f;
+        if (stableVrStand) {
+            const s16 viewYaw = vr_get_first_person_view_yaw();
+            m->faceAngle[1] = viewYaw;
+            m->intendedYaw = viewYaw;
+        } else {
+            m->intendedYaw = m->faceAngle[1];
+        }
     }
 }
 
@@ -2540,6 +3048,8 @@ s32 execute_mario_action(UNUSED struct Object *o) {
         update_mario_health(gMarioState);
         update_mario_info_for_cam(gMarioState);
         mario_update_hitbox_and_cap_model(gMarioState);
+        vr_hand_interaction_update_headset_collider(gMarioState);
+        vr_update_twirl_tornado_effect(gMarioState);
 
         // Both of the wind handling portions play wind audio only in
         // non-Japanese releases.

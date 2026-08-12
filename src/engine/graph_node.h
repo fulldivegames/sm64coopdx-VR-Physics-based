@@ -135,6 +135,7 @@ struct DisplayListNode
     struct DisplayListNode *next;
     u8 usingCamSpace;
     u8 billboard;
+    struct Object *owner;
 };
 
 /** GraphNode that manages the 8 top-level display lists that will be drawn

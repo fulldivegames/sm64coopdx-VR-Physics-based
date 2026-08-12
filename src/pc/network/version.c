@@ -16,6 +16,10 @@ const char* get_version(void) {
     return sVersionString;
 }
 
+const char* get_vr_version(void) {
+    return SM64COOPDX_VR_VERSION;
+}
+
 #ifdef COMPILE_TIME
 const char* get_version_with_build_date(void) {
     snprintf(

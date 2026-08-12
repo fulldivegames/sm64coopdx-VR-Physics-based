@@ -376,6 +376,7 @@ static const void *sDynosBuiltinActors[] = {
     define_builtin(palm_tree_geo),
     define_builtin(leaves_geo),
     define_builtin(tweester_geo),
+    define_builtin(vr_twirl_tornado_geo),
     define_builtin(ukiki_geo),
     define_builtin(unagi_geo),
     define_builtin(warp_pipe_geo),

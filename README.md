@@ -1,197 +1,180 @@
-# SM64 Co-Op DX VR
+<p align="center">
+  <img src="textures/segment2/custom_coopdx_logo.rgba32.png" alt="SM64 Co-Op DX VR" width="720">
+</p>
 
-An experimental OpenXR VR fork of [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx).
+<p align="center">
+  <a href="https://github.com/fulldivegames/sm64coopdx-VR"><strong>PC VR edition</strong></a>
+  &nbsp;|&nbsp; <strong>Quest standalone edition</strong>
+</p>
 
-Version 0.4.0 improves first-person camera stability, physical object handling, cannon play, desktop capture, and VR performance. It builds on the tracked motion controls and first- and third-person modes introduced in earlier releases. Third Person Mode remains available and works with both the default camera and SM64 Co-Op DX's free camera.
+<h1 align="center">SM64 Co-Op DX VR — Quest Standalone</h1>
+
+<p align="center">
+  Native ARM64/OpenXR VR for Meta Quest. No PC is required after installation.
+</p>
+
+> [!WARNING]
+> This is an active, experimental fan project. The standalone edition has been tested on **Meta Quest 3 only**. It has **not been tested on Quest 2 at all**, and neither edition has been tested across every level, multiplayer situation, ROM hack, or mod combination.
+
+This repository contains the standalone Android/Quest port of [SM64 Co-Op DX VR for PC](https://github.com/fulldivegames/sm64coopdx-VR), derived from [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx). It runs the game natively on the headset through OpenXR and OpenGL ES while retaining the original project's multiplayer foundation, Lua/mod support where compatible, first- and third-person cameras, tracked hands, and physical VR interactions.
+
+## Download and install with SideQuest
+
+The release is a single APK. Players do not need Git, Android Studio, Gradle, ADB commands, or a PC VR streaming application.
+
+### Requirements
+
+- Meta Quest 3 (the only tested standalone headset)
+- Developer Mode enabled for the headset
+- [SideQuest](https://sidequestvr.com/setup-howto) installed on a computer
+- A USB data cable or an already configured SideQuest wireless connection
+- Your own legally obtained, unmodified **Super Mario 64 US `.z64` ROM**
+
+### Install the APK
+
+1. Open this repository's [latest release](https://github.com/fulldivegames/sm64coopdx-VR-Standalone/releases/latest).
+2. Download `SM64-Co-Op-DX-VR-Quest-v0.5.0.apk` under **Assets**.
+3. Connect the Quest to your computer and allow the USB debugging prompt inside the headset.
+4. Open SideQuest and confirm that the headset indicator is connected.
+5. Click **Install APK file from folder** in SideQuest, choose the downloaded APK, and wait for the install-success message.
+6. In the headset, open the App Library, select **Unknown Sources**, and launch **SM64 Co-Op DX VR**.
+7. On first launch, use the Android file picker to select your own unmodified US `.z64` ROM. Placing the ROM in the headset's **Downloads** folder beforehand makes it easy to find.
+8. Stand comfortably, face forward, and use **Settings > VR > Recalibrate Tracking** if the initial height or direction is wrong.
+
+Updates can be installed over the existing app through SideQuest. Keep the same Android application installed if you want its private ROM/configuration data to remain available. Back up important saves before testing a new release.
 
 > [!IMPORTANT]
-> This is an early project, not a finished VR port. It currently targets 64-bit Windows, OpenGL, and OpenXR. Solo hosting is tested; online co-op still needs broader testing. ROM hacks, Lua mods, model packs, and texture packs may work, but compatibility varies.
+> The APK contains no ROM and no Nintendo game assets. Do not upload, bundle, or redistribute a ROM with this project. The app validates the unmodified US ROM before importing it into private application storage.
 
-## Download and play on Windows
-
-Normal players do not need Git, MSYS2, a compiler, or any command-line build tools.
-
-1. Open the [latest release](https://github.com/fulldivegames/sm64coopdx-VR/releases/latest) and download the Windows ZIP.
-2. Extract the entire ZIP to a normal folder. Do not run the game from inside the ZIP.
-3. Start your headset software and make sure the OpenXR runtime you want to use is active.
-4. Launch `SM64-Co-Op-DX-VR.exe`.
-5. On first launch, drag your legally obtained, unmodified **Super Mario 64 US `.z64` ROM** onto the game window when prompted.
-6. Open **Settings > VR**, enable **VR Mode**, and choose a mode under **Camera Settings**.
-
-The validated ROM is remembered in the user-data folder. It should not need to be supplied again on every launch.
-
-> [!IMPORTANT]
-> The release ZIP does not contain a ROM or Nintendo game assets. You must provide your own legally obtained, unmodified US ROM. Never upload a ROM when reporting a problem.
-
-If Windows SmartScreen appears, confirm that the ZIP came from this repository's official release page. This community build is not currently code-signed. Windows Firewall may also ask about network access because SM64 Co-Op DX includes online multiplayer; only allow the networks you intend to use.
-
-### Player requirements
-
-- A 64-bit Windows PC
-- A PC VR headset and controllers with a working OpenXR runtime
-- OpenGL support compatible with the active OpenXR runtime
-- A legally obtained, unmodified Super Mario 64 US ROM
-- Optional: a standard gamepad; all main actions can also be mapped to VR controllers
-
-The current build has been tested with a Meta Quest 3 using Virtual Desktop's OpenXR runtime. Other conformant OpenXR headsets and runtimes may work, but have not all been tested.
-
-## What is included in v0.4.0
-
-- Native stereoscopic rendering through separate left- and right-eye OpenXR swapchains
-- Full 6DoF headset tracking for looking, leaning, and positional movement
-- Third-person and first-person VR camera modes
-- Head-directed first-person walking, swimming, Wing Cap flight, and shell riding
-- Head-directed cannon aiming with automatic entry alignment, firing-cone comfort fade, and directional Mario HUD arrows
-- Smooth horizontal turning with the camera stick
-- Tracked, player-colored floating gloves with hand poses and haptics
-- Physical punches, grabs, throws, dives, crouching, and ground pounds
-- One-handed physical Bowser tail grabbing and hand-driven spin momentum
-- Remappable VR-controller sticks and buttons
-- Optional first-person torso and legs, plus experimental tracked arms
-- Character-specific first-person camera-height settings
-- Automatic tracking recalibration when VR starts and camera/body reset on level changes
-- Adjustable camera, movement, glove, body, HUD, and performance settings
-- Head-locked menus, HUD, text boxes, and Star Select interface
-- First-person camera isolation from tunnels, doors, conversations, and other scripted camera pulls
-- Corrected stereo skybox, lighting, terrain, billboard, and culling behavior
-- Stable live switching between first- and third-person modes
-- Optional complete left-eye desktop mirror for recording or streaming without cropping
-- Startup shader precompilation and a learned shader cache to reduce gameplay stutters
-- Faster shader lookup, billboard processing, controller tracking, and physical-hit detection
-- Improved physical handling for Mips and other supported carryable actors
-- Flat-screen play remains available whenever VR Mode is off
-
-## Camera and movement
-
-### Third Person Mode
-
-Third Person Mode keeps the character visible and supports either the original camera or SM64 Co-Op DX's free camera. Camera distance is adjustable. Neither camera system is required or specifically recommended; use whichever feels better to you.
-
-### First Person Mode
-
-First Person Mode is the default VR camera. The headset controls the view and Mario's forward direction, while the selected camera stick provides smooth horizontal turning.
-
-The default VR locomotion allows normal forward movement and steering up to 90 degrees left or right without making Mario turn his back to the player. Pulling backward produces a steerable reverse jog. Moving forward and then pulling backward preserves a short skid window so a side flip can still be performed. **Experimental > Original Mario Movement** restores Mario's original movement rules.
-
-Swimming, active Wing Cap flight, and turtle-shell riding follow the headset's look direction. Look up or down to change vertical direction while flying or swimming; the normal gameplay buttons still provide swimming strokes and other actions.
-
-Cannons align the virtual view horizontally with the barrel when aiming begins. Move your head to aim and press the normal Jump input to fire. Your head remains free, but the shot stays inside the cannon's original firing limits. Looking outside those limits gradually darkens the view and displays a Mario-style arrow pointing back toward the usable firing cone.
-
-First-person mode removes the local character's head and normal arms so they do not block the view. Player-colored tracked gloves remain visible. The torso and legs can be shown or hidden under **Model Settings**.
-
-## Default VR controller layout
-
-The exact physical button names vary between headset brands. In the menu, **Primary** usually means A/X and **Secondary** usually means B/Y.
+## Default Quest controls
 
 | Action | Default input |
 | --- | --- |
-| Move | Left stick |
-| Smooth turn / camera | Right stick |
-| Jump | Right Primary |
-| Attack / interact | Right Secondary |
+| Move | Left thumbstick |
+| Smooth turn / camera | Right thumbstick |
+| Jump / cannon fire | Right Primary (A) |
+| Attack / interact | Right Secondary (B) |
 | Crouch | Left Trigger |
 | L button | Left stick click |
 | R button | Right stick click |
-| Pause | Left Menu |
-| Form a fist / physical grab | Hold the matching hand grip |
-| Button punching | Off by default; optionally use Right Trigger |
+| Pause | Left Menu button |
+| Close fist / physical grab | Hold that hand's Grip |
+| Optional button punch | Right Trigger; disabled by default |
 
-Open **Settings > VR > Controller Settings** to change either stick and every listed action. Inputs can be disabled individually. A connected gamepad remains usable alongside the VR controllers.
+Open **Settings > VR > Controller Settings** to exchange the movement/camera sticks, remap the listed actions, or disable individual bindings.
 
-## Physical actions
+## How to play in VR
 
-- **Punch:** Hold a grip to close that glove, then make a deliberate punch. The tracked fist is the attack point, so Mario's body does not need to face the target. Punch speed, travel distance, grip strength, and collider length are adjustable.
-- **Grab and throw:** Close either grip while that glove overlaps an object or character the game marks as grabbable, such as a Bob-omb, Mips, or a baby penguin. Keep holding to carry it at your hand. Release gently to drop it, or release during a faster hand movement to throw it.
-- **Dive:** Punch forward with both hands at nearly the same time. In the air this triggers a dive; while running fast enough on the ground it triggers a running dive. Air and ground motion dives can be enabled separately.
-- **Crouch and ground pound:** With **Physical Crouching / Ground Pounds** enabled, lower the headset by roughly one third of your calibrated standing height. Mario stays crouched while you remain below the threshold. Crouching while airborne triggers a ground pound.
-- **Bowser:** Reach either glove to Bowser's tail and close that grip. Move the held hand in a turning arc around your body to build spin speed, then release the grip to throw. The camera stick can also help turn. Bowser spin acceleration and maximum speed are adjustable.
-- **Hoot and moving actors:** Grip a supported physical interaction point to attach to it, then release the grip to let go. This uses the game's existing interaction and networking paths.
+### First person and movement
 
-Physical punches can play Mario's one-two punch voice sequence, and supported interactions provide controller haptics. The optional **Enable Punch Button (Right Trigger)** setting restores a traditional right-trigger punch without changing grip-based physical punching.
+First Person Mode is the default. The headset controls the view and, by default, Mario's forward direction. The stick controls travel while Mario retains his established acceleration, momentum, skids, jumps, and landings. Camera Settings can instead use the left or right controller as the calibrated facing source.
 
-## VR settings guide
+Swimming, Wing Cap flight, shell riding, cannon aiming, and pole dismounts follow the configured look direction. Looking up or down controls vertical swimming and flight. A normal action press is still required for swimming strokes.
 
-| Submenu | What it controls |
+Third Person Mode remains available for players who prefer the original character-focused camera and conventional controls.
+
+### Punching
+
+Hold a Grip to close that glove, then make a deliberate punching motion. The tracked glove is the attack point; Mario's body does not need to face the target. Punch speed, travel distance, grip threshold, and collider length are adjustable under Motion Control Settings.
+
+### Grabbing, carrying, and throwing
+
+Close either Grip while its glove overlaps an object the original game permits Mario to carry, such as a Bob-omb, Mips, or a baby penguin. Keep holding to carry it at the hand. Release gently to drop it, or release while moving the hand to throw it. Taking damage forces the normal game drop even if the Grip remains held.
+
+Normal, Wing, Metal, and Vanish Caps can also be collected by touching them with a tracked glove.
+
+### Motion-controlled diving
+
+Punch both hands forward within the configured timing window. In the air this can trigger a dive; while running fast enough on the ground it can trigger a running dive. Air and ground motion dives have separate switches.
+
+### Physical crouching and ground pounds
+
+Lower the headset below roughly two-thirds of the calibrated standing height to hold Mario's crouch. Crossing that threshold while airborne triggers a ground pound. This option is enabled by default under Immersion.
+
+### Bowser
+
+Reach either glove to Bowser's tail and hold that Grip. Swing the held hand around your body to build spin speed, then release to throw. The camera stick can assist turning, and acceleration/maximum speed are adjustable.
+
+### Physical climbing
+
+Physical climbing is enabled by default, while Mario's standard automatic climbing is disabled by default.
+
+- **Poles and trees:** touch one with a glove and hold Grip. Pull yourself, change anchors with the other hand, or release both hands to fall. Hold the movement stick downward while gripping to slide down. Near the top 3% of a pole/tree—or once the headset is within the top detection window—Jump performs Mario's native top-of-pole flip.
+- **Moving poles:** the player, grip anchor, collision, and visible pole follow the platform together.
+- **Hangable ceilings and monkey bars:** hold Grip before or while jumping into the actual underside, then alternate hands to move. The body is hidden during the physical climb to prevent clipping.
+- **Ledges:** move the headset over a safe ledge and release Grip to finish onto the top. A fast release can swing off toward the configured facing direction.
+- **Climb Any Wall or Ceiling:** the disabled-by-default Cheats option permits close fresh grips on ordinary walls and overhead ceilings. Floors, boxes, cap blocks, and breakable blocks remain excluded.
+
+### Collection gestures
+
+- During a star/key collection screen, hold **Grip + Trigger** on either hand to show Mario's peace-sign glove.
+- During a successful painting/course exit, bring either **Grip + Trigger** hand to the headset or just above it to pull off the cap. Keep holding to carry it; release it to drop it onto geometry before it fades.
+
+## Comfort, immersion, and visual options
+
+All options in **Settings > VR > Immersion** default to enabled:
+
+- Smooth crouch and sinking-surface camera motion
+- Full-view face-stuck blackout with readable stereo text
+- Cannon aim-direction cone, firing lockout, and four directional arrows
+- Head-tracked horizontal 3D positional sound
+- Camera movement with Mario's ledge catch and pull-up animation
+- A light 25%-opacity castle-water-blue filter only while the headset is underwater
+- Side-flip camera follow
+- 180-degree wall-jump camera turning
+- Physical crouching and ground pounds
+
+Painting entries use a short white comfort fade. The optional True First Person and True Diving camera effects remain experimental and can cause motion sickness.
+
+## Settings overview
+
+| Submenu | Main controls |
 | --- | --- |
-| Camera Settings | Camera mode, third-person distance, per-character first-person height, forward/back position, movement-direction calibration, and field of view |
-| Controller Settings | VR input enable, movement and camera sticks, action mappings, and optional trigger punching |
-| Motion Control Settings | Physical punches and grabs, motion dives, punch sound, punch thresholds, collider length, and Bowser spin tuning |
-| Model Settings | First-person torso/legs, torso and leg placement, glove size, rotation, and position |
-| Performance | Headset render scale, desktop mirror on/off, and desktop mirror frame rate |
-| HUD Settings | HUD opacity |
-| Experimental | Side-flip camera follow, 180-degree wall-jump turns, flat first person, True First Person, True Diving, Arms Mode, body visibility during mounted actions, physical crouching, original movement, and reverse speed |
+| Camera Settings | Camera mode, height/position, FOV, facing source, facing calibration, and standalone color controls |
+| Controller Settings | Motion-controller enablement, stick selection, button mappings, and optional trigger punch |
+| Motion Control Settings | Punching, grabbing, climbing, dives, jump turning, hit ranges, and Bowser tuning |
+| Model Settings | Body visibility/placement, feet-only view, glove scale, rotation, and position |
+| Performance | Render scale from 10%-100% (80% default) and standalone performance options |
+| HUD Settings | HUD opacity and corner spread |
+| Immersion | Default-on comfort, audio, camera, underwater, cannon, and physical-crouch options |
+| Effects | Twirl tornado visual effect |
+| Cheats | Climb-any-surface, flying speed, swimming speed, and running speed |
+| Experimental | True First Person, True Diving, Arms Mode, and original movement options |
 
-Every VR submenu includes a **Set to Defaults** button.
+## Standalone-specific notes
 
-Lowering **Render Scale** can improve performance while still filling the headset display. Turning off **Desktop View** removes the spectator mirror and can save additional GPU work. When enabled, the desktop mirror fits the complete left-eye image into the window and may show black bars to preserve the full frame. On startup, the game prebuilds common shaders and stores newly discovered shader definitions in `gfx_shader_cache.txt`; later launches can prepare those shaders before gameplay.
+- Quest color grading uses slightly deeper saturation and contrast than the PC build to reduce the washed-out appearance seen on Quest 3. The Brightness value itself is unchanged.
+- The game keeps Super Mario 64's deterministic 30 Hz gameplay simulation while rendering and tracking at the headset cadence. Physics are not globally accelerated.
+- Render Scale defaults to 80% and can be adjusted from 10% through 100%. Lower it if a demanding level or mod cannot maintain headset refresh. Menus remain full resolution.
+- Multiplayer code remains present, but standalone online co-op has not been comprehensively validated.
+- Large Lua mods, model packs, ROM hacks, and texture packs may exceed standalone memory/performance budgets or rely on desktop-only behavior.
 
-## Current limitations
+## Troubleshooting
 
-- Windows/OpenGL is the only implemented OpenXR graphics path.
-- Motion controls are still under active development and may have action-specific edge cases.
-- **True First Person**, **True Diving**, and **Arms Mode** are experimental. True First Person follows animated body motion and may cause discomfort or motion sickness. True Diving temporarily follows the animated dive pose and may also be uncomfortable.
-- The 3D star models currently do not appear on the Star Select screen in VR. The screen remains usable.
-- Original flat billboard objects, such as some 2D trees, can make their camera-facing rotation more noticeable in VR. True 3D replacement models can improve this.
-- Some levels, actions, Lua mods, character models, texture packs, and ROM hacks may still have camera, visual, or performance problems.
-- Hardware, OpenXR runtime, and online co-op compatibility testing is still limited.
+- **App is missing:** open the App Library's **Unknown Sources** category.
+- **ROM picker rejects the file:** use an unmodified US `.z64` ROM. Other regions and modified ROMs are not accepted.
+- **Wrong height or facing:** use **Settings > VR > Recalibrate Tracking** while standing neutrally and looking forward.
+- **Poor performance:** lower Render Scale, disable expensive mods, and restart the headset after long development/testing sessions.
+- **Controls feel wrong:** reset Controller Settings and Camera Settings, then recalibrate the selected facing source.
+- **Updating fails:** uninstalling removes private app data. Prefer installing the newer APK over the existing package and back up saves first.
 
-When reporting a VR problem, include the headset, OpenXR runtime, GPU, reproduction steps, and the relevant `[VR]` or `[GFX]` console output. Launch from PowerShell with `./SM64-Co-Op-DX-VR.exe --console` to keep the diagnostic console visible.
+## Building from source
 
-## Building from source (developers only)
-
-Players should use the release ZIP. Building is only necessary to modify the source or test unreleased changes.
-
-### Developer requirements
-
-- The normal [SM64 Co-Op DX build prerequisites](https://github.com/coop-deluxe/sm64coopdx)
-- A Windows/MSYS2 MinGW64 build environment
-- Git and GNU Make
-
-After installing the upstream Windows build prerequisites, clone this fork, check out the `vr` branch, and build from an **MSYS2 MinGW64** shell:
-
-```sh
-git clone --branch vr https://github.com/fulldivegames/sm64coopdx-VR.git
-cd sm64coopdx-VR
-make -j
-```
-
-The executable is produced at `build/us_pc/sm64coopdx.exe`.
-
-To create the allow-listed Windows player ZIP after a successful build, run this from PowerShell:
+Player releases should be installed through the APK above. Developers can build from `platform/android` with Android SDK/NDK 27, Java, Gradle, CMake, and Ninja configured:
 
 ```powershell
-.\tools\package-vr-windows.ps1 -Version dev
+cd platform\android
+.\gradlew.bat assembleDebug
 ```
 
-The ZIP is written to `dist/`. The packaging script verifies that no `.z64`, `.n64`, or `.v64` ROM was staged. Nintendo ROMs and game assets must never be committed, uploaded as workflow artifacts, or attached to a release.
+The debug APK is produced under `platform/android/app/build/outputs/apk/debug/`. A ROM must never be added to the repository or APK.
 
-## Planned direction
+## Credits and legal notice
 
-- Physical swimming driven by tracked swimming strokes
-- Optional physical running driven by natural arm swings
-- Physical Wing Cap steering using both hands
-- Two-handed steering while sliding
-- Hand anchoring for wall slides and wall jumps
-- Hand-mounted HUD placement with size, angle, position, and distance controls
-- Further arm IK work, interaction refinement, performance tuning, and compatibility testing
+- [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx) and the Coop Deluxe Team
+- [sm64ex-coop](https://github.com/djoslin0/sm64ex-coop) and its contributors
+- The Super Mario 64 decompilation and PC-port contributors
+- [Khronos OpenXR](https://www.khronos.org/openxr/) and Meta's Android/OpenXR platform components
+- Lua 5.3.5, included under its MIT-style license in `platform/android/third_party/lua-5.3.5/doc/readme.html`
 
-These are goals, not promised release dates.
-
-## Credits and acknowledgements
-
-- [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx) and the Coop Deluxe Team for the multiplayer game and codebase this project forks
-- [sm64ex-coop](https://github.com/djoslin0/sm64ex-coop) and djoslin0 for the project continued by SM64 Co-Op DX
-- The Super Mario 64 decompilation and PC-port contributors whose work underpins the upstream project
-- [Khronos OpenXR](https://www.khronos.org/openxr/) for the cross-platform XR API and redistributable OpenXR loader used by this project
-
-No source code from another SM64 or Zelda VR mod has been incorporated into this release. Additional third-party work will only be bundled when its license or author explicitly permits redistribution, and it will be credited if used.
-
-## Legal and licensing notice
-
-This is an unofficial fan project and is not affiliated with or endorsed by Nintendo, the SM64 Co-Op DX team, Meta, Virtual Desktop, or Khronos. Super Mario and related names, characters, and assets are property of their respective owners.
-
-This fork retains the upstream repository's history and third-party notices. The checkout does not currently contain a single project-wide license file, so do not assume that every file or bundled component is covered by one license. Each dependency and third-party component remains subject to its own terms. Do not redistribute Nintendo ROMs or game assets, and obtain permission before bundling third-party mods or model packs.
-
-## Upstream project
-
-SM64 Co-Op DX is an online multiplayer continuation of sm64ex-coop maintained by the Coop Deluxe Team. For upstream documentation, community information, and non-VR issues, visit the [official SM64 Co-Op DX repository](https://github.com/coop-deluxe/sm64coopdx).
+This is an unofficial fan project and is not affiliated with or endorsed by Nintendo, Meta, the SM64 Co-Op DX team, SideQuest, or Khronos. Super Mario and related names, characters, and assets belong to their respective owners. This repository does not grant permission to redistribute Nintendo ROMs or game assets.

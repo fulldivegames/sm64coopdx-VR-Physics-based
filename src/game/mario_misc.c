@@ -27,6 +27,8 @@
 #include "pc/network/network.h"
 #include "pc/lua/smlua_hooks.h"
 #include "pc/mods/mods.h"
+#include "pc/configfile.h"
+#include "pc/vr/vr.h"
 
 #define TOAD_STAR_1_REQUIREMENT gBehaviorValues.ToadStar1Requirement
 #define TOAD_STAR_2_REQUIREMENT gBehaviorValues.ToadStar2Requirement
@@ -245,6 +247,12 @@ void bhv_unlock_door_star_init(void) {
     gCurrentObject->oUnlockDoorStarYawVel = 0x1000;
     gCurrentObject->oPosX += 30.0f * sins(gMarioState->faceAngle[1] - 0x4000);
     gCurrentObject->oPosY += 160.0f;
+    // Keep the unlock-star presentation at eye level in first-person VR
+    // without changing Mario, the door, the cutscene state, or its timing.
+    if (vr_is_active() &&
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON) {
+        gCurrentObject->oPosY += 120.0f;
+    }
     gCurrentObject->oPosZ += 30.0f * coss(gMarioState->faceAngle[1] - 0x4000);
     gCurrentObject->oMoveAngleYaw = 0x7800;
     obj_scale(gCurrentObject, 0.5f);

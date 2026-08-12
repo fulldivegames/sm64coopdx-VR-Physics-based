@@ -87,8 +87,14 @@ int stop_thread(struct ThreadHandle *handle) {
 
     handle->state = STOPPED;
 
-    // Stop and or cancel the execution of the thread in question.
+    // Bionic intentionally does not implement pthread_cancel. Android worker
+    // loops observe the STOPPED state and are detached here so their resources
+    // are reclaimed when they return.
+#ifdef __ANDROID__
+    return pthread_detach(handle->thread);
+#else
     return pthread_cancel(handle->thread);
+#endif
 }
 
 // Optimally just call init_thread_handle instead.
