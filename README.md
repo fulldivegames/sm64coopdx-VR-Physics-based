@@ -39,7 +39,8 @@ The release is a single APK. Players do not need Git, Android Studio, Gradle, AD
 5. Click **Install APK file from folder** in SideQuest, choose the downloaded APK, and wait for the install-success message.
 6. In the headset, open the App Library, select **Unknown Sources**, and launch **SM64 Co-Op DX VR**.
 7. On first launch, use the Android file picker to select your own unmodified US `.z64` ROM. Placing the ROM in the headset's **Downloads** folder beforehand makes it easy to find.
-8. Stand comfortably, face forward, and use **Settings > VR > Recalibrate Tracking** if the initial height or direction is wrong.
+8. After the ROM finishes importing, the app will likely close. This is expected; simply reopen **SM64 Co-Op DX VR** from **Unknown Sources**.
+9. Stand comfortably, face forward, and use **Settings > VR > Recalibrate Tracking** if the initial height or direction is wrong.
 
 Updates can be installed over the existing app through SideQuest. Keep the same Android application installed if you want its private ROM/configuration data to remain available. Back up important saves before testing a new release.
 
@@ -153,6 +154,7 @@ Painting entries use a short white comfort fade. The optional True First Person 
 
 - **App is missing:** open the App Library's **Unknown Sources** category.
 - **ROM picker rejects the file:** use an unmodified US `.z64` ROM. Other regions and modified ROMs are not accepted.
+- **App closes after importing the ROM:** this is expected on the first import. Reopen the game from **Unknown Sources** and it should load normally.
 - **Wrong height or facing:** use **Settings > VR > Recalibrate Tracking** while standing neutrally and looking forward.
 - **Poor performance:** lower Render Scale, disable expensive mods, and restart the headset after long development/testing sessions.
 - **Controls feel wrong:** reset Controller Settings and Camera Settings, then recalibrate the selected facing source.
