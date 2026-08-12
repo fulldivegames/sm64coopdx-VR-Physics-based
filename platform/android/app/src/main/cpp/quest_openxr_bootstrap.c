@@ -193,10 +193,12 @@ static void handle_app_command(struct android_app *android_app, int32_t command)
             LOGI("Android activity resumed.");
             break;
         case APP_CMD_PAUSE:
+            quest_game_flush_persistent_state();
             app->activity_resumed = false;
             LOGI("Android activity paused.");
             break;
         case APP_CMD_STOP:
+            quest_game_flush_persistent_state();
             app->activity_resumed = false;
             app->exit_requested = true;
             LOGI("Android activity stopped; terminating standalone session.");
@@ -1047,6 +1049,7 @@ static bool poll_openxr_events(QuestApp *app) {
 }
 
 static void destroy_quest_app(QuestApp *app) {
+    quest_game_flush_persistent_state();
     quest_input_shutdown();
     if (app->mario_texture != 0) glDeleteTextures(1, &app->mario_texture);
     if (app->mario_program != 0) glDeleteProgram(app->mario_program);
@@ -1095,6 +1098,9 @@ void android_main(struct android_app *android_app) {
     android_app->userData = &app;
     android_app->onAppCmd = handle_app_command;
     sActiveQuestApp = &app;
+
+    extern void quest_android_set_user_path(const char *path);
+    quest_android_set_user_path(android_app->activity->externalDataPath);
 
     LOGI("Starting Android/Quest game integration test.");
     const bool android_ready = wait_for_android_ready(&app);

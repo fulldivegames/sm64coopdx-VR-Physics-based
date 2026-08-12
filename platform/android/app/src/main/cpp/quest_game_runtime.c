@@ -7,7 +7,9 @@
 
 #include "data/dynos.h"
 #include "game/game_init.h"
+#include "game/level_update.h"
 #include "game/rendering_graph_node.h"
+#include "game/save_file.h"
 #include "pc/configfile.h"
 #include "pc/audio/audio_api.h"
 #include "pc/djui/djui.h"
@@ -58,6 +60,7 @@ extern void patch_djui_interpolated(float delta);
 extern void patch_djui_hud(float delta);
 extern void patch_scroll_targets_interpolated(float delta);
 extern bool gSkipInterpolationTitleScreen;
+extern bool gGameInited;
 extern float gRenderingDelta;
 extern float gFramePercentage;
 extern uint8_t gRenderingInterpolated;
@@ -140,6 +143,20 @@ void quest_game_load_early_config(void) {
     }
 #endif
     sConfigLoaded = true;
+}
+
+void quest_game_flush_persistent_state(void) {
+    if (!sConfigLoaded) return;
+
+    if (gGameInited && gCurrSaveFileNum >= 1
+        && gCurrSaveFileNum <= NUM_SAVE_FILES) {
+        // Star/key collection normally writes immediately. Force the current
+        // slot once more when Android pauses so progress also survives the OS
+        // stopping the NativeActivity without the desktop shutdown path.
+        save_file_do_save(gCurrSaveFileNum - 1, TRUE);
+    }
+    configfile_save(configfile_name());
+    LOGI("Persistent save and settings flushed to %s.", sys_user_path());
 }
 
 unsigned int quest_game_render_scale_percent(void) {

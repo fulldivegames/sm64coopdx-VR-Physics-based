@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
 #include <android/log.h>
 
 #include "pc/platform.h"
@@ -29,7 +30,10 @@ uint32_t mouse_scroll_timestamp;
 float mouse_scroll_x, mouse_scroll_y;
 float gRenderingDelta;
 uint8_t gRenderingInterpolated;
-char gRomFilename[4096] = "/sdcard/Android/data/com.fulldivegames.sm64coopdxvr/files/baserom.us.z64";
+static char sQuestUserPath[4096] =
+    "/sdcard/Android/data/com.fulldivegames.sm64coopdxvr/files";
+char gRomFilename[4096] =
+    "/sdcard/Android/data/com.fulldivegames.sm64coopdxvr/files/baserom.us.z64";
 bool gGameInited;
 bool gGfxInited;
 bool gUpdateMessage;
@@ -61,9 +65,10 @@ static void quest_parse_version(
     const char *value, int *major, int *minor, int *patch);
 
 static void quest_refresh_update_status(void) {
-    FILE *file = fopen(
-        "/sdcard/Android/data/com.fulldivegames.sm64coopdxvr/files/vr-update-status.txt",
-        "rb");
+    char status_path[4096];
+    snprintf(status_path, sizeof(status_path), "%s/vr-update-status.txt",
+             sQuestUserPath);
+    FILE *file = fopen(status_path, "rb");
     if (file == NULL) return;
     char result[16] = { 0 };
     char version[32] = { 0 };
@@ -158,7 +163,17 @@ char *sys_strlwr(char *src) {
     return src;
 }
 int sys_strcasecmp(const char *a, const char *b) { return strcasecmp(a, b); }
-const char *sys_user_path(void) { return "/sdcard/Android/data/com.fulldivegames.sm64coopdxvr/files"; }
+void quest_android_set_user_path(const char *path) {
+    if (path == NULL || path[0] == '\0') return;
+    snprintf(sQuestUserPath, sizeof(sQuestUserPath), "%s", path);
+    mkdir(sQuestUserPath, 0700);
+    snprintf(gRomFilename, sizeof(gRomFilename), "%s/baserom.us.z64",
+             sQuestUserPath);
+    __android_log_print(ANDROID_LOG_INFO, "SM64CoopDXVR",
+                        "Persistent user path: %s", sQuestUserPath);
+}
+
+const char *sys_user_path(void) { return sQuestUserPath; }
 const char *sys_resource_path(void) { return sys_user_path(); }
 const char *sys_exe_path_dir(void) { return sys_user_path(); }
 const char *sys_exe_path_file(void) { return "/proc/self/exe"; }
