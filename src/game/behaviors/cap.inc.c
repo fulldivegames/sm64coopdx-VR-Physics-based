@@ -195,6 +195,44 @@ void bhv_normal_cap_init(void) {
     o->oOpacity = 0xFF;
 }
 
+#define VR_PAINTING_EXIT_HAT_GROUND_FRAMES 150
+#define VR_PAINTING_EXIT_HAT_GROUND_FADE_FRAMES 30
+
+static void vr_painting_exit_hat_loop(void) {
+    o->oInteractType = 0;
+    o->oInteractionSubtype = 0;
+    o->oInteractStatus = 0;
+    o->oIntangibleTimer = -1;
+
+    if (o->oAction == 0) {
+        o->oFaceAngleYaw += 0x400;
+        const s16 collisionFlags = object_step();
+        if (collisionFlags & OBJ_COL_FLAG_GROUNDED) {
+            o->oForwardVel = 0.0f;
+            o->oVelY = 0.0f;
+            o->oFaceAnglePitch = 0;
+            o->oAction = 1;
+        }
+        return;
+    }
+
+    if (o->oTimer < VR_PAINTING_EXIT_HAT_GROUND_FRAMES) {
+        return;
+    }
+
+    const s32 fadeFrame = o->oTimer - VR_PAINTING_EXIT_HAT_GROUND_FRAMES;
+    if (fadeFrame >= VR_PAINTING_EXIT_HAT_GROUND_FADE_FRAMES) {
+        o->activeFlags = ACTIVE_FLAG_DEACTIVATED;
+        return;
+    }
+    o->oOpacity = (u8)clamp(
+        255 - fadeFrame * 255 / VR_PAINTING_EXIT_HAT_GROUND_FADE_FRAMES,
+        0,
+        255
+    );
+    o->oAnimState = 1;
+}
+
 void normal_cap_set_save_flags(void) {
     if (o->oBehParams - 1 != 0) { return; }
 
@@ -236,6 +274,11 @@ void normal_cap_act_0(void) {
 }
 
 void bhv_normal_cap_loop(void) {
+    if (o->oBehParams2ndByte == VR_PAINTING_EXIT_HAT_BEH_PARAM) {
+        vr_painting_exit_hat_loop();
+        return;
+    }
+
     switch (o->oAction) {
         case 0:
             normal_cap_act_0();

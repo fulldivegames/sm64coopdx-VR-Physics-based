@@ -54,8 +54,6 @@ static uint16_t color_combiner_pool_index = 0;
 static uint16_t sColorCombinerBucketHeads[CC_LOOKUP_BUCKET_COUNT] = { 0 };
 static uint16_t sColorCombinerNext[CC_MAX_SHADERS] = { 0 };
 static uint16_t sBuiltInColorCombinerCount = 0;
-static bool sShaderStartupWarmupComplete = false;
-static FILE *sShaderCacheAppendFile = NULL;
 
 static void gfx_pc_precomp_shader_exact(
     uint32_t rgb1,
@@ -402,17 +400,6 @@ static struct ColorCombiner *gfx_lookup_or_create_color_combiner(struct CombineM
     memcpy(&comb->cm, cm, sizeof(struct CombineMode));
     gfx_generate_cc(comb);
     gfx_color_combiner_index_insert(newIndex);
-
-    if (sShaderStartupWarmupComplete &&
-        sShaderCacheAppendFile != NULL) {
-        gfx_shader_cache_write_definition(
-            sShaderCacheAppendFile,
-            &comb->cm
-        );
-        // Shader discovery is infrequent. Flushing this tiny definition now
-        // keeps it available for the next startup even after an abnormal exit.
-        fflush(sShaderCacheAppendFile);
-    }
 
     return prev_combiner = comb;
 }
@@ -2215,12 +2202,6 @@ void gfx_init(struct GfxWindowManagerAPI *wapi, struct GfxRenderingAPI *rapi, co
         loadedCount
     );
 
-    sShaderCacheAppendFile = fopen(
-        fs_get_write_path(GFX_SHADER_CACHE_FILENAME),
-        "a"
-    );
-    sShaderStartupWarmupComplete = true;
-
     gGfxInited = true;
 }
 
@@ -2286,12 +2267,6 @@ void gfx_end_frame(void) {
 }
 
 void gfx_shutdown(void) {
-    sShaderStartupWarmupComplete = false;
-    if (sShaderCacheAppendFile != NULL) {
-        fclose(sShaderCacheAppendFile);
-        sShaderCacheAppendFile = NULL;
-    }
-
     if (color_combiner_pool_size > 0) {
         FILE *shaderCache = fopen(
             fs_get_write_path(GFX_SHADER_CACHE_FILENAME),

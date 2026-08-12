@@ -46,9 +46,15 @@ static Gfx* sBubbleGfxPos;
 static Vtx* sBubbleInternalGfxPos[65 / 5];
 static Vec3s sBubbleGfxCamFrom;
 static Vec3s sBubbleGfxCamTo;
+static Vec3s sBubbleGfxPrevCamFrom;
+static Vec3s sBubbleGfxPrevCamTo;
+static bool sBubbleGfxHistoryValid;
 
 void patch_bubble_particles_before(void) {
     if (sBubbleGfxPos) {
+        vec3s_copy(sBubbleGfxPrevCamFrom, sBubbleGfxCamFrom);
+        vec3s_copy(sBubbleGfxPrevCamTo, sBubbleGfxCamTo);
+        sBubbleGfxHistoryValid = true;
         for (s32 i = 0; i < sBubbleParticleMaxCount; i++) {
             vec3s_set(gEnvFxBuffer[i].prevPos, gEnvFxBuffer[i].xPos, gEnvFxBuffer[i].yPos, gEnvFxBuffer[i].zPos);
         }
@@ -56,9 +62,34 @@ void patch_bubble_particles_before(void) {
     }
 }
 
-void patch_bubble_particles_interpolated(UNUSED f32 delta) {
+void patch_bubble_particles_interpolated(f32 delta) {
     if (sBubbleGfxPos) {
-        envfx_update_bubble_particles_internal(sBubbleGfxMode, NULL, sBubbleGfxCamFrom, sBubbleGfxCamTo, true);
+        Vec3s camFrom;
+        Vec3s camTo;
+        if (!sBubbleGfxHistoryValid) {
+            vec3s_copy(sBubbleGfxPrevCamFrom, sBubbleGfxCamFrom);
+            vec3s_copy(sBubbleGfxPrevCamTo, sBubbleGfxCamTo);
+            sBubbleGfxHistoryValid = true;
+        }
+        for (u32 axis = 0; axis < 3; axis++) {
+            camFrom[axis] = (s16)delta_interpolate_s32(
+                sBubbleGfxPrevCamFrom[axis],
+                sBubbleGfxCamFrom[axis],
+                delta
+            );
+            camTo[axis] = (s16)delta_interpolate_s32(
+                sBubbleGfxPrevCamTo[axis],
+                sBubbleGfxCamTo[axis],
+                delta
+            );
+        }
+        envfx_update_bubble_particles_internal(
+            sBubbleGfxMode,
+            NULL,
+            camFrom,
+            camTo,
+            true
+        );
     }
 }
 
@@ -343,6 +374,7 @@ void envfx_update_jetstream(void) {
  * Analogous to init_snow_particles, but for bubbles.
  */
 s32 envfx_init_bubble(s32 mode) {
+    sBubbleGfxHistoryValid = false;
     s32 i;
 
     switch (mode) {
@@ -526,6 +558,9 @@ Gfx *envfx_update_bubble_particles_internal(s32 mode, UNUSED Vec3s marioPos, Vec
     } else {
         gfxStart = alloc_display_list(((sBubbleParticleMaxCount / 5) * 10 + sBubbleParticleMaxCount + 3) * sizeof(Gfx));
         sBubbleGfxPos = gfxStart;
+        if (sBubbleGfxMode != mode) {
+            sBubbleGfxHistoryValid = false;
+        }
         sBubbleGfxMode = mode;
         vec3s_copy(sBubbleGfxCamFrom, camFrom);
         vec3s_copy(sBubbleGfxCamTo, camTo);

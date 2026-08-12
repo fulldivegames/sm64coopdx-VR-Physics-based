@@ -77,6 +77,9 @@ void djui_three_panel_recalculate_body_size(struct DjuiThreePanel* threePanel) {
         child = child->next;
     }
     if (bodyHeight < 0) { bodyHeight = 0; }
+    body->contentHeight = bodyHeight;
+    body->scrollY = 0.0f;
+    body->lastAutoScrollSelection = NULL;
     djui_three_panel_set_body_size(threePanel, bodyHeight);
 }
 

@@ -757,10 +757,6 @@ int main(int argc, char *argv[]) {
 
     show_update_popup();
 
-    if (can_update_game()) {
-        djui_open_update_panel();
-    }
-
     // initialize network
     if (gCLIOpts.network == NT_CLIENT) {
         network_set_system(NS_SOCKET);

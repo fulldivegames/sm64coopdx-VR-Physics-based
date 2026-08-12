@@ -2,6 +2,11 @@
   <img src="textures/segment2/custom_coopdx_logo.rgba32.png" alt="SM64 Co-Op DX VR" width="720">
 </p>
 
+<p align="center">
+  <strong>PC VR edition</strong> &nbsp;|&nbsp;
+  <a href="https://github.com/fulldivegames/sm64coopdx-VR-Standalone"><strong>Quest standalone edition</strong></a>
+</p>
+
 <h1 align="center">SM64 Co-Op DX VR</h1>
 
 <p align="center">
@@ -9,7 +14,7 @@
 </p>
 
 > [!IMPORTANT]
-> The current public release is **v0.4.0**. The features listed under **Upcoming v0.5.0** are implemented in the development branch but are still being tested. Download links continue to point to the latest verified release until that testing is complete.
+> The current public release is **v0.5.0**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination.
 
 SM64 Co-Op DX VR currently targets 64-bit Windows, OpenGL, and OpenXR. It keeps the original game's flat-screen mode and multiplayer foundation while adding native stereoscopic rendering, 6DoF tracking, VR-aware cameras, remappable motion-controller input, physical interactions, comfort options, and extensive calibration settings.
 
@@ -81,7 +86,7 @@ The lower-left corner of the main menu shows the installed VR version and checks
 
 First Person Mode is the default VR camera. The headset controls the view, and the configured facing source determines Mario's forward direction. The selected camera stick provides smooth horizontal turning without enabling vertical stick camera movement.
 
-The default VR locomotion keeps Mario facing generally forward while allowing normal movement and steering through a wide 180-degree forward arc. Pulling the stick backward produces a steerable reverse jog instead of making Mario turn around and run toward the player. A short forward-to-back skid window preserves Mario's normal side-flip opportunity.
+The default VR locomotion locks Mario's body toward the selected headset or controller facing direction while the stick independently controls his world-space travel direction. Forward, lateral, and backward movement share Mario's normal acceleration and over-speed curve across the complete 360-degree stick circle, while travel direction retains the original gradual steering inertia. Landing and long-jump velocity remain the starting momentum for grounded movement. A deliberate left/right reversal produces a short skid and side-flip window, while a direct forward-to-back flick retains its separate skid window. Traveling around the stick normally cancels both reversal gestures, so an ordinary circle cannot trigger a skid.
 
 The locomotion transition code validates both Mario's scalar speed and horizontal velocity vectors, preventing repeated skid/side-flip transitions from retaining a stale sign or launching Mario across the ground. **Experimental > Original Mario Movement** restores the unmodified movement rules.
 
@@ -162,22 +167,31 @@ Reach a glove to a pole or tree and hold its grip. That hand becomes the anchor,
 
 Hold a grip before or while jumping into a native hangable ceiling, grate, or monkey-bar surface. The game sweeps the tracked hand path and glove footprint so a fast jump or triangle seam is less likely to miss. Once attached, hands become the camera anchor instead of sliding the player through the original canned hanging movement. Hand-over-hand movement is supported.
 
-Mario's temporary interaction collider follows the tracked headset while climbing, allowing nearby coins and pickups to be collected at the player's physical position. The view is kept on the playable side of the grabbed surface. On release, the collider is resolved back to a safe floor/wall/ceiling position to reduce the chance of leaving Mario embedded in geometry.
+Mario's compact temporary object-interaction collider follows the tracked headset while climbing, allowing coins and supported pickups at the player's physical position to register without moving Mario's environment/physics collider. To climb onto a ledge, lift your headset over the ledge and let go of Grip; Mario finishes on top when a safe floor is available. The view is kept on the playable side of the grabbed surface. On other releases, the collider is resolved back to a safe floor/wall/ceiling position to reduce the chance of leaving Mario embedded in geometry.
 
 The torso and legs are hidden automatically during physical climbing; tracked gloves stay visible. **Swing Off While Releasing** converts a sufficiently fast release into a headset-directed jump, while a normal two-hand release simply drops Mario.
 
 ### Climb Any Wall or Ceiling cheat
 
-The disabled-by-default **Cheats > Climb Any Wall or Ceiling** option extends physical gripping to ordinary solid vertical walls and overhead ceiling surfaces. Floors remain excluded. This is a cheat and may bypass intended level routes or encounter unusual modded collision.
+The disabled-by-default **Cheats > Climb Any Wall or Ceiling** option extends physical gripping to ordinary solid vertical walls and overhead ceiling surfaces. Floors remain excluded. This is a cheat and may bypass intended level routes or encounter unusual modded collision. **Flying Speed (%)** ranges from the original 100% speed to 300% and defaults to 100%.
 
 ## Immersion and comfort
 
-The new **Immersion** submenu contains four default-on options:
+The **Immersion** submenu contains these default-on comfort and camera options:
 
 - **Crouch / Sand Camera:** smoothly follows crouching, quicksand depth, and soft-ground actions without changing gameplay collision.
 - **Face-Stuck Blackout:** covers the headset view while Mario's face is stuck in the ground and displays `Face stuck in the ground` using the game's Mario-style font until he escapes.
 - **Cannon Aim Direction Cone:** keeps headset movement free but clamps cannon aim to the original yaw/pitch limits. Firing is blocked while the view is outside the usable cone, the image fades toward black, and four inward-facing Mario-style arrows point back toward the valid region.
 - **Head-Tracked 3D Sound:** calculates world-object sound direction from the first-person HMD position and horizontal facing instead of the desktop camera. UI/global sounds remain centered, and headset pitch/roll do not tilt the virtual ears.
+- **Camera on Body During Climb Up:** follows Mario's native ledge-catch and pull-up height instead of leaving the view floating above the animation.
+- **Underwater Filter:** places a light 25%-opacity castle-water-blue tint over both eyes only while the tracked headset is below the water surface.
+- **Side-Flip Camera Follow:** follows the direction of side-flip momentum.
+- **180 Degree Wall-Jump Camera Turn:** turns the view with supported wall jumps.
+- **Physical Crouching / Ground Pounds:** maps real crouching below the calibrated threshold to crouching, or to a ground pound while airborne.
+
+## Twirl tornado effect
+
+The default-on **Effects > Twirl Tornado Effect** surrounds the selected character with a small, rotating white version of the in-game tornado whenever Mario is in a Shy Guy, Spindrift, or Tweester twirl. It remains centered at the character's feet for the full twirl, scales to roughly 75% of the selected character, and is rendered at 25% transparency. It is visual only and has no collision, damage, wind, or multiplayer authority.
 
 ## Cannons
 
@@ -195,12 +209,13 @@ The headset remains free inside the cannon. With the default Aim Direction Cone 
 | Camera Settings | Camera mode, third-person distance, character-specific first-person height, forward/back placement, headset/left-hand/right-hand facing source, facing calibration, FOV, and brightness |
 | Controller Settings | Motion-controller input, movement/camera stick selection, action mappings, and optional trigger punching |
 | Motion Control Settings | Physical punches, physical grabbing, physical climbing, standard grabbing/climbing, swing release, motion dives, jump turning, punch thresholds, collider length, and Bowser tuning |
-| Model Settings | First-person torso/legs, crawl body hiding, torso/leg placement, glove size, rotation, and position |
+| Model Settings | Body and Hand pages; torso/legs, optional feet-only view, crawl and mounted-action visibility, body placement, glove size, rotation, and position |
 | Performance | Headset Render Scale, Desktop View, and desktop mirror frame rate |
 | HUD Settings | HUD opacity and corner spread |
-| Immersion | Crouch/sand camera, face-stuck blackout, cannon aim direction cone, and head-tracked 3D sound |
-| Cheats | Climb Any Wall or Ceiling |
-| Experimental | Side-flip camera follow, wall-jump camera turn, flat first person, True First Person, True Diving, Arms Mode, mounted-action body visibility, physical crouching, original movement, and backpedal speed |
+| Immersion | Crouch/sand camera, face-stuck blackout, cannon cone, 3D sound, ledge camera, underwater filter, side-flip follow, wall-jump turn, and physical crouching |
+| Effects | Twirl Tornado Effect |
+| Cheats | Climb Any Wall or Ceiling and Flying Speed (100%-300%; 100% default) |
+| Experimental | Flat first person, True First Person, True Diving (Camera Effect), Arms Mode, and original Mario movement |
 
 Every VR submenu includes **Set to Defaults**.
 
@@ -215,7 +230,7 @@ Every VR submenu includes **Set to Defaults**.
 
 This project keeps Super Mario 64's original 30 Hz gameplay simulation and renders interpolated headset frames at the OpenXR runtime's cadence. Raising the simulation rate globally would change physics, animation timing, multiplayer behavior, and mod assumptions, so high-refresh VR smoothness is handled through render interpolation and late headset/controller poses instead.
 
-## Upcoming v0.5.0 development summary
+## v0.5.0 summary
 
 - Physical pole, tree, monkey-bar, native ceiling, and hand-over-hand climbing
 - Optional climbing on any vertical wall or overhead ceiling

@@ -1,5 +1,9 @@
-SM64 CO-OP DX VR v0.4.0 - WINDOWS PLAYER GUIDE
-================================================
+SM64 CO-OP DX VR v0.5.0 - WINDOWS PLAYER GUIDE
+==============================================
+
+This is an active fan project. The PC and Quest standalone editions have not
+been tested across every level, headset, multiplayer situation, ROM hack, or
+mod combination. Keep a backup of your previous installation and saves.
 
 WHAT YOU NEED
 
@@ -34,8 +38,12 @@ CAMERA MODES
   camera and SM64 Co-Op DX's free camera. Camera distance is adjustable.
 - First Person Mode is the default. The headset controls the view and Mario's
   forward direction. The camera stick provides smooth horizontal turning.
-- First-person movement supports normal forward steering up to 90 degrees,
-  a steerable reverse jog, and a short forward-to-back side-flip window.
+- First-person movement locks body yaw to the selected facing source while the
+  stick independently controls travel in every direction. Mario's normal speed
+  buildup, landing momentum, and gradual steering inertia remain active.
+  Deliberate left/right reversals and a direct forward-to-back flick retain
+  separate skid/side-flip windows. A normal stick circle cancels those reversal
+  gestures and does not stop Mario at east or west.
 - Swimming, Wing Cap flight, and shell riding follow the direction you look.
   Normal action buttons are still used for swimming strokes and other moves.
 - Tunnels, conversations, doors, and other scripted camera events continue
@@ -52,8 +60,8 @@ CANNONS
 3. Move your head to aim and press Jump (Right Primary by default) to fire.
 
 Head movement remains free, but the shot stays inside the cannon's original
-firing cone. Looking outside that cone gradually darkens the view. A rotating
-Mario camera-arrow points back toward the nearest valid firing direction.
+firing cone. Looking outside that cone gradually darkens the view and blocks
+firing. Four Mario-style arrows point inward toward the valid direction.
 
 
 DEFAULT VR CONTROLS
@@ -68,6 +76,7 @@ R button                Right stick click
 Pause                   Left Menu
 Close fist / grab       Hold that hand's Grip
 Right Trigger punch     Disabled by default; optional in Controller Settings
+Victory peace sign      Hold Grip + Trigger on either hand during star/key pickup
 
 Open Settings > VR > Controller Settings to remap the sticks and buttons.
 A connected gamepad can remain active alongside the VR controllers.
@@ -106,40 +115,186 @@ Grip a supported interaction point to attach to it. Release the grip to let
 go. Physical interactions use the game's normal interaction and networking
 paths where possible.
 
+CAPS
+Touch a normal, Wing, Metal, or Vanish Cap with either tracked glove to
+collect it. Mario's normal body-based cap interaction remains available too.
+
+STAR / KEY POSE
+While the star or key collection sequence is visible, hold Grip + Trigger on
+either controller to change that glove into Mario's peace sign. Releasing the
+buttons or finishing the collection sequence restores the normal glove.
+
+PAINTING-EXIT HAT GESTURE
+While Mario is jumping back out of a painting, bring either tracked glove to
+the headset or just above it and hold that hand's Grip + Trigger. Either hand
+can pull off Mario's cap. You can hold it for about one minute. Let go to drop
+the cap onto the level; it lands, rests briefly, and then fades away.
+
+
+PHYSICAL CLIMBING
+
+Physical climbing is enabled by default. Standard collision-based climbing is
+disabled by default, so a pole or ceiling does not automatically take control
+away from your hands.
+
+POLES AND TREES
+Reach a glove to the object and hold that hand's Grip. The held hand becomes
+the anchor. Grab with the other hand to change anchors. Release both hands to
+fall. Press Jump to dismount in your configured facing direction. Hold the
+movement stick down while gripping to slide down a real pole or tree; this
+does not apply to cheat-climbed walls or ceilings.
+
+MONKEY BARS AND HANGABLE CEILINGS
+Hold Grip before or while jumping into a native hanging surface. The game
+sweeps the tracked hand path to catch fast jumps and triangle seams. Use the
+other hand to move hand-over-hand. The torso and legs are hidden while a
+physical climb is active; tracked gloves remain visible.
+
+The temporary interaction collider follows the headset while climbing so
+nearby coins can be collected through a small headset collider. To climb onto
+a ledge, lift your headset over the ledge and let go of Grip; Mario will finish
+on top when there is a safe floor. On release elsewhere, Mario is resolved
+back to a safe playable position. Releasing both hands normally drops him.
+With Swing Off While Releasing enabled, a fast hand release launches him toward the current
+facing direction. If the headset has cleared the top of a safe ledge, a normal
+release finishes onto that ledge instead of dropping below it.
+
+CLIMB ANY WALL OR CEILING
+The Cheats submenu contains a disabled-by-default option that allows grips on
+ordinary vertical walls and overhead ceilings. Floors are never accepted.
+Cheat-only surfaces require a fresh Grip press at close hand contact; holding
+Grip before a jump only auto-catches poles, trees, and native hangables. The
+wall constraint ends at the real triangle edge so a second hand can continue
+around an open corner. Breakable, cap, and box surfaces can never be climbed,
+even with this cheat, but retain their normal punch and jump interactions.
+This can bypass intended routes and may encounter unusual modded collision.
+
 
 VR SETTINGS
 
 Camera Settings
   Camera mode, distance, per-character height, forward/back position,
-  movement calibration, and field of view.
+  Headset/Left Controller/Right Controller facing source, facing calibration,
+  field of view, and brightness.
 
 Controller Settings
   Motion-controller input, stick selection, button mapping, and optional
   Right Trigger punching.
 
 Motion Control Settings
-  Punching, grabbing, motion dives, punch sound, punch requirements,
-  collider length, and Bowser spin tuning.
+  Physical punching/grabbing/climbing, standard grabbing/climbing, swing-off
+  releases, motion dives, turn-on-landing, punch requirements, collider
+  length, and Bowser spin tuning.
 
 Model Settings
-  Torso and legs, glove size, glove rotation, and glove/body positions.
+  Body Settings and Hand Settings. Body Settings includes torso/legs, the
+  optional Feet Only view, crawling and mounted-action visibility, and body
+  placement. Hand Settings contains glove size, rotation, and positions.
 
 Performance
   Render scale, desktop view on/off, and desktop mirror frame rate. Lower
   render scale or disable Desktop View if more performance is needed.
 
 HUD Settings
-  HUD opacity.
+  HUD opacity and corner spread.
+
+Immersion
+  Crouch/Sand Camera, Face-Stuck Blackout, Cannon Aim Direction Cone, and
+  Head-Tracked 3D Sound, Side-Flip Camera Follow, 180 Degree Wall-Jump Camera
+  Turn, Physical Crouching / Ground Pounds, and optional Camera on Body During
+  Climb Up. Underwater Filter adds a light blue 25%-opacity tint only when the
+  tracked headset is below the water surface. All Immersion options default on.
+
+Effects
+  Twirl Tornado Effect is enabled by default. During Shy Guy, Spindrift, and
+  Tweester twirls, a small collisionless rotating white tornado remains at the
+  character's feet for the whole action. It is 25% transparent and scales to
+  roughly 75% of the selected character.
+
+Cheats
+  Climb Any Wall or Ceiling, disabled by default. Flying and Swimming Speed
+  range from 100% to 300%. Running Speed ranges from 100% to 200%. All three
+  retain Mario's normal 100% speed by default.
 
 Experimental
-  Side-flip camera follow, 180-degree wall-jump turns, flat first person,
-  True First Person, True Diving, Arms Mode, mounted-action body visibility,
-  physical crouching, original Mario movement, and backpedal speed.
+  Flat first person, True First Person, True Diving (Camera Effect), Arms
+  Mode, and original Mario movement.
 
 True First Person follows animated body movement and might cause sickness.
 True Diving follows the animated dive position only during dives and may also
 be uncomfortable. Both options are disabled by default.
 Every submenu has a Set to Defaults button.
+
+
+V0.5.0 TEST CHECKLIST
+
+- Confirm the main menu shows the current v0.5.0 test version and the new VR logo.
+- Confirm long VR submenus scroll to keep the selected option visible.
+- Move repeatedly through long menus and change several sliders. Text and
+  labels must remain attached to their controls and never jump off-screen.
+- Move selection repeatedly across menu buttons in VR and confirm the active
+  button no longer flickers between two visual states.
+- Lower Render Scale and confirm main/pause menu text remains full resolution.
+- Test Headset, Left Controller, and Right Controller facing directions.
+- Climb a pole/tree by holding Grip, change hands, release both hands to fall,
+  and press Jump to leave in the direction you are facing.
+- With Climb Any Wall or Ceiling OFF, hold Grip before jumping into the
+  underside of BOB's first bridge, a wire-net/monkey-bar ceiling, and a native
+  pyramid hangable. Confirm each grabs without perfect timing, supports
+  hand-over-hand movement and coin collection, then drops or swings off.
+- Stand on top of BOB's first bridge and close either grip. Confirm the player
+  is not pulled through it. From below, confirm the glove must touch/cross the
+  actual underside rather than grabbing from a large distance.
+- On BOB's first bridge, pull with one hand, attach the other, release the old
+  hand, and repeat. Each pull must move once and remain smooth; changing the
+  active hand must not snap, reverse, or shake the world.
+- While physically hanging, collect a coin at headset height. Jump off while
+  looking forward and confirm Mario does not turn 180 degrees.
+- Pull the headset just over a safe ledge and release without a fast swing;
+  confirm Mario finishes on top instead of dropping below the lip.
+- Confirm Standard Climbing defaults off and Standard Grabbing defaults on.
+- Enable Climb Any Wall or Ceiling. Confirm cheat walls/ceilings require a new
+  close Grip press, a held Grip does not catch empty/nearby geometry, corners
+  can be rounded, and floors/blocks/cap boxes cannot be grabbed. Confirm those
+  blocks still respond to punches and normal jump impacts.
+- Confirm first-person ground movement matches v0.4.0: headset/controller-
+  relative steering, the established reverse jog, and Mario's native skid and
+  turnaround transition. Run forward, pull backward, then press Jump during
+  the skid to verify side flips still work. Circle the stick in both directions
+  and compare acceleration, momentum, and transitions with the official release.
+- While entering backpedal from either side, press Jump shortly after reverse
+  motion begins. Confirm both directions can side flip, but the opportunity
+  expires quickly instead of remaining active throughout backpedaling.
+- Enter a level/area-loading door and confirm the new room begins facing
+  forward through the doorway. Stand completely still and turn your headset;
+  Mario's hidden physical body should match that yaw without affecting motion.
+- Touch each cap type with either glove and confirm it equips normally.
+- Swim and fly through coins or pickups near the headset and confirm they can
+  be collected without changing Mario's normal environment collision.
+- Collect a star or key, then hold Grip + Trigger on either hand. Confirm that
+  hand shows the peace sign only for the collection sequence.
+- Successfully exit a course through a star/Bowser painting sequence, bring
+  either Grip-and-Trigger-held hand to the headset grab region, and confirm it
+  holds Mario's cap instead of showing a peace sign. Confirm either hand works,
+  then release it: the cap should fall onto geometry, rest briefly, and fade.
+  Confirm death and Exit Course never activate it.
+- Set Cheats > Flying Speed to 100% and confirm normal Wing Cap speed, then
+  increase it and confirm actual travel becomes faster without multiplying
+  uncontrollably over time. Set to Defaults must restore 100%.
+- Physically grip a pole/tree, pull repeatedly, change hands, and hold stick
+  down. Confirm the anchor never drifts and the pole-only slide is controlled.
+- Confirm crouching and sand lower the view smoothly.
+- Get Mario's face stuck in soft ground and confirm the blackout clears when
+  he escapes.
+- Enter a cannon, look outside its legal bounds, and confirm the fade, four
+  arrows, and blocked firing. Return inside the bounds and fire normally.
+- Walk around a world sound source and confirm its left/right direction tracks
+  the headset's horizontal position and facing.
+- Jump into a painting and confirm the immediate white comfort transition.
+- Play for at least 30 minutes and watch for frame-time spikes as new actors
+  enter view. Interpolation records are now pooled per level to avoid repeated
+  mid-frame allocations; also watch for climbing jitter, billboard problems,
+  crashes, or regressions in Third Person Mode.
 
 
 STARTUP SHADER CACHE
@@ -152,7 +307,8 @@ This is intended to reduce repeat stutters in levels and mods you have used.
 KNOWN LIMITATIONS
 
 - Windows and OpenGL are the only implemented OpenXR graphics path.
-- Motion controls, online co-op, mods, and other headsets need more testing.
+- Motion controls, physical climbing, online co-op, mods, and other headsets
+  need more testing.
 - True First Person, True Diving, and Arms Mode are experimental.
 - The 3D star models do not currently appear on the Star Select screen in VR.
 - Some original flat billboard objects can look unusual in stereo VR.

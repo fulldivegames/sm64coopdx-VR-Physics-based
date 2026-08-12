@@ -49,6 +49,7 @@
 #include "pc/lua/smlua_hooks.h"
 #include "pc/mods/mods.h"
 #include "pc/nametags.h"
+#include "pc/vr/vr.h"
 
 #include "game/screen_transition.h"
 
@@ -458,6 +459,12 @@ void init_mario_after_warp(void) {
         init_mario();
         vr_reset_first_person_calibration();
         set_mario_initial_action(gMarioState, marioSpawnType, sWarpDest.arg);
+        if (marioSpawnType == MARIO_SPAWN_DOOR_WARP) {
+            // A level/area-loading door has a fresh spawn yaw. Align the VR
+            // camera basis to that yaw so the player enters facing into the
+            // room rather than retaining the previous room's world heading.
+            vr_align_first_person_camera_yaw(gMarioState->faceAngle[1]);
+        }
 
         // remove offset from local mario during warps
         if (sWarpDest.type == WARP_TYPE_SAME_AREA && marioSpawnType != MARIO_SPAWN_DOOR_WARP) {
@@ -830,11 +837,36 @@ static void initiate_painting_warp_node(struct WarpNode *pWarpNode) {
     initiate_warp(warpNode.destLevel & 0x7F, warpNode.destArea, warpNode.destNode, 0);
     check_if_should_set_warp_checkpoint(&warpNode);
 
+    const bool vrPaintingFade = vr_is_active();
     extern s16 gMenuMode;
     if (gMenuMode == -1) {
-        play_transition_after_delay(WARP_TRANSITION_FADE_INTO_COLOR, 30, 255, 255, 255, 45);
+        if (vrPaintingFade) {
+            // First-person players can otherwise see past the painting and
+            // through unloaded castle geometry during its long camera pull.
+            // Begin a quick white comfort fade on the exact frame the warp is
+            // accepted. Once opaque, the normal transition holds that color
+            // until the destination (including Act Select) takes over. The VR
+            // hold is capped at 1.5 seconds so protection stays immediate
+            // without lingering.
+            play_transition(
+                WARP_TRANSITION_FADE_INTO_COLOR,
+                6,
+                255,
+                255,
+                255
+            );
+        } else {
+            play_transition_after_delay(
+                WARP_TRANSITION_FADE_INTO_COLOR,
+                30,
+                255,
+                255,
+                255,
+                45
+            );
+        }
     }
-    level_set_transition(74, basic_update);
+    level_set_transition(vrPaintingFade ? 45 : 74, basic_update);
 
     play_sound(SOUND_MENU_STAR_SOUND, gGlobalSoundSource);
     fadeout_music(398);

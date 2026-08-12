@@ -13,6 +13,7 @@
 #include "pc/cliopts.h"
 #include "game/level_update.h"
 #include "pc/lua/smlua_hooks.h"
+#include "pc/vr/vr.h"
 #include "djui_panel_playerlist.h"
 #include "djui_hud_utils.h"
 #include "engine/math_util.h"
@@ -77,6 +78,18 @@ void patch_djui_before(void) {
 void patch_djui_interpolated(UNUSED f32 delta) {
     extern f32 gFramePercentage;
     if (gDjuiInMainMenu || gDjuiPanelPauseCreated) {
+        if (vr_is_active()) {
+            // A second mid-tick DJUI rebuild alternates two independently
+            // laid-out menu display lists at the headset refresh rate. The
+            // highlighted control can then appear to flash as selection and
+            // VR auto-scroll settle on different ticks. Keep one immutable
+            // menu list per 30 Hz gameplay tick in VR; the eye projection is
+            // still patched for every submitted OpenXR frame below it.
+            Gfx* displayListHead = gDisplayListHead;
+            djui_cursor_interp();
+            gDisplayListHead = displayListHead;
+            return;
+        }
         if (gFramePercentage >= 0.5f && !sDjuiRendered60fps) {
             // reset the head and re-render DJUI
             sDjuiRendered60fps = true;

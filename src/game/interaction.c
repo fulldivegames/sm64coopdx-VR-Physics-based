@@ -525,6 +525,12 @@ void mario_retrieve_cap(struct MarioState* m) {
 
 u32 able_to_grab_object(struct MarioState *m, UNUSED struct Object *o) {
     if (!m || !o) { return FALSE; }
+    if (m->playerIndex == 0 &&
+        vr_is_active() &&
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
+        !configVrStandardGrabbing) {
+        return FALSE;
+    }
     u32 action = m->action;
 
     if (action == ACT_DIVE_SLIDE || action == ACT_DIVE) {
@@ -562,6 +568,13 @@ u32 mario_check_object_grab(struct MarioState *m) {
     const BehaviorScript *script;
 
     if (m->playerIndex != 0) { return FALSE; }
+    if (vr_is_active() &&
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
+        !configVrStandardGrabbing) {
+        // Physical grip interactions call mario_grab_used_object directly,
+        // so disabling this path removes only Mario's normal punch/dive grab.
+        return FALSE;
+    }
     if (m->interactObj == NULL || m->interactObj->oHeldState == HELD_HELD) { return FALSE; }
 
     if (m->input & INPUT_INTERACT_OBJ_GRABBABLE) {
@@ -2119,6 +2132,14 @@ u32 check_object_grab_mario(struct MarioState *m, UNUSED u32 interactType, struc
 
 u32 interact_pole(struct MarioState *m, UNUSED u32 interactType, struct Object *o) {
     if (!m || !o) { return FALSE; }
+    if (m->playerIndex == 0 &&
+        vr_is_active() &&
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
+        !configVrStandardClimbing) {
+        // Physical climbing enters ACT_HOLDING_POLE directly after a tracked
+        // grip, so this disables only collision-based automatic attachment.
+        return FALSE;
+    }
     s32 actionId = m->action & ACT_ID_MASK;
     if (actionId >= 0x080 && actionId < 0x0A0) {
         if (!(m->prevAction & ACT_FLAG_ON_POLE) || m->usedObj != o) {

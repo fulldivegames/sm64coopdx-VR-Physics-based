@@ -31,6 +31,7 @@
 #include "gfx_cc.h"
 #include "gfx_rendering_api.h"
 #include "gfx_pc.h"
+#include "../vr/vr.h"
 
 #define TEX_CACHE_STEP 512
 
@@ -90,8 +91,42 @@ static inline void gfx_opengl_set_shader_uniforms(struct ShaderProgram *prg) {
     if (prg->used_noise) { glUniform1f(prg->uniform_locations[4], (float)frame_count); }
     if (prg->used_lightmap) { glUniform3f(prg->uniform_locations[5], gVertexColor[0] / 255.0f, gVertexColor[1] / 255.0f, gVertexColor[2] / 255.0f); }
     if (prg->world_geometry) {
-        glUniform1iv(prg->uniform_locations[6], SHADER_FLAG_MAX, gShaderFlags);
-        glUniform1fv(prg->uniform_locations[7], SHADER_FLAG_MAX, gShaderFlagValues);
+        if (configVrBrightness != 100U && vr_is_active()) {
+            int vrShaderFlags[SHADER_FLAG_MAX];
+            float vrShaderValues[SHADER_FLAG_MAX];
+            for (int i = 0; i < SHADER_FLAG_MAX; ++i) {
+                vrShaderFlags[i] = gShaderFlags[i];
+                vrShaderValues[i] = gShaderFlagValues[i];
+            }
+            vrShaderFlags[SHADER_FLAG_BRIGHTNESS] = 1;
+            const float baseBrightness =
+                gShaderFlags[SHADER_FLAG_BRIGHTNESS]
+                    ? gShaderFlagValues[SHADER_FLAG_BRIGHTNESS]
+                    : 1.0f;
+            vrShaderValues[SHADER_FLAG_BRIGHTNESS] =
+                baseBrightness * (float)configVrBrightness / 100.0f;
+            glUniform1iv(
+                prg->uniform_locations[6],
+                SHADER_FLAG_MAX,
+                vrShaderFlags
+            );
+            glUniform1fv(
+                prg->uniform_locations[7],
+                SHADER_FLAG_MAX,
+                vrShaderValues
+            );
+        } else {
+            glUniform1iv(
+                prg->uniform_locations[6],
+                SHADER_FLAG_MAX,
+                gShaderFlags
+            );
+            glUniform1fv(
+                prg->uniform_locations[7],
+                SHADER_FLAG_MAX,
+                gShaderFlagValues
+            );
+        }
     }
 
     glUniform1i(prg->uniform_locations[8], configFiltering);

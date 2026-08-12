@@ -4,6 +4,8 @@
 #include <string.h>
 
 #include "pc/configfile.h"
+#include "pc/djui/djui.h"
+#include "pc/djui/djui_panel_pause.h"
 #include "pc/vr/vr.h"
 #include "pc/vr/vr_openxr.h"
 
@@ -57,7 +59,6 @@ struct VrOpenXrFunctions {
     PFN_xrGetActionStateBoolean xrGetActionStateBoolean;
     PFN_xrGetActionStateFloat xrGetActionStateFloat;
     PFN_xrGetActionStateVector2f xrGetActionStateVector2f;
-    PFN_xrGetActionStatePose xrGetActionStatePose;
     PFN_xrSyncActions xrSyncActions;
     PFN_xrApplyHapticFeedback xrApplyHapticFeedback;
     PFN_xrStopHapticFeedback xrStopHapticFeedback;
@@ -155,7 +156,14 @@ static bool sStereoEyeOffsetsLogged = false;
 static bool sAsymmetricProjectionLogged = false;
 
 static uint32_t vr_openxr_scaled_dimension(uint32_t dimension) {
-    uint32_t scale = configVrRenderScale;
+    // Keep the interactive front-end and pause panels at the headset's full
+    // recommended resolution. Render Scale resumes as soon as the player
+    // returns to gameplay, so lowering it does not soften menu text or
+    // controls. The full-size OpenXR swapchain already exists; this only
+    // chooses whether the intermediate scaled gameplay target is used.
+    uint32_t scale = (gDjuiInMainMenu || gDjuiPanelPauseCreated)
+        ? VR_RENDER_SCALE_MAX
+        : configVrRenderScale;
 
     if (scale < VR_RENDER_SCALE_MIN) {
         scale = VR_RENDER_SCALE_MIN;
@@ -330,7 +338,6 @@ static bool vr_openxr_load_instance_functions(void) {
     LOAD_XR_FUNCTION(xrGetActionStateBoolean, "xrGetActionStateBoolean", PFN_xrGetActionStateBoolean);
     LOAD_XR_FUNCTION(xrGetActionStateFloat, "xrGetActionStateFloat", PFN_xrGetActionStateFloat);
     LOAD_XR_FUNCTION(xrGetActionStateVector2f, "xrGetActionStateVector2f", PFN_xrGetActionStateVector2f);
-    LOAD_XR_FUNCTION(xrGetActionStatePose, "xrGetActionStatePose", PFN_xrGetActionStatePose);
     LOAD_XR_FUNCTION(xrSyncActions, "xrSyncActions", PFN_xrSyncActions);
     LOAD_XR_FUNCTION(xrApplyHapticFeedback, "xrApplyHapticFeedback", PFN_xrApplyHapticFeedback);
     LOAD_XR_FUNCTION(xrStopHapticFeedback, "xrStopHapticFeedback", PFN_xrStopHapticFeedback);
@@ -2056,26 +2063,6 @@ static void vr_openxr_update_cached_tracking(void) {
     sCachedTrackingValid = true;
 }
 
-static bool vr_openxr_controller_pose_is_active(
-    XrAction action,
-    XrPath handPath
-) {
-    XrActionStateGetInfo getInfo = { 0 };
-    getInfo.type = XR_TYPE_ACTION_STATE_GET_INFO;
-    getInfo.action = action;
-    getInfo.subactionPath = handPath;
-
-    XrActionStatePose state = { 0 };
-    state.type = XR_TYPE_ACTION_STATE_POSE;
-
-    XrResult result = sXr.xrGetActionStatePose(
-        sSession,
-        &getInfo,
-        &state
-    );
-    return XR_SUCCEEDED(result) && state.isActive;
-}
-
 static bool vr_openxr_locate_controller_pose(
     XrSpace space,
     XrTime displayTime,
@@ -2394,11 +2381,7 @@ static void vr_openxr_update_controller_states(
             sizeof(sControllerStates[hand])
         );
 
-        if (trackControllerPoses &&
-            vr_openxr_controller_pose_is_active(
-                sGripPoseAction,
-                sControllerHandPaths[hand]
-            )) {
+        if (trackControllerPoses) {
             sControllerStates[hand].gripPoseValid =
                 vr_openxr_locate_controller_pose(
                     sControllerGripSpaces[hand],
@@ -2422,11 +2405,7 @@ static void vr_openxr_update_controller_states(
             sControllerPreviousGripTime[hand] = 0;
         }
 
-        if (trackControllerPoses &&
-            vr_openxr_controller_pose_is_active(
-                sAimPoseAction,
-                sControllerHandPaths[hand]
-            )) {
+        if (trackControllerPoses) {
             sControllerStates[hand].aimPoseValid =
                 vr_openxr_locate_controller_pose(
                     sControllerAimSpaces[hand],

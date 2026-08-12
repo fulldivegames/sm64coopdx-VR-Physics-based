@@ -5,6 +5,8 @@
 #include "behavior_data.h"
 #include "characters.h"
 #include "engine/math_util.h"
+#include "engine/surface_collision.h"
+#include "engine/surface_load.h"
 #include "interaction.h"
 #include "mario.h"
 #include "object_constants.h"
@@ -13,6 +15,7 @@
 #include "object_list_processor.h"
 #include "rendering_graph_node.h"
 #include "sm64.h"
+#include "surface_terrains.h"
 #include "vr_hand_interaction.h"
 
 #include "pc/configfile.h"
@@ -35,6 +38,25 @@
 #define VR_GRIP_CLOSE_THRESHOLD 0.55f
 #define VR_GRIP_OPEN_THRESHOLD 0.35f
 #define VR_GRAB_EXTRA_REACH 16.0f
+#define VR_CLIMB_CEILING_EXTRA_REACH 20.0f
+#define VR_CLIMB_NATIVE_SWEEP_SAMPLES 4
+#define VR_CLIMB_SURFACE_EXTRA_REACH 20.0f
+#define VR_CLIMB_SURFACE_HAND_RADIUS_MAX 24.0f
+#define VR_CLIMB_SURFACE_CLEARANCE 12.0f
+#define VR_CLIMB_SURFACE_EDGE_MARGIN 48.0f
+#define VR_CLIMB_SAFE_RELEASE_SAMPLE_FRAMES 3U
+#define VR_CLIMB_LEDGE_MIN_RISE 20.0f
+#define VR_CLIMB_LEDGE_MAX_HEAD_ABOVE_FLOOR 190.0f
+#define VR_CLIMB_LEDGE_MAX_FLOOR_ABOVE_HEAD 24.0f
+#define VR_CLIMB_WALL_MAX_NORMAL_Y 0.35f
+#define VR_CLIMB_CEILING_MAX_NORMAL_Y -0.10f
+#define VR_CLIMB_CEILING_MIN_FEET_SEPARATION 24.0f
+#define VR_CLIMB_CEILING_HAND_PLANE_TOLERANCE 8.0f
+#define VR_CLIMB_SWING_RELEASE_MIN_SPEED 110.0f
+#define VR_CLIMB_REGRAB_COOLDOWN_FRAMES 8
+#define VR_PHYSICAL_POLE_SLIDE_MAX_SPEED 6.0f
+#define VR_HEADSET_INTERACTION_RADIUS 24.0f
+#define VR_HEADSET_INTERACTION_HEIGHT 48.0f
 #define VR_THROW_MIN_SPEED 60.0f
 #define VR_THROW_VELOCITY_SCALE 0.125f
 #define VR_THROW_VELOCITY_MEMORY 0.78f
@@ -97,6 +119,76 @@ static u32 sVrTrackedHootHand = VR_CONTROLLER_COUNT;
 static struct Object* sVrTrackedAnchorObject = NULL;
 static u32 sVrTrackedAnchorHand = VR_CONTROLLER_COUNT;
 static Vec3f sVrTrackedAnchorOffset = { 0.0f, 0.0f, 0.0f };
+
+enum VrPhysicalClimbType {
+    VR_PHYSICAL_CLIMB_NONE,
+    VR_PHYSICAL_CLIMB_POLE,
+    VR_PHYSICAL_CLIMB_CEILING,
+    VR_PHYSICAL_CLIMB_CHEAT_CEILING,
+    VR_PHYSICAL_CLIMB_CHEAT_WALL,
+};
+
+static enum VrPhysicalClimbType sVrPhysicalClimbType =
+    VR_PHYSICAL_CLIMB_NONE;
+static u32 sVrPhysicalClimbHand = VR_CONTROLLER_COUNT;
+static struct Object* sVrPhysicalClimbPole = NULL;
+static Vec3f sVrPhysicalClimbPolePrevPosition = { 0.0f, 0.0f, 0.0f };
+static bool sVrPhysicalClimbPolePrevPositionValid = false;
+static struct Surface* sVrPhysicalClimbSurface = NULL;
+static Vec3f sVrPhysicalClimbSurfacePoint = {
+    0.0f,
+    0.0f,
+    0.0f
+};
+static Vec3f sVrPhysicalClimbSurfaceNormal = {
+    0.0f,
+    0.0f,
+    0.0f
+};
+static bool sVrPhysicalClimbHands[VR_CONTROLLER_COUNT] = {
+    false,
+    false
+};
+static bool sVrPhysicalClimbLastPositionValid[VR_CONTROLLER_COUNT] = {
+    false,
+    false
+};
+static Vec3f sVrPhysicalClimbLastPosition[VR_CONTROLLER_COUNT] = {
+    { 0.0f, 0.0f, 0.0f },
+    { 0.0f, 0.0f, 0.0f }
+};
+static Vec3f sVrPhysicalClimbContactPosition = {
+    0.0f,
+    0.0f,
+    0.0f
+};
+static Vec3f sVrPhysicalClimbCameraOffset = {
+    0.0f,
+    0.0f,
+    0.0f
+};
+static Vec3f sVrPhysicalClimbCameraOffsetPrev = {
+    0.0f,
+    0.0f,
+    0.0f
+};
+static bool sVrPhysicalClimbSafeReleasePositionValid = false;
+static Vec3f sVrPhysicalClimbSafeReleasePosition = {
+    0.0f,
+    0.0f,
+    0.0f
+};
+static u32 sVrPhysicalClimbSafeReleaseTimestamp = 0;
+static u32 sVrPhysicalClimbOffsetTimestamp = 0;
+static u8 sVrPhysicalClimbRegrabFrames = 0;
+static bool sVrClimbPreviousPositionValid[VR_CONTROLLER_COUNT] = {
+    false,
+    false
+};
+static Vec3f sVrClimbPreviousPosition[VR_CONTROLLER_COUNT] = {
+    { 0.0f, 0.0f, 0.0f },
+    { 0.0f, 0.0f, 0.0f }
+};
 static u32 sVrBowserGripHand = VR_CONTROLLER_COUNT;
 static bool sVrBowserHandYawValid = false;
 static s16 sVrBowserPreviousHandYaw = 0;
@@ -104,6 +196,13 @@ static s32 sVrBowserAccumulatedHandYaw = 0;
 static f32 sVrBowserPhysicalTurnInput = 0.0f;
 static bool sVrBowserFullPowerImpulse = false;
 static bool sVrInteractionTrackingActive = false;
+static bool sVrHeadsetColliderActive = false;
+static f32 sVrHeadsetColliderSavedRadius = 50.0f;
+static f32 sVrHeadsetColliderSavedHeight = 160.0f;
+static f32 sVrHeadsetColliderSavedDownOffset = 0.0f;
+
+extern u8 gRenderingInterpolated;
+extern f32 gRenderingDelta;
 
 struct VrFistSweep {
     Vec3f start;
@@ -111,6 +210,41 @@ struct VrFistSweep {
     f32 minimum[3];
     f32 maximum[3];
 };
+
+static void vr_hand_interaction_sync_climb_collider_to_headset(
+    struct MarioState* mario
+);
+
+static void vr_hand_interaction_apply_headset_collider(
+    struct MarioState* mario,
+    const Vec3f headsetPosition
+) {
+    if (mario == NULL ||
+        mario->marioObj == NULL ||
+        headsetPosition == NULL) {
+        return;
+    }
+
+    if (!sVrHeadsetColliderActive) {
+        sVrHeadsetColliderSavedRadius =
+            mario->marioObj->hitboxRadius;
+        sVrHeadsetColliderSavedHeight =
+            mario->marioObj->hitboxHeight;
+        sVrHeadsetColliderSavedDownOffset =
+            mario->marioObj->hitboxDownOffset;
+        sVrHeadsetColliderActive = true;
+    }
+
+    mario->marioObj->hitboxRadius =
+        VR_HEADSET_INTERACTION_RADIUS;
+    mario->marioObj->hitboxHeight =
+        VR_HEADSET_INTERACTION_HEIGHT;
+    mario->marioObj->hitboxDownOffset = 0.0f;
+    mario->marioObj->oPosX = headsetPosition[0];
+    mario->marioObj->oPosY = headsetPosition[1] -
+        VR_HEADSET_INTERACTION_HEIGHT * 0.5f;
+    mario->marioObj->oPosZ = headsetPosition[2];
+}
 
 static void vr_hand_interaction_clear_tracked_hold(void) {
     sVrTrackedHeldObject = NULL;
@@ -151,6 +285,181 @@ static void vr_hand_interaction_clear_player_anchor(void) {
     vec3f_set(sVrTrackedAnchorOffset, 0.0f, 0.0f, 0.0f);
 }
 
+static void vr_hand_interaction_clear_physical_climb(void) {
+    sVrPhysicalClimbType = VR_PHYSICAL_CLIMB_NONE;
+    sVrPhysicalClimbHand = VR_CONTROLLER_COUNT;
+    sVrPhysicalClimbPole = NULL;
+    sVrPhysicalClimbPolePrevPositionValid = false;
+    vec3f_set(sVrPhysicalClimbPolePrevPosition, 0.0f, 0.0f, 0.0f);
+    sVrPhysicalClimbSurface = NULL;
+    for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
+        sVrPhysicalClimbHands[hand] = false;
+        sVrPhysicalClimbLastPositionValid[hand] = false;
+        vec3f_set(
+            sVrPhysicalClimbLastPosition[hand],
+            0.0f,
+            0.0f,
+            0.0f
+        );
+    }
+    vec3f_set(sVrPhysicalClimbContactPosition, 0.0f, 0.0f, 0.0f);
+    vec3f_set(sVrPhysicalClimbSurfacePoint, 0.0f, 0.0f, 0.0f);
+    vec3f_set(sVrPhysicalClimbSurfaceNormal, 0.0f, 0.0f, 0.0f);
+    vec3f_set(sVrPhysicalClimbCameraOffset, 0.0f, 0.0f, 0.0f);
+    vec3f_set(sVrPhysicalClimbCameraOffsetPrev, 0.0f, 0.0f, 0.0f);
+    sVrPhysicalClimbSafeReleasePositionValid = false;
+    sVrPhysicalClimbSafeReleaseTimestamp = 0;
+    vec3f_set(
+        sVrPhysicalClimbSafeReleasePosition,
+        0.0f,
+        0.0f,
+        0.0f
+    );
+    sVrPhysicalClimbOffsetTimestamp = 0;
+}
+
+static void vr_hand_interaction_prepare_climb_offset_update(void) {
+    if (sVrPhysicalClimbOffsetTimestamp == gGlobalTimer) {
+        return;
+    }
+
+    vec3f_copy(
+        sVrPhysicalClimbCameraOffsetPrev,
+        sVrPhysicalClimbCameraOffset
+    );
+    sVrPhysicalClimbOffsetTimestamp = gGlobalTimer;
+}
+
+bool vr_hand_interaction_get_climb_camera_offset(Vec3f offset) {
+    if (offset == NULL ||
+        sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_NONE ||
+        sVrPhysicalClimbHand >= VR_CONTROLLER_COUNT) {
+        return false;
+    }
+
+    if (gRenderingInterpolated) {
+        const f32 delta = clamp(gRenderingDelta, 0.0f, 1.0f);
+        for (u32 axis = 0; axis < 3; axis++) {
+            offset[axis] =
+                sVrPhysicalClimbCameraOffsetPrev[axis] +
+                (sVrPhysicalClimbCameraOffset[axis] -
+                 sVrPhysicalClimbCameraOffsetPrev[axis]) * delta;
+        }
+    } else {
+        vec3f_copy(offset, sVrPhysicalClimbCameraOffset);
+    }
+    return true;
+}
+
+bool vr_hand_interaction_is_physical_pole_climb_active(
+    struct MarioState* mario
+) {
+    return mario != NULL &&
+        sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_POLE &&
+        sVrPhysicalClimbHand < VR_CONTROLLER_COUNT &&
+        mario->usedObj == sVrPhysicalClimbPole &&
+        (mario->action & ACT_FLAG_ON_POLE) != 0;
+}
+
+void vr_hand_interaction_apply_moving_pole_displacement(
+    struct MarioState* mario
+) {
+    struct Object* pole = sVrPhysicalClimbPole;
+    if (mario == NULL || mario->marioObj == NULL || pole == NULL ||
+        !vr_hand_interaction_is_physical_pole_climb_active(mario)) {
+        sVrPhysicalClimbPolePrevPositionValid = false;
+        return;
+    }
+
+    Vec3f polePosition = { pole->oPosX, pole->oPosY, pole->oPosZ };
+    if (!sVrPhysicalClimbPolePrevPositionValid) {
+        vec3f_copy(sVrPhysicalClimbPolePrevPosition, polePosition);
+        sVrPhysicalClimbPolePrevPositionValid = true;
+        return;
+    }
+
+    Vec3f displacement;
+    for (u32 axis = 0; axis < 3; axis++) {
+        displacement[axis] = polePosition[axis] -
+            sVrPhysicalClimbPolePrevPosition[axis];
+    }
+    vec3f_copy(sVrPhysicalClimbPolePrevPosition, polePosition);
+    if (!isfinite(displacement[0]) || !isfinite(displacement[1]) ||
+        !isfinite(displacement[2])) {
+        return;
+    }
+
+    // Mario can consume the pole's new collision position before the pole
+    // reaches its normal end-of-update graphics sync. Keep the visible model
+    // on that same current transform while a physical grip is active.
+    obj_update_gfx_pos_and_angle(pole);
+
+    // Move the native anchor and every cached tracked contact together. If
+    // only Mario moved, the controller delta would immediately cancel the
+    // platform displacement and leave the headset behind the moving pole.
+    for (u32 axis = 0; axis < 3; axis++) {
+        mario->pos[axis] += displacement[axis];
+        sVrPhysicalClimbContactPosition[axis] += displacement[axis];
+        if (sVrPhysicalClimbSafeReleasePositionValid) {
+            sVrPhysicalClimbSafeReleasePosition[axis] += displacement[axis];
+        }
+        for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
+            if (sVrPhysicalClimbLastPositionValid[hand]) {
+                sVrPhysicalClimbLastPosition[hand][axis] +=
+                    displacement[axis];
+            }
+        }
+    }
+    vec3f_copy(&mario->marioObj->oPosX, mario->pos);
+    vec3f_copy(mario->marioObj->header.gfx.pos, mario->pos);
+    vr_invalidate_first_person_tracked_world_cache();
+}
+
+bool vr_hand_interaction_is_at_physical_pole_top(
+    struct MarioState* mario
+) {
+    struct Object* pole = sVrPhysicalClimbPole;
+    Vec3f headsetPosition;
+    if (mario == NULL || pole == NULL ||
+        !vr_hand_interaction_is_physical_pole_climb_active(mario) ||
+        !vr_get_stabilized_headset_world_position(
+            headsetPosition,
+            false
+        )) {
+        return false;
+    }
+
+    const f32 poleHeight = fmaxf(pole->hitboxHeight, 1.0f);
+    const f32 poleTop = pole->oPosY + poleHeight -
+        pole->hitboxDownOffset;
+    const f32 topWindow = fmaxf(poleHeight * 0.03f, 10.0f);
+    return headsetPosition[1] >= poleTop - topWindow;
+}
+
+bool vr_hand_interaction_is_physical_climb_active(
+    struct MarioState* mario
+) {
+    if (mario == NULL ||
+        sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_NONE ||
+        sVrPhysicalClimbHand >= VR_CONTROLLER_COUNT) {
+        return false;
+    }
+    return sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_POLE
+        ? mario->usedObj == sVrPhysicalClimbPole &&
+            (mario->action & ACT_FLAG_ON_POLE) != 0
+        : (mario->action & ACT_FLAG_HANGING) != 0;
+}
+
+bool vr_hand_interaction_is_physical_surface_climb_active(
+    struct MarioState* mario
+) {
+    return mario != NULL &&
+        sVrPhysicalClimbType != VR_PHYSICAL_CLIMB_NONE &&
+        sVrPhysicalClimbType != VR_PHYSICAL_CLIMB_POLE &&
+        sVrPhysicalClimbHand < VR_CONTROLLER_COUNT &&
+        (mario->action & ACT_FLAG_HANGING) != 0;
+}
+
 static void vr_hand_interaction_clear_bowser_motion(void) {
     sVrBowserHandYawValid = false;
     sVrBowserPreviousHandYaw = 0;
@@ -165,12 +474,21 @@ static void vr_hand_interaction_reset(void) {
          hand++) {
         sVrFistActiveFrames[hand] = 0;
         sVrFistPreviousPositionValid[hand] = false;
+        sVrClimbPreviousPositionValid[hand] = false;
+        vec3f_set(
+            sVrClimbPreviousPosition[hand],
+            0.0f,
+            0.0f,
+            0.0f
+        );
         sVrMotionDivePairFrames[hand] = 0;
         sVrGripPressed[hand] = false;
     }
     sVrPunchSoundComboStep = 0;
     sVrPunchSoundComboResetFrames = 0;
     sVrBowserGripHand = VR_CONTROLLER_COUNT;
+    sVrPhysicalClimbRegrabFrames = 0;
+    vr_hand_interaction_clear_physical_climb();
     vr_hand_interaction_clear_bowser_motion();
 }
 
@@ -310,12 +628,19 @@ static void vr_hand_interaction_register_motion_dive_punch(
 }
 
 static f32 vr_hand_interaction_fist_radius(void) {
-    const f32 gloveSize = (f32)clamp(
-        configVrGloveSize,
-        25U,
-        250U
-    );
-    return VR_FIST_BASE_RADIUS * gloveSize / 70.0f;
+    static unsigned int sCachedGloveSize = ~0U;
+    static f32 sCachedRadius = VR_FIST_BASE_RADIUS;
+
+    if (sCachedGloveSize != configVrGloveSize) {
+        sCachedGloveSize = configVrGloveSize;
+        const f32 gloveSize = (f32)clamp(
+            sCachedGloveSize,
+            25U,
+            250U
+        );
+        sCachedRadius = VR_FIST_BASE_RADIUS * gloveSize / 70.0f;
+    }
+    return sCachedRadius;
 }
 
 static f32 vr_hand_interaction_fist_length(
@@ -350,7 +675,12 @@ bool vr_hand_interaction_blocks_native_held_object_release(
         mario->heldObj != NULL &&
         mario->heldObj == sVrTrackedHeldObject &&
         sVrTrackedHeldHand < VR_CONTROLLER_COUNT &&
-        sVrGripPressed[sVrTrackedHeldHand];
+        sVrGripPressed[sVrTrackedHeldHand] &&
+        // Damage and knockback use Mario's native forced-drop path. A closed
+        // physical grip must not cancel that rule or instantly reclaim Mips,
+        // a baby penguin, or another carried actor after Mario is hit.
+        mario->hurtCounter == 0 &&
+        mario->knockbackTimer == 0;
 }
 
 bool vr_hand_interaction_get_held_object_position(
@@ -367,6 +697,45 @@ bool vr_hand_interaction_get_held_object_position(
     return true;
 }
 
+bool vr_hand_interaction_get_late_held_object_position(
+    struct Object* object,
+    Vec3f position
+) {
+    if (position == NULL ||
+        !vr_hand_interaction_is_tracked_held_object(object)) {
+        return false;
+    }
+
+    struct VrControllerState state;
+    Vec3f handPosition;
+    if (!vr_get_controller_state(sVrTrackedHeldHand, &state) ||
+        !vr_get_controller_world_fist_from_state(
+            sVrTrackedHeldHand,
+            &state,
+            handPosition,
+            NULL
+        )) {
+        return vr_hand_interaction_get_held_object_position(
+            object,
+            position
+        );
+    }
+
+    const f32 objectHeight = fmaxf(
+        object->hitboxHeight,
+        object->hurtboxHeight
+    );
+    const f32 centerOffset = clamp(
+        objectHeight * 0.5f - object->hitboxDownOffset,
+        0.0f,
+        80.0f
+    );
+    position[0] = handPosition[0];
+    position[1] = handPosition[1] - centerOffset;
+    position[2] = handPosition[2];
+    return true;
+}
+
 bool vr_hand_interaction_apply_held_object_transform(
     struct Object* object
 ) {
@@ -378,6 +747,10 @@ bool vr_hand_interaction_apply_held_object_transform(
 
     vec3f_copy(&object->oPosX, sVrTrackedHeldPosition);
     vec3f_copy(object->header.gfx.pos, sVrTrackedHeldPosition);
+    // Floating gloves are late-patched from the newest OpenXR pose. Do not
+    // blend a physically held object toward its previous 30 Hz position or
+    // it visibly trails behind the hand despite sharing the same hold point.
+    object->header.gfx.skipInterpolationTimestamp = gGlobalTimer;
     object->header.gfx.node.flags |= GRAPH_RENDER_ACTIVE;
     object->header.gfx.node.flags &= ~GRAPH_RENDER_INVISIBLE;
     return true;
@@ -419,8 +792,11 @@ bool vr_hand_interaction_is_player_anchor_object(
     struct Object* object
 ) {
     return object != NULL &&
-        object == sVrTrackedAnchorObject &&
-        sVrTrackedAnchorHand < VR_CONTROLLER_COUNT;
+        ((object == sVrTrackedAnchorObject &&
+          sVrTrackedAnchorHand < VR_CONTROLLER_COUNT) ||
+         (object == sVrPhysicalClimbPole &&
+          sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_POLE &&
+          sVrPhysicalClimbHand < VR_CONTROLLER_COUNT));
 }
 
 static void vr_hand_interaction_update_grip(
@@ -680,6 +1056,17 @@ static void vr_hand_interaction_update_held_position(
     vr_hand_interaction_apply_held_object_transform(object);
 }
 
+static bool vr_hand_interaction_requires_native_carry(
+    struct Object* object
+) {
+    // Crazy/Jumping Boxes deliberately take control of Mario for their
+    // three-bounce sequence. Treating them like Bob-ombs or ordinary held
+    // enemies pins the box to a hand and suppresses the movement that is the
+    // object's entire purpose. Keep this behavior-specific so normal enemies
+    // remain decoupled from Mario's old forced pickup/backstep motion.
+    return object != NULL && obj_has_behavior(object, bhvJumpingBox);
+}
+
 static bool vr_hand_interaction_adopt_native_hold(
     struct MarioState* mario,
     u32 hand,
@@ -693,6 +1080,7 @@ static bool vr_hand_interaction_adopt_native_hold(
         hand >= VR_CONTROLLER_COUNT ||
         !sVrGripPressed[hand] ||
         obj_has_behavior(object, bhvBowser) ||
+        vr_hand_interaction_requires_native_carry(object) ||
         (object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
         return false;
     }
@@ -784,6 +1172,102 @@ static bool vr_hand_interaction_grab_overlaps_object(
             deltaZ * deltaZ;
     }
     return true;
+}
+
+static bool vr_hand_interaction_try_collect_cap(
+    struct MarioState* mario,
+    u32 hand,
+    const Vec3f handPosition
+) {
+    if (mario == NULL ||
+        hand >= VR_CONTROLLER_COUNT ||
+        handPosition == NULL ||
+        gObjectLists == NULL) {
+        return false;
+    }
+
+    const f32 handRadius = vr_hand_interaction_fist_radius();
+    struct ObjectNode* list = &gObjectLists[OBJ_LIST_LEVEL];
+    struct ObjectNode* node = list->next;
+    while (node != NULL && node != list) {
+        struct Object* object = (struct Object*)node;
+        node = node->next;
+
+        if ((object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
+            object->oIntangibleTimer != 0 ||
+            (object->oInteractType & INTERACT_CAP) == 0 ||
+            (object->oInteractStatus & INT_STATUS_INTERACTED) != 0 ||
+            !vr_hand_interaction_grab_overlaps_object(
+                handPosition,
+                handRadius,
+                object,
+                NULL
+            )) {
+            continue;
+        }
+
+        if (process_interaction(
+                mario,
+                INTERACT_CAP,
+                object,
+                interact_cap
+            )) {
+            vr_apply_haptic(hand, 0.45f, 0.08f, -1.0f);
+            VR_INTERACTION_DEBUG(
+                "[VR] Hand contact collected a cap.\n"
+            );
+            return true;
+        }
+    }
+    return false;
+}
+
+void vr_hand_interaction_update_headset_collider(
+    struct MarioState* mario
+) {
+    if (mario == NULL ||
+        mario->playerIndex != 0 ||
+        mario->marioObj == NULL) {
+        return;
+    }
+
+    const bool useHeadsetCollider =
+        vr_is_active() &&
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
+        ((mario->action & ACT_FLAG_SWIMMING) != 0 ||
+         mario->action == ACT_FLYING ||
+         mario->action == ACT_FLYING_TRIPLE_JUMP ||
+         vr_hand_interaction_is_physical_climb_active(mario));
+
+    if (!useHeadsetCollider) {
+        if (sVrHeadsetColliderActive) {
+            mario->marioObj->hitboxRadius =
+                sVrHeadsetColliderSavedRadius;
+            mario->marioObj->hitboxHeight =
+                sVrHeadsetColliderSavedHeight;
+            mario->marioObj->hitboxDownOffset =
+                sVrHeadsetColliderSavedDownOffset;
+            vec3f_copy(&mario->marioObj->oPosX, mario->pos);
+            sVrHeadsetColliderActive = false;
+        }
+        return;
+    }
+
+    Vec3f headsetPosition;
+    if (!vr_get_stabilized_headset_world_position(
+            headsetPosition,
+            false
+        )) {
+        return;
+    }
+
+    // This is deliberately only Mario's object-interaction cylinder. The
+    // environment/physics collider remains at mario->pos so flight and water
+    // movement stay compatible with the original engine and multiplayer.
+    vr_hand_interaction_apply_headset_collider(
+        mario,
+        headsetPosition
+    );
 }
 
 static struct Object* vr_hand_interaction_find_bowser_tail(
@@ -958,6 +1442,1628 @@ static struct Object* vr_hand_interaction_find_grab_target(
     }
 
     return nearestObject;
+}
+
+static bool vr_hand_interaction_climb_is_occupied(void) {
+    return sVrTrackedHeldObject != NULL ||
+        sVrTrackedHootObject != NULL ||
+        sVrTrackedAnchorObject != NULL ||
+        sVrPhysicalClimbType != VR_PHYSICAL_CLIMB_NONE ||
+        sVrBowserGripHand < VR_CONTROLLER_COUNT;
+}
+
+static struct Object* vr_hand_interaction_find_pole_target(
+    struct MarioState* mario,
+    const Vec3f handPosition
+) {
+    if (mario == NULL ||
+        mario->heldObj != NULL ||
+        gObjectLists == NULL ||
+        vr_hand_interaction_climb_is_occupied()) {
+        return NULL;
+    }
+
+    const f32 handRadius = vr_hand_interaction_fist_radius();
+    struct Object* nearestPole = NULL;
+    f32 nearestDistanceSquared = 0.0f;
+    struct ObjectNode* list = &gObjectLists[OBJ_LIST_POLELIKE];
+    struct ObjectNode* node = list->next;
+
+    while (node != NULL && node != list) {
+        struct Object* pole = (struct Object*)node;
+        node = node->next;
+
+        f32 distanceSquared;
+        if ((pole->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
+            pole->oIntangibleTimer != 0 ||
+            (pole->oInteractType & INTERACT_POLE) == 0 ||
+            !vr_hand_interaction_grab_overlaps_object(
+                handPosition,
+                handRadius,
+                pole,
+                &distanceSquared
+            )) {
+            continue;
+        }
+
+        if (nearestPole == NULL ||
+            distanceSquared < nearestDistanceSquared) {
+            nearestPole = pole;
+            nearestDistanceSquared = distanceSquared;
+        }
+    }
+
+    return nearestPole;
+}
+
+static void vr_hand_interaction_set_physical_climb_owner(
+    u32 hand,
+    const Vec3f climbPosition
+) {
+    if (hand >= VR_CONTROLLER_COUNT || climbPosition == NULL) {
+        return;
+    }
+
+    sVrPhysicalClimbHands[hand] = true;
+    sVrPhysicalClimbHand = hand;
+    for (u32 axis = 0; axis < 3; axis++) {
+        sVrPhysicalClimbContactPosition[axis] = climbPosition[axis];
+        sVrPhysicalClimbLastPosition[hand][axis] = climbPosition[axis];
+    }
+    sVrPhysicalClimbLastPositionValid[hand] = true;
+    vr_invalidate_first_person_tracked_world_cache();
+}
+
+static bool vr_hand_interaction_start_pole_climb(
+    struct MarioState* mario,
+    struct Object* pole,
+    u32 hand,
+    const Vec3f climbPosition
+) {
+    if (mario == NULL ||
+        mario->marioObj == NULL ||
+        pole == NULL ||
+        hand >= VR_CONTROLLER_COUNT) {
+        return false;
+    }
+
+    bool allowInteract = true;
+    smlua_call_event_hooks(
+        HOOK_ALLOW_INTERACT,
+        mario,
+        pole,
+        INTERACT_POLE,
+        &allowInteract
+    );
+    if (!allowInteract) {
+        return false;
+    }
+
+    Vec3f previousPosition;
+    vec3f_copy(previousPosition, mario->pos);
+    mario_stop_riding_and_holding(mario);
+    mario->interactObj = pole;
+    mario->usedObj = pole;
+    mario->pos[0] = pole->oPosX;
+    mario->pos[2] = pole->oPosZ;
+    vec3f_set(mario->vel, 0.0f, 0.0f, 0.0f);
+    mario->forwardVel = 0.0f;
+    mario->marioObj->oMarioPoleUnk108 = 0;
+    mario->marioObj->oMarioPoleYawVel = 0;
+    mario->marioObj->oMarioPolePos =
+        mario->pos[1] - pole->oPosY;
+    mario->faceAngle[0] = 0;
+    vec3f_copy(mario->marioObj->header.gfx.pos, mario->pos);
+
+    if (!set_mario_action(mario, ACT_HOLDING_POLE, 0)) {
+        vec3f_copy(mario->pos, previousPosition);
+        vec3f_copy(mario->marioObj->header.gfx.pos, mario->pos);
+        mario->usedObj = NULL;
+        smlua_call_event_hooks(
+            HOOK_ON_INTERACT,
+            mario,
+            pole,
+            INTERACT_POLE,
+            false
+        );
+        return false;
+    }
+
+    sVrPhysicalClimbType = VR_PHYSICAL_CLIMB_POLE;
+    sVrPhysicalClimbPole = pole;
+    vec3f_copy(
+        sVrPhysicalClimbPolePrevPosition,
+        &pole->oPosX
+    );
+    sVrPhysicalClimbPolePrevPositionValid = true;
+    for (u32 axis = 0; axis < 3; axis++) {
+        sVrPhysicalClimbCameraOffset[axis] =
+            previousPosition[axis] - mario->pos[axis];
+    }
+    vec3f_copy(
+        sVrPhysicalClimbCameraOffsetPrev,
+        sVrPhysicalClimbCameraOffset
+    );
+    vec3f_copy(sVrPhysicalClimbSafeReleasePosition, previousPosition);
+    sVrPhysicalClimbSafeReleasePositionValid = true;
+    sVrPhysicalClimbSafeReleaseTimestamp = gGlobalTimer;
+    sVrPhysicalClimbOffsetTimestamp = gGlobalTimer;
+    vr_hand_interaction_set_physical_climb_owner(
+        hand,
+        climbPosition
+    );
+    vr_hand_interaction_sync_climb_collider_to_headset(mario);
+    smlua_call_event_hooks(
+        HOOK_ON_INTERACT,
+        mario,
+        pole,
+        INTERACT_POLE,
+        true
+    );
+    vr_apply_haptic(hand, 0.5f, 0.08f, -1.0f);
+    VR_INTERACTION_DEBUG("[VR] Physical grip attached to a pole/tree.\n");
+    return true;
+}
+
+static bool vr_hand_interaction_surface_is_block_or_box(
+    struct Surface* surface
+) {
+    if (surface == NULL) {
+        return false;
+    }
+    struct Object* surfaceObject = surface->object;
+    return surfaceObject != NULL &&
+        (((surfaceObject->oInteractType & INTERACT_BREAKABLE) != 0) ||
+         obj_has_behavior(surfaceObject, bhvBreakableBox) ||
+         obj_has_behavior(surfaceObject, bhvExclamationBox) ||
+         obj_has_behavior(surfaceObject, bhvHiddenObject) ||
+         obj_has_behavior(surfaceObject, bhvPushableMetalBox) ||
+         obj_has_behavior(surfaceObject, bhvJumpingBox));
+}
+
+static bool vr_hand_interaction_surface_is_climbable_ceiling(
+    struct Surface* surface,
+    bool allowAnyCeiling
+) {
+    if (surface == NULL ||
+        (surface->flags & SURFACE_FLAG_INTANGIBLE) != 0 ||
+        vr_hand_interaction_surface_is_block_or_box(surface)) {
+        // Blocks and boxes remain punch/jump targets even with the climb-all
+        // cheat enabled. Never turn their temporary collision into a handhold.
+        return false;
+    }
+
+    return allowAnyCeiling
+        ? surface->normal.y <= VR_CLIMB_CEILING_MAX_NORMAL_Y
+        : surface->type == SURFACE_HANGABLE;
+}
+
+static bool vr_hand_interaction_surface_is_overhead_contact(
+    struct MarioState* mario,
+    struct Surface* surface,
+    f32 contactHeight,
+    bool allowAnyCeiling
+) {
+    if (mario == NULL || !isfinite(contactHeight)) {
+        return false;
+    }
+
+    if (vr_hand_interaction_surface_is_climbable_ceiling(
+            surface,
+            allowAnyCeiling
+        )) {
+        // A ceiling is a handhold only from its underside. In particular,
+        // Mario standing on a bridge must not be pulled through its top merely
+        // because the engine also exposes a broad hangable ceiling reference.
+        return contactHeight >= mario->pos[1] +
+            VR_CLIMB_CEILING_MIN_FEET_SEPARATION;
+    }
+
+    if (!allowAnyCeiling ||
+        surface == NULL ||
+        (surface->flags & SURFACE_FLAG_INTANGIBLE) != 0 ||
+        surface->normal.y < -VR_CLIMB_CEILING_MAX_NORMAL_Y) {
+        return false;
+    }
+
+    // Some monkey bars and grates expose only their upward-facing collision
+    // triangle, so the engine stores them in the floor partition even though
+    // the player approaches them from below. The cheat may treat that solid
+    // as a ceiling only when it is well above Mario's feet. This preserves the
+    // explicit rule that the actual ground can never become grabbable.
+    const f32 minimumOverheadHeight = mario->pos[1] + fmaxf(
+        96.0f,
+        mario->marioObj != NULL
+            ? mario->marioObj->hitboxHeight * 0.55f
+            : 96.0f
+    );
+    return contactHeight >= minimumOverheadHeight;
+}
+
+static bool vr_hand_interaction_surface_height_at_xz(
+    struct Surface* surface,
+    f32 x,
+    f32 z,
+    f32* height
+) {
+    if (surface == NULL ||
+        height == NULL ||
+        fabsf(surface->normal.y) < 0.0001f) {
+        return false;
+    }
+
+    const f32 x1 = surface->vertex1[0];
+    const f32 z1 = surface->vertex1[2];
+    const f32 x2 = surface->vertex2[0];
+    const f32 z2 = surface->vertex2[2];
+    const f32 x3 = surface->vertex3[0];
+    const f32 z3 = surface->vertex3[2];
+    const f32 edge1 = (x - x2) * (z1 - z2) -
+        (x1 - x2) * (z - z2);
+    const f32 edge2 = (x - x3) * (z2 - z3) -
+        (x2 - x3) * (z - z3);
+    const f32 edge3 = (x - x1) * (z3 - z1) -
+        (x3 - x1) * (z - z1);
+    const bool hasNegative =
+        edge1 < -0.5f || edge2 < -0.5f || edge3 < -0.5f;
+    const bool hasPositive =
+        edge1 > 0.5f || edge2 > 0.5f || edge3 > 0.5f;
+    if (hasNegative && hasPositive) {
+        return false;
+    }
+
+    *height = -(
+        surface->normal.x * x +
+        surface->normal.z * z +
+        surface->originOffset
+    ) / surface->normal.y;
+    return isfinite(*height);
+}
+
+static void vr_hand_interaction_scan_native_hangable_list(
+    struct SurfaceNode* node,
+    f32 x,
+    f32 y,
+    f32 z,
+    f32 verticalReach,
+    struct Surface** nearestSurface,
+    f32* nearestHeight,
+    f32* nearestDistance
+) {
+    while (node != NULL) {
+        struct Surface* surface = node->surface;
+        node = node->next;
+        if (surface == NULL ||
+            surface->type != SURFACE_HANGABLE ||
+            (surface->flags & SURFACE_FLAG_INTANGIBLE) != 0 ||
+            y + verticalReach < surface->lowerY ||
+            y - verticalReach > surface->upperY) {
+            continue;
+        }
+
+        f32 height = 0.0f;
+        if (!vr_hand_interaction_surface_height_at_xz(
+                surface,
+                x,
+                z,
+                &height
+            )) {
+            continue;
+        }
+
+        const f32 distanceBelowSurface = height - y;
+        if (distanceBelowSurface >=
+                -VR_CLIMB_CEILING_HAND_PLANE_TOLERANCE &&
+            distanceBelowSurface <= verticalReach &&
+            fabsf(distanceBelowSurface) < *nearestDistance) {
+            *nearestSurface = surface;
+            *nearestHeight = height;
+            *nearestDistance = fabsf(distanceBelowSurface);
+        }
+    }
+}
+
+static bool vr_hand_interaction_find_native_hangable_at_point(
+    f32 x,
+    f32 y,
+    f32 z,
+    f32 verticalReach,
+    struct Surface** surface,
+    f32* height
+) {
+    if (surface == NULL || height == NULL) {
+        return false;
+    }
+
+#if EXTENDED_BOUNDS_MODE != 3
+    if (x <= -LEVEL_BOUNDARY_MAX || x >= LEVEL_BOUNDARY_MAX ||
+        z <= -LEVEL_BOUNDARY_MAX || z >= LEVEL_BOUNDARY_MAX) {
+        return false;
+    }
+#endif
+
+    const s16 collisionX = (s16)x;
+    const s16 collisionZ = (s16)z;
+    const s16 cellX = ((collisionX + LEVEL_BOUNDARY_MAX) / CELL_SIZE) &
+        NUM_CELLS_INDEX;
+    const s16 cellZ = ((collisionZ + LEVEL_BOUNDARY_MAX) / CELL_SIZE) &
+        NUM_CELLS_INDEX;
+    f32 nearestDistance = verticalReach + 1.0f;
+    *surface = NULL;
+
+    // A native hangable can be stored in either floor or ceiling collision
+    // according to triangle winding. Inspect every partition directly so an
+    // overlapping bridge top or nearby solid cannot hide the hangable face
+    // behind find_floor/find_ceil's single nearest-surface result.
+    for (s32 partition = SPATIAL_PARTITION_FLOORS;
+         partition <= SPATIAL_PARTITION_WALLS;
+         partition++) {
+        vr_hand_interaction_scan_native_hangable_list(
+            gStaticSurfacePartition[cellZ][cellX][partition].next,
+            x,
+            y,
+            z,
+            verticalReach,
+            surface,
+            height,
+            &nearestDistance
+        );
+        vr_hand_interaction_scan_native_hangable_list(
+            gDynamicSurfacePartition[cellZ][cellX][partition].next,
+            x,
+            y,
+            z,
+            verticalReach,
+            surface,
+            height,
+            &nearestDistance
+        );
+    }
+
+    return *surface != NULL;
+}
+
+static bool vr_hand_interaction_find_native_hangable_contact(
+    const Vec3f handPosition,
+    const Vec3f previousHandPosition,
+    bool previousHandPositionValid,
+    f32 verticalReach,
+    f32 sampleOffset,
+    const f32 sampleDirections[][2],
+    u32 sampleDirectionCount,
+    struct Surface** ceiling,
+    f32* ceilingHeight,
+    Vec3f contactPosition
+) {
+    Vec3f sweep;
+    vec3f_set(sweep, 0.0f, 0.0f, 0.0f);
+    u32 pathSampleCount = 0;
+    if (previousHandPositionValid) {
+        for (u32 axis = 0; axis < 3; axis++) {
+            sweep[axis] = handPosition[axis] -
+                previousHandPosition[axis];
+        }
+        const f32 sweepLength = vec3f_length(sweep);
+        if (isfinite(sweepLength) &&
+            sweepLength <= VR_FIST_MAX_SWEEP_DISTANCE) {
+            pathSampleCount = VR_CLIMB_NATIVE_SWEEP_SAMPLES;
+        }
+    }
+
+    for (u32 pathSample = 0;
+         pathSample <= pathSampleCount;
+         pathSample++) {
+        const f32 progress = pathSampleCount > 0
+            ? (f32)pathSample / (f32)pathSampleCount
+            : 1.0f;
+        Vec3f pathPosition;
+        if (pathSampleCount > 0) {
+            for (u32 axis = 0; axis < 3; axis++) {
+                pathPosition[axis] = previousHandPosition[axis] +
+                    sweep[axis] * progress;
+            }
+        } else {
+            for (u32 axis = 0; axis < 3; axis++) {
+                pathPosition[axis] = handPosition[axis];
+            }
+        }
+
+        for (u32 sample = 0;
+             sample < sampleDirectionCount;
+             sample++) {
+            const f32 sampleX = pathPosition[0] +
+                sampleDirections[sample][0] * sampleOffset;
+            const f32 sampleZ = pathPosition[2] +
+                sampleDirections[sample][1] * sampleOffset;
+            struct Surface* hitSurface = NULL;
+            f32 hitHeight = 0.0f;
+            if (vr_hand_interaction_find_native_hangable_at_point(
+                    sampleX,
+                    pathPosition[1],
+                    sampleZ,
+                    verticalReach,
+                    &hitSurface,
+                    &hitHeight
+                )) {
+                *ceiling = hitSurface;
+                *ceilingHeight = hitHeight;
+                vec3f_set(
+                    contactPosition,
+                    sampleX,
+                    hitHeight,
+                    sampleZ
+                );
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+static bool vr_hand_interaction_find_ceiling_contact(
+    struct MarioState* mario,
+    const Vec3f handPosition,
+    const Vec3f previousHandPosition,
+    bool previousHandPositionValid,
+    bool allowAnyCeiling,
+    struct Surface** ceiling,
+    f32* ceilingHeight,
+    Vec3f contactPosition
+) {
+    if (ceiling == NULL ||
+        ceilingHeight == NULL ||
+        contactPosition == NULL) {
+        return false;
+    }
+
+    *ceiling = NULL;
+    const f32 handRadius = vr_hand_interaction_fist_radius();
+    const f32 contactHandRadius = fminf(
+        handRadius,
+        VR_CLIMB_SURFACE_HAND_RADIUS_MAX
+    );
+    const f32 reach = allowAnyCeiling
+        ? contactHandRadius + VR_CLIMB_SURFACE_EXTRA_REACH
+        : handRadius + VR_CLIMB_CEILING_EXTRA_REACH;
+    const f32 sampleOffset = contactHandRadius * 0.75f;
+    static const f32 sampleDirections[9][2] = {
+        { 0.0f, 0.0f },
+        { 1.0f, 0.0f },
+        { -1.0f, 0.0f },
+        { 0.0f, 1.0f },
+        { 0.0f, -1.0f },
+        { 0.70710678f, 0.70710678f },
+        { -0.70710678f, 0.70710678f },
+        { 0.70710678f, -0.70710678f },
+        { -0.70710678f, -0.70710678f },
+    };
+    Vec3f hitPosition;
+    struct Surface* hitSurface = NULL;
+
+    // Search native hangables by type before the generic nearest-surface
+    // queries. This is the reliable path for bridge undersides, wire netting,
+    // monkey bars, and pyramid hangables whose ordinary collision face may
+    // otherwise hide the grabbable triangle.
+    vr_hand_interaction_find_native_hangable_contact(
+        handPosition,
+        previousHandPosition,
+        previousHandPositionValid,
+        reach,
+        sampleOffset,
+        sampleDirections,
+        ARRAY_COUNT(sampleDirections),
+        ceiling,
+        ceilingHeight,
+        contactPosition
+    );
+    if (*ceiling != NULL &&
+        !vr_hand_interaction_surface_is_overhead_contact(
+            mario,
+            *ceiling,
+            *ceilingHeight,
+            allowAnyCeiling
+        )) {
+        *ceiling = NULL;
+    }
+
+    // Sample the glove's footprint rather than a single thin ray. Besides
+    // catching triangle seams, find_ceil directly queries the collision cell
+    // and is considerably cheaper than marching a long vertical ray in tiny
+    // increments every gameplay tick.
+    for (u32 sample = 0;
+         *ceiling == NULL && sample < ARRAY_COUNT(sampleDirections);
+         sample++) {
+        const f32 sampleX = handPosition[0] +
+            sampleDirections[sample][0] * sampleOffset;
+        const f32 sampleZ = handPosition[2] +
+            sampleDirections[sample][1] * sampleOffset;
+        hitSurface = NULL;
+        const f32 hitHeight = find_ceil(
+            sampleX,
+            handPosition[1] - reach,
+            sampleZ,
+            &hitSurface
+        );
+        if (hitHeight <= handPosition[1] + reach &&
+            vr_hand_interaction_surface_is_overhead_contact(
+                mario,
+                hitSurface,
+                hitHeight,
+                allowAnyCeiling
+            )) {
+            *ceiling = hitSurface;
+            *ceilingHeight = hitHeight;
+            vec3f_set(contactPosition, sampleX, hitHeight, sampleZ);
+            break;
+        }
+
+        // A bar may be modeled with only an upward-facing top triangle. Such
+        // geometry is invisible to find_ceil, so query the floor partition
+        // from just above the glove and accept only native hangables or a
+        // cheat-enabled solid that is genuinely overhead.
+        hitSurface = NULL;
+        const f32 upwardFacingHeight = find_floor(
+            sampleX,
+            handPosition[1] + reach,
+            sampleZ,
+            &hitSurface
+        );
+        if (upwardFacingHeight >= handPosition[1] - reach &&
+            upwardFacingHeight <= handPosition[1] + reach &&
+            vr_hand_interaction_surface_is_overhead_contact(
+                mario,
+                hitSurface,
+                upwardFacingHeight,
+                allowAnyCeiling
+            )) {
+            *ceiling = hitSurface;
+            *ceilingHeight = upwardFacingHeight;
+            vec3f_set(
+                contactPosition,
+                sampleX,
+                upwardFacingHeight,
+                sampleZ
+            );
+            break;
+        }
+    }
+
+    // A fast jump can cover more than the local reach span in one gameplay
+    // tick. Sweep the complete tracked path so a held grip cannot tunnel
+    // through a thin monkey-bar or ceiling triangle.
+    if (*ceiling == NULL && previousHandPositionValid) {
+        Vec3f sweepDirection;
+        for (u32 axis = 0; axis < 3; axis++) {
+            sweepDirection[axis] = handPosition[axis] -
+                previousHandPosition[axis];
+        }
+        const f32 sweepLength = vec3f_length(sweepDirection);
+        if (isfinite(sweepLength) &&
+            sweepLength > 0.001f &&
+            sweepLength <= VR_FIST_MAX_SWEEP_DISTANCE) {
+            hitSurface = NULL;
+            find_surface_on_ray(
+                (Vec3f) {
+                    previousHandPosition[0],
+                    previousHandPosition[1],
+                    previousHandPosition[2]
+                },
+                sweepDirection,
+                &hitSurface,
+                hitPosition,
+                3.0f
+            );
+            if (vr_hand_interaction_surface_is_overhead_contact(
+                    mario,
+                    hitSurface,
+                    hitPosition[1],
+                    allowAnyCeiling
+                )) {
+                *ceiling = hitSurface;
+                *ceilingHeight = hitPosition[1];
+                vec3f_copy(contactPosition, hitPosition);
+            }
+        }
+    }
+
+    // Retain the native geometry fallback for triangle seams, but only while
+    // the tracked path is still reasonably close to that ceiling.
+    const f32 nativeFallbackReach = reach * 1.5f;
+    f32 fallbackHeight = 0.0f;
+    if (*ceiling == NULL &&
+        mario != NULL &&
+        vr_hand_interaction_surface_is_climbable_ceiling(
+            mario->ceil,
+            allowAnyCeiling
+        ) &&
+        vr_hand_interaction_surface_height_at_xz(
+            mario->ceil,
+            handPosition[0],
+            handPosition[2],
+            &fallbackHeight
+        ) &&
+        fallbackHeight - handPosition[1] >=
+            -VR_CLIMB_CEILING_HAND_PLANE_TOLERANCE &&
+        fallbackHeight - handPosition[1] <= nativeFallbackReach &&
+        vr_hand_interaction_surface_is_overhead_contact(
+            mario,
+            mario->ceil,
+            fallbackHeight,
+            allowAnyCeiling
+        )) {
+        *ceiling = mario->ceil;
+        *ceilingHeight = fallbackHeight;
+        vec3f_set(
+            contactPosition,
+            handPosition[0],
+            fallbackHeight,
+            handPosition[2]
+        );
+    }
+
+    if (*ceiling == NULL) {
+        return false;
+    }
+
+    struct Surface* floor = NULL;
+    const f32 floorHeight = find_floor(
+        contactPosition[0],
+        *ceilingHeight - 160.0f - VR_CLIMB_SURFACE_CLEARANCE,
+        contactPosition[2],
+        &floor
+    );
+    if (floor != NULL && *ceilingHeight - floorHeight <= 160.0f) {
+        *ceiling = NULL;
+        return false;
+    }
+
+    return true;
+}
+
+static bool vr_hand_interaction_find_vertical_wall_contact(
+    const Vec3f handPosition,
+    const Vec3f previousHandPosition,
+    bool previousHandPositionValid,
+    struct Surface** wall,
+    Vec3f contactPosition
+) {
+    if (wall == NULL || contactPosition == NULL) {
+        return false;
+    }
+
+    *wall = NULL;
+    const f32 reach = fminf(
+        vr_hand_interaction_fist_radius(),
+        VR_CLIMB_SURFACE_HAND_RADIUS_MAX
+    ) + VR_CLIMB_SURFACE_EXTRA_REACH;
+    struct WallCollisionData collisionData = {
+        .x = handPosition[0],
+        .y = handPosition[1],
+        .z = handPosition[2],
+        .offsetY = 0.0f,
+        .radius = reach,
+    };
+    find_wall_collisions(&collisionData);
+
+    f32 nearestDistance = reach + 1.0f;
+    for (s32 index = 0; index < collisionData.numWalls; index++) {
+        struct Surface* candidate = collisionData.walls[index];
+        if (candidate == NULL ||
+            (candidate->flags & SURFACE_FLAG_INTANGIBLE) != 0 ||
+            vr_hand_interaction_surface_is_block_or_box(candidate) ||
+            fabsf(candidate->normal.y) > VR_CLIMB_WALL_MAX_NORMAL_Y) {
+            continue;
+        }
+
+        const f32 signedDistance =
+            candidate->normal.x * handPosition[0] +
+            candidate->normal.y * handPosition[1] +
+            candidate->normal.z * handPosition[2] +
+            candidate->originOffset;
+        const f32 distance = fabsf(signedDistance);
+        if (distance < nearestDistance) {
+            nearestDistance = distance;
+            *wall = candidate;
+            contactPosition[0] = handPosition[0] -
+                candidate->normal.x * signedDistance;
+            contactPosition[1] = handPosition[1] -
+                candidate->normal.y * signedDistance;
+            contactPosition[2] = handPosition[2] -
+                candidate->normal.z * signedDistance;
+        }
+    }
+
+    if (*wall == NULL && previousHandPositionValid) {
+        Vec3f sweepDirection;
+        Vec3f hitPosition;
+        struct Surface* hitSurface = NULL;
+        for (u32 axis = 0; axis < 3; axis++) {
+            sweepDirection[axis] = handPosition[axis] -
+                previousHandPosition[axis];
+        }
+        const f32 sweepLength = vec3f_length(sweepDirection);
+        if (isfinite(sweepLength) &&
+            sweepLength > 0.001f &&
+            sweepLength <= VR_FIST_MAX_SWEEP_DISTANCE) {
+            find_surface_on_ray(
+                (Vec3f) {
+                    previousHandPosition[0],
+                    previousHandPosition[1],
+                    previousHandPosition[2]
+                },
+                sweepDirection,
+                &hitSurface,
+                hitPosition,
+                3.0f
+            );
+            if (hitSurface != NULL &&
+                (hitSurface->flags & SURFACE_FLAG_INTANGIBLE) == 0 &&
+                !vr_hand_interaction_surface_is_block_or_box(
+                    hitSurface
+                ) &&
+                fabsf(hitSurface->normal.y) <=
+                    VR_CLIMB_WALL_MAX_NORMAL_Y) {
+                *wall = hitSurface;
+                vec3f_copy(contactPosition, hitPosition);
+            }
+        }
+    }
+
+    return *wall != NULL;
+}
+
+static void vr_hand_interaction_set_surface_constraint(
+    struct Surface* surface,
+    const Vec3f contactPosition,
+    const Vec3f playerReferencePosition
+) {
+    sVrPhysicalClimbSurface = surface;
+    for (u32 axis = 0; axis < 3; axis++) {
+        sVrPhysicalClimbSurfacePoint[axis] = contactPosition[axis];
+    }
+    vec3f_set(
+        sVrPhysicalClimbSurfaceNormal,
+        surface->normal.x,
+        surface->normal.y,
+        surface->normal.z
+    );
+
+    Vec3f playerSide;
+    for (u32 axis = 0; axis < 3; axis++) {
+        playerSide[axis] = playerReferencePosition[axis] -
+            contactPosition[axis];
+    }
+    // Ceiling normals already point toward the playable space below them.
+    // Only wall normals need to be oriented to the side Mario approached.
+    if (surface->normal.y > VR_CLIMB_CEILING_MAX_NORMAL_Y &&
+        vec3f_dot(sVrPhysicalClimbSurfaceNormal, playerSide) < 0.0f) {
+        vec3f_mul(sVrPhysicalClimbSurfaceNormal, -1.0f);
+    }
+}
+
+static bool vr_hand_interaction_start_ceiling_climb(
+    struct MarioState* mario,
+    struct Surface* ceiling,
+    f32 ceilingHeight,
+    const Vec3f ceilingContactPosition,
+    bool cheatCeiling,
+    u32 hand,
+    const Vec3f climbPosition
+) {
+    if (mario == NULL ||
+        mario->marioObj == NULL ||
+        ceiling == NULL ||
+        (!cheatCeiling && ceiling->type != SURFACE_HANGABLE) ||
+        hand >= VR_CONTROLLER_COUNT) {
+        return false;
+    }
+
+    Vec3f previousPosition;
+    vec3f_copy(previousPosition, mario->pos);
+    mario_stop_riding_and_holding(mario);
+    mario->ceil = ceiling;
+    mario->ceilHeight = ceilingHeight;
+    if (!cheatCeiling) {
+        mario->pos[1] = ceilingHeight - 160.0f;
+    }
+    vec3f_set(mario->vel, 0.0f, 0.0f, 0.0f);
+    mario->forwardVel = 0.0f;
+    vec3f_copy(mario->marioObj->header.gfx.pos, mario->pos);
+    if (!set_mario_action(mario, ACT_HANGING, 0)) {
+        vec3f_copy(mario->pos, previousPosition);
+        vec3f_copy(mario->marioObj->header.gfx.pos, mario->pos);
+        return false;
+    }
+
+    sVrPhysicalClimbType = cheatCeiling
+        ? VR_PHYSICAL_CLIMB_CHEAT_CEILING
+        : VR_PHYSICAL_CLIMB_CEILING;
+    sVrPhysicalClimbPole = NULL;
+    Vec3f playerReferencePosition;
+    vec3f_copy(playerReferencePosition, previousPosition);
+    playerReferencePosition[1] +=
+        fmaxf(mario->marioObj->hitboxHeight, 160.0f) * 0.5f;
+    vr_hand_interaction_set_surface_constraint(
+        ceiling,
+        ceilingContactPosition,
+        playerReferencePosition
+    );
+    for (u32 axis = 0; axis < 3; axis++) {
+        sVrPhysicalClimbCameraOffset[axis] =
+            previousPosition[axis] - mario->pos[axis];
+    }
+    vec3f_copy(
+        sVrPhysicalClimbCameraOffsetPrev,
+        sVrPhysicalClimbCameraOffset
+    );
+    vec3f_copy(sVrPhysicalClimbSafeReleasePosition, previousPosition);
+    sVrPhysicalClimbSafeReleasePositionValid = true;
+    sVrPhysicalClimbSafeReleaseTimestamp = gGlobalTimer;
+    sVrPhysicalClimbOffsetTimestamp = gGlobalTimer;
+    vr_hand_interaction_set_physical_climb_owner(
+        hand,
+        climbPosition
+    );
+    vr_hand_interaction_sync_climb_collider_to_headset(mario);
+    mario->input |= INPUT_A_DOWN;
+    vr_apply_haptic(hand, 0.5f, 0.08f, -1.0f);
+    VR_INTERACTION_DEBUG("[VR] Physical grip attached to a hangable ceiling.\n");
+    return true;
+}
+
+static bool vr_hand_interaction_start_wall_climb(
+    struct MarioState* mario,
+    struct Surface* wall,
+    const Vec3f wallContactPosition,
+    u32 hand,
+    const Vec3f climbPosition
+) {
+    if (mario == NULL ||
+        mario->marioObj == NULL ||
+        wall == NULL ||
+        fabsf(wall->normal.y) > VR_CLIMB_WALL_MAX_NORMAL_Y ||
+        hand >= VR_CONTROLLER_COUNT) {
+        return false;
+    }
+
+    Vec3f previousPosition;
+    Vec3f playerReferencePosition;
+    vec3f_copy(previousPosition, mario->pos);
+    vec3f_copy(playerReferencePosition, previousPosition);
+    playerReferencePosition[1] +=
+        fmaxf(mario->marioObj->hitboxHeight, 160.0f) * 0.5f;
+    mario_stop_riding_and_holding(mario);
+    mario->ceil = wall;
+    mario->ceilHeight = wallContactPosition[1] + 160.0f;
+    vec3f_set(mario->vel, 0.0f, 0.0f, 0.0f);
+    mario->forwardVel = 0.0f;
+    vec3f_copy(mario->marioObj->header.gfx.pos, mario->pos);
+    if (!set_mario_action(mario, ACT_HANGING, 0)) {
+        return false;
+    }
+
+    sVrPhysicalClimbType = VR_PHYSICAL_CLIMB_CHEAT_WALL;
+    sVrPhysicalClimbPole = NULL;
+    vr_hand_interaction_set_surface_constraint(
+        wall,
+        wallContactPosition,
+        playerReferencePosition
+    );
+    vec3f_set(sVrPhysicalClimbCameraOffset, 0.0f, 0.0f, 0.0f);
+    vec3f_set(sVrPhysicalClimbCameraOffsetPrev, 0.0f, 0.0f, 0.0f);
+    vec3f_copy(sVrPhysicalClimbSafeReleasePosition, previousPosition);
+    sVrPhysicalClimbSafeReleasePositionValid = true;
+    sVrPhysicalClimbSafeReleaseTimestamp = gGlobalTimer;
+    sVrPhysicalClimbOffsetTimestamp = gGlobalTimer;
+    vr_hand_interaction_set_physical_climb_owner(
+        hand,
+        climbPosition
+    );
+    vr_hand_interaction_sync_climb_collider_to_headset(mario);
+    mario->input |= INPUT_A_DOWN;
+    vr_apply_haptic(hand, 0.5f, 0.08f, -1.0f);
+    VR_INTERACTION_DEBUG("[VR] Cheat climb attached to a vertical wall.\n");
+    return true;
+}
+
+static bool vr_hand_interaction_try_physical_climb(
+    struct MarioState* mario,
+    u32 hand,
+    const Vec3f handPosition,
+    const Vec3f previousHandPosition,
+    bool previousHandPositionValid,
+    const Vec3f climbPosition,
+    bool allowCheatContact
+) {
+    if (!configVrPhysicalClimbing ||
+        mario == NULL ||
+        hand >= VR_CONTROLLER_COUNT ||
+        vr_hand_interaction_climb_is_occupied()) {
+        return false;
+    }
+
+    struct Object* pole = vr_hand_interaction_find_pole_target(
+        mario,
+        handPosition
+    );
+    if (pole != NULL) {
+        return vr_hand_interaction_start_pole_climb(
+            mario,
+            pole,
+            hand,
+            climbPosition
+        );
+    }
+
+    if (mario->heldObj != NULL) {
+        return false;
+    }
+
+    struct Surface* ceiling = NULL;
+    f32 ceilingHeight = 0.0f;
+    Vec3f ceilingContactPosition;
+    const bool allowCheatSurface =
+        configVrCheatSurfaceClimbing && allowCheatContact;
+    if (vr_hand_interaction_find_ceiling_contact(
+            mario,
+            handPosition,
+            previousHandPosition,
+            previousHandPositionValid,
+            allowCheatSurface,
+            &ceiling,
+            &ceilingHeight,
+            ceilingContactPosition
+        )) {
+        const bool nativeHangable =
+            ceiling->type == SURFACE_HANGABLE;
+        if (!nativeHangable && !allowCheatSurface) {
+            return false;
+        }
+        const bool cheatCeiling = !nativeHangable;
+        return vr_hand_interaction_start_ceiling_climb(
+            mario,
+            ceiling,
+            ceilingHeight,
+            ceilingContactPosition,
+            cheatCeiling,
+            hand,
+            climbPosition
+        );
+    }
+
+    if (!allowCheatSurface) {
+        return false;
+    }
+
+    struct Surface* wall = NULL;
+    Vec3f wallContactPosition;
+    if (vr_hand_interaction_find_vertical_wall_contact(
+            handPosition,
+            previousHandPosition,
+            previousHandPositionValid,
+            &wall,
+            wallContactPosition
+        )) {
+        return vr_hand_interaction_start_wall_climb(
+            mario,
+            wall,
+            wallContactPosition,
+            hand,
+            climbPosition
+        );
+    }
+
+    return false;
+}
+
+static bool vr_hand_interaction_try_add_physical_climb_hand(
+    struct MarioState* mario,
+    u32 hand,
+    const Vec3f handPosition,
+    const Vec3f climbPosition,
+    bool allowCheatContact
+) {
+    if (!configVrPhysicalClimbing ||
+        mario == NULL ||
+        hand >= VR_CONTROLLER_COUNT ||
+        sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_NONE ||
+        sVrPhysicalClimbHands[hand]) {
+        return false;
+    }
+
+    if (sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_POLE) {
+        f32 distanceSquared;
+        if (sVrPhysicalClimbPole == NULL ||
+            (sVrPhysicalClimbPole->activeFlags &
+                ACTIVE_FLAG_ACTIVE) == 0 ||
+            !vr_hand_interaction_grab_overlaps_object(
+                handPosition,
+                vr_hand_interaction_fist_radius(),
+                sVrPhysicalClimbPole,
+                &distanceSquared
+            )) {
+            return false;
+        }
+    } else if (sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_CEILING ||
+               sVrPhysicalClimbType ==
+                   VR_PHYSICAL_CLIMB_CHEAT_CEILING) {
+        struct Surface* ceiling = NULL;
+        f32 ceilingHeight = 0.0f;
+        Vec3f ceilingContactPosition;
+        const bool cheatCeiling =
+            sVrPhysicalClimbType ==
+                VR_PHYSICAL_CLIMB_CHEAT_CEILING;
+        if (cheatCeiling && !allowCheatContact) {
+            return false;
+        }
+        if (!vr_hand_interaction_find_ceiling_contact(
+                mario,
+                handPosition,
+                sVrClimbPreviousPosition[hand],
+                sVrClimbPreviousPositionValid[hand],
+                cheatCeiling,
+                &ceiling,
+                &ceilingHeight,
+                ceilingContactPosition
+            )) {
+            return false;
+        }
+
+        // A new monkey-bar contact can lie on an adjacent ceiling triangle.
+        // Update the collision reference without moving Mario's native anchor;
+        // tracked hand deltas alone own camera translation during the hold.
+        mario->ceil = ceiling;
+        mario->ceilHeight = ceilingHeight;
+        Vec3f playerReferencePosition;
+        vec3f_copy(playerReferencePosition, mario->pos);
+        playerReferencePosition[1] +=
+            fmaxf(mario->marioObj->hitboxHeight, 160.0f) * 0.5f;
+        vr_hand_interaction_set_surface_constraint(
+            ceiling,
+            ceilingContactPosition,
+            playerReferencePosition
+        );
+    } else if (sVrPhysicalClimbType ==
+               VR_PHYSICAL_CLIMB_CHEAT_WALL) {
+        if (!allowCheatContact) {
+            return false;
+        }
+        struct Surface* wall = NULL;
+        Vec3f wallContactPosition;
+        if (!vr_hand_interaction_find_vertical_wall_contact(
+                handPosition,
+                sVrClimbPreviousPosition[hand],
+                sVrClimbPreviousPositionValid[hand],
+                &wall,
+                wallContactPosition
+            )) {
+            return false;
+        }
+
+        Vec3f playerReferencePosition;
+        vec3f_copy(playerReferencePosition, mario->pos);
+        playerReferencePosition[1] +=
+            fmaxf(mario->marioObj->hitboxHeight, 160.0f) * 0.5f;
+        vr_hand_interaction_set_surface_constraint(
+            wall,
+            wallContactPosition,
+            playerReferencePosition
+        );
+        mario->ceil = wall;
+        mario->ceilHeight = wallContactPosition[1] + 160.0f;
+    } else {
+        return false;
+    }
+
+    // The newest contact becomes the active anchor. The older hand remains
+    // attached, so releasing either controller transfers cleanly rather than
+    // dropping Mario or starting the native hand-over-hand animation.
+    vr_hand_interaction_set_physical_climb_owner(
+        hand,
+        climbPosition
+    );
+    vr_apply_haptic(hand, 0.4f, 0.06f, -1.0f);
+    VR_INTERACTION_DEBUG("[VR] Physical climb anchor changed hands.\n");
+    return true;
+}
+
+static bool vr_hand_interaction_physical_climb_matches_action(
+    struct MarioState* mario
+) {
+    if (mario == NULL) {
+        return false;
+    }
+
+    if (sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_POLE) {
+        return (mario->action & ACT_FLAG_ON_POLE) != 0 &&
+            mario->usedObj == sVrPhysicalClimbPole;
+    }
+    if (sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_CEILING ||
+        sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_CHEAT_CEILING ||
+        sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_CHEAT_WALL) {
+        return (mario->action & ACT_FLAG_HANGING) != 0;
+    }
+    return false;
+}
+
+static bool vr_hand_interaction_resolve_safe_release_position(
+    Vec3f position
+) {
+    if (position == NULL) {
+        return false;
+    }
+
+    struct WallCollisionData collisionData = { 0 };
+    resolve_and_return_wall_collisions_data(
+        position,
+        60.0f,
+        50.0f,
+        &collisionData
+    );
+    resolve_and_return_wall_collisions_data(
+        position,
+        30.0f,
+        24.0f,
+        &collisionData
+    );
+
+    struct Surface* floor = NULL;
+    struct Surface* ceiling = NULL;
+    const f32 floorHeight = find_floor(
+        position[0],
+        position[1] + 160.0f,
+        position[2],
+        &floor
+    );
+    const f32 ceilingHeight = find_ceil(
+        position[0],
+        position[1],
+        position[2],
+        &ceiling
+    );
+
+    if (floor != NULL &&
+        ceiling != NULL &&
+        ceilingHeight - floorHeight < 160.0f) {
+        return false;
+    }
+    if (floor != NULL && position[1] < floorHeight) {
+        position[1] = floorHeight;
+    }
+    if (ceiling != NULL && position[1] + 160.0f > ceilingHeight) {
+        position[1] = ceilingHeight - 160.0f;
+    }
+    if (floor != NULL && position[1] < floorHeight) {
+        return false;
+    }
+
+    return isfinite(position[0]) &&
+        isfinite(position[1]) &&
+        isfinite(position[2]);
+}
+
+static void vr_hand_interaction_sync_climb_collider_to_headset(
+    struct MarioState* mario
+) {
+    if (mario == NULL ||
+        mario->marioObj == NULL ||
+        sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_NONE ||
+        sVrPhysicalClimbHand >= VR_CONTROLLER_COUNT) {
+        return;
+    }
+
+    Vec3f headsetPosition;
+    if (!vr_get_stabilized_headset_world_position(
+            headsetPosition,
+            false
+        )) {
+        return;
+    }
+
+    // Keep the view on the same side of the grabbed wall/ceiling. Only the
+    // temporary climb offset is corrected here, so the HMD never crosses the
+    // contact plane even if a controller sample overshoots it.
+    if (sVrPhysicalClimbSurface != NULL) {
+        Vec3f fromSurface;
+        vec3f_dif(
+            fromSurface,
+            headsetPosition,
+            sVrPhysicalClimbSurfacePoint
+        );
+        const f32 surfaceDistance = vec3f_dot(
+            sVrPhysicalClimbSurfaceNormal,
+            fromSurface
+        );
+        Vec3f projectedPosition;
+        Vec3f closestSurfacePoint;
+        for (u32 axis = 0; axis < 3; axis++) {
+            projectedPosition[axis] = headsetPosition[axis] -
+                sVrPhysicalClimbSurfaceNormal[axis] *
+                    surfaceDistance;
+        }
+        closest_point_to_triangle(
+            sVrPhysicalClimbSurface,
+            projectedPosition,
+            closestSurfacePoint
+        );
+        const f32 edgeDeltaX = projectedPosition[0] -
+            closestSurfacePoint[0];
+        const f32 edgeDeltaY = projectedPosition[1] -
+            closestSurfacePoint[1];
+        const f32 edgeDeltaZ = projectedPosition[2] -
+            closestSurfacePoint[2];
+        const f32 edgeDistanceSquared =
+            edgeDeltaX * edgeDeltaX +
+            edgeDeltaY * edgeDeltaY +
+            edgeDeltaZ * edgeDeltaZ;
+        const bool besideGrabbedTriangle =
+            isfinite(edgeDistanceSquared) &&
+            edgeDistanceSquared <=
+                VR_CLIMB_SURFACE_EDGE_MARGIN *
+                VR_CLIMB_SURFACE_EDGE_MARGIN;
+
+        if (besideGrabbedTriangle &&
+            isfinite(surfaceDistance) &&
+            surfaceDistance < VR_CLIMB_SURFACE_CLEARANCE) {
+            const f32 correction =
+                VR_CLIMB_SURFACE_CLEARANCE - surfaceDistance;
+            vr_hand_interaction_prepare_climb_offset_update();
+            for (u32 axis = 0; axis < 3; axis++) {
+                const f32 axisCorrection =
+                    sVrPhysicalClimbSurfaceNormal[axis] * correction;
+                sVrPhysicalClimbCameraOffset[axis] += axisCorrection;
+                headsetPosition[axis] += axisCorrection;
+            }
+        }
+    }
+
+    // Keep the native pole/hanging action anchor fixed. Repositioning
+    // mario->pos and then compensating the camera offset created a second
+    // feedback loop with floor/wall resolution, visible as bridge jitter.
+    // Object interactions only need Mario's interaction object at the HMD;
+    // the accumulated camera offset is committed to mario->pos once on release.
+    vr_hand_interaction_apply_headset_collider(
+        mario,
+        headsetPosition
+    );
+
+    // This collision-safe fallback is only consumed when a climb ends, where
+    // it is resolved once more using the current position. Refreshing it a few
+    // times per gameplay second is enough to retain a nearby fallback without
+    // repeating several wall/floor/ceiling queries on every climbing tick.
+    if (!sVrPhysicalClimbSafeReleasePositionValid ||
+        (u32)(gGlobalTimer - sVrPhysicalClimbSafeReleaseTimestamp) >=
+            VR_CLIMB_SAFE_RELEASE_SAMPLE_FRAMES) {
+        Vec3f releasePosition;
+        sVrPhysicalClimbSafeReleaseTimestamp = gGlobalTimer;
+        for (u32 axis = 0; axis < 3; axis++) {
+            releasePosition[axis] = mario->pos[axis] +
+                sVrPhysicalClimbCameraOffset[axis];
+        }
+        if (vr_hand_interaction_resolve_safe_release_position(
+                releasePosition
+            )) {
+            vec3f_copy(
+                sVrPhysicalClimbSafeReleasePosition,
+                releasePosition
+            );
+            sVrPhysicalClimbSafeReleasePositionValid = true;
+        }
+    }
+
+    vr_invalidate_first_person_tracked_world_cache();
+}
+
+static void vr_hand_interaction_commit_physical_climb_offset(
+    struct MarioState* mario
+) {
+    Vec3f offset;
+    Vec3f safeReleasePosition;
+    const bool safeReleasePositionValid =
+        sVrPhysicalClimbSafeReleasePositionValid;
+    vec3f_copy(offset, sVrPhysicalClimbCameraOffset);
+    vec3f_copy(
+        safeReleasePosition,
+        sVrPhysicalClimbSafeReleasePosition
+    );
+    vr_hand_interaction_clear_physical_climb();
+
+    if (mario != NULL && mario->marioObj != NULL) {
+        for (u32 axis = 0; axis < 3; axis++) {
+            mario->pos[axis] += offset[axis];
+        }
+        if (!vr_hand_interaction_resolve_safe_release_position(
+                mario->pos
+            ) && safeReleasePositionValid) {
+            vec3f_copy(mario->pos, safeReleasePosition);
+        }
+        vec3f_copy(&mario->marioObj->oPosX, mario->pos);
+        vec3f_copy(mario->marioObj->header.gfx.pos, mario->pos);
+    }
+    sVrPhysicalClimbRegrabFrames =
+        VR_CLIMB_REGRAB_COOLDOWN_FRAMES;
+    vr_invalidate_first_person_tracked_world_cache();
+}
+
+static bool vr_hand_interaction_find_ledge_release(
+    struct MarioState* mario,
+    Vec3f releasePosition,
+    struct Surface** releaseFloor
+) {
+    if (mario == NULL ||
+        releasePosition == NULL ||
+        releaseFloor == NULL ||
+        sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_NONE ||
+        sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_POLE) {
+        return false;
+    }
+
+    Vec3f headsetPosition;
+    if (!vr_get_stabilized_headset_world_position(
+            headsetPosition,
+            false
+        )) {
+        return false;
+    }
+
+    struct Surface* floor = NULL;
+    const f32 floorHeight = find_floor(
+        headsetPosition[0],
+        headsetPosition[1] +
+            VR_CLIMB_LEDGE_MAX_FLOOR_ABOVE_HEAD,
+        headsetPosition[2],
+        &floor
+    );
+    if (floor == NULL ||
+        floor->normal.y < 0.5f ||
+        floorHeight < mario->floorHeight +
+            VR_CLIMB_LEDGE_MIN_RISE ||
+        floorHeight < headsetPosition[1] -
+            VR_CLIMB_LEDGE_MAX_HEAD_ABOVE_FLOOR ||
+        floorHeight > headsetPosition[1] +
+            VR_CLIMB_LEDGE_MAX_FLOOR_ABOVE_HEAD) {
+        return false;
+    }
+
+    vec3f_set(
+        releasePosition,
+        headsetPosition[0],
+        floorHeight,
+        headsetPosition[2]
+    );
+    if (!vr_hand_interaction_resolve_safe_release_position(
+            releasePosition
+        )) {
+        return false;
+    }
+
+    struct Surface* resolvedFloor = NULL;
+    const f32 resolvedFloorHeight = find_floor(
+        releasePosition[0],
+        releasePosition[1] + 160.0f,
+        releasePosition[2],
+        &resolvedFloor
+    );
+    if (resolvedFloor == NULL ||
+        resolvedFloor->normal.y < 0.5f ||
+        fabsf(resolvedFloorHeight - releasePosition[1]) > 16.0f) {
+        return false;
+    }
+
+    releasePosition[1] = resolvedFloorHeight;
+    *releaseFloor = resolvedFloor;
+    return true;
+}
+
+static void vr_hand_interaction_release_physical_climb(
+    struct MarioState* mario,
+    const Vec3f releaseVelocity,
+    bool allowSwingRelease
+) {
+    const u32 hand = sVrPhysicalClimbHand;
+    const bool actionMatches =
+        vr_hand_interaction_physical_climb_matches_action(mario);
+    bool swingRelease = false;
+    if (allowSwingRelease &&
+        configVrSwingClimbRelease &&
+        releaseVelocity != NULL) {
+        const f32 speed = sqrtf(
+            releaseVelocity[0] * releaseVelocity[0] +
+            releaseVelocity[1] * releaseVelocity[1] +
+            releaseVelocity[2] * releaseVelocity[2]
+        );
+        swingRelease = isfinite(speed) &&
+            speed >= VR_CLIMB_SWING_RELEASE_MIN_SPEED;
+    }
+    Vec3f ledgeReleasePosition;
+    struct Surface* ledgeReleaseFloor = NULL;
+    const bool ledgeRelease =
+        actionMatches &&
+        !swingRelease &&
+        vr_hand_interaction_find_ledge_release(
+            mario,
+            ledgeReleasePosition,
+            &ledgeReleaseFloor
+        );
+    vr_hand_interaction_commit_physical_climb_offset(mario);
+
+    if (actionMatches) {
+        mario->usedObj = NULL;
+        if (ledgeRelease) {
+            const s16 viewYaw = vr_get_first_person_view_yaw();
+            vec3f_copy(mario->pos, ledgeReleasePosition);
+            vec3f_set(mario->vel, 0.0f, 0.0f, 0.0f);
+            mario->forwardVel = 0.0f;
+            mario->floor = ledgeReleaseFloor;
+            mario->floorHeight = ledgeReleasePosition[1];
+            mario->faceAngle[0] = 0;
+            mario->faceAngle[1] = viewYaw;
+            mario->faceAngle[2] = 0;
+            mario->intendedYaw = viewYaw;
+            vec3f_copy(&mario->marioObj->oPosX, mario->pos);
+            vec3f_copy(
+                mario->marioObj->header.gfx.pos,
+                mario->pos
+            );
+            set_mario_action(mario, ACT_IDLE, 0);
+        } else if (swingRelease) {
+            const s16 viewYaw = vr_get_first_person_view_yaw();
+            mario->faceAngle[0] = 0;
+            mario->faceAngle[1] = viewYaw;
+            mario->faceAngle[2] = 0;
+            mario->intendedYaw = viewYaw;
+            set_mario_action(mario, ACT_WALL_KICK_AIR, 0);
+        } else {
+            // Simply opening the last attached hand is always a clean fall;
+            // only a sufficiently fast tracked release becomes a launch.
+            set_mario_action(mario, ACT_FREEFALL, 0);
+        }
+    }
+    if (hand < VR_CONTROLLER_COUNT) {
+        vr_apply_haptic(hand, 0.15f, 0.04f, -1.0f);
+    }
+    VR_INTERACTION_DEBUG("[VR] Physical climb grip released.\n");
+}
+
+static void vr_hand_interaction_maintain_physical_climb(
+    struct MarioState* mario,
+    u32 hand,
+    bool climbPositionValid,
+    const Vec3f climbPosition,
+    const Vec3f handVelocity
+) {
+    if (mario == NULL ||
+        hand >= VR_CONTROLLER_COUNT ||
+        !sVrPhysicalClimbHands[hand]) {
+        return;
+    }
+
+    if (climbPositionValid) {
+        for (u32 axis = 0; axis < 3; axis++) {
+            sVrPhysicalClimbLastPosition[hand][axis] =
+                climbPosition[axis];
+        }
+        sVrPhysicalClimbLastPositionValid[hand] = true;
+    }
+
+    if (!climbPositionValid ||
+        !sVrGripPressed[hand] ||
+        !configVrPhysicalClimbing ||
+        ((sVrPhysicalClimbType ==
+              VR_PHYSICAL_CLIMB_CHEAT_CEILING ||
+          sVrPhysicalClimbType ==
+              VR_PHYSICAL_CLIMB_CHEAT_WALL) &&
+         !configVrCheatSurfaceClimbing) ||
+        (sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_POLE &&
+         (sVrPhysicalClimbPole == NULL ||
+          (sVrPhysicalClimbPole->activeFlags &
+              ACTIVE_FLAG_ACTIVE) == 0))) {
+        sVrPhysicalClimbHands[hand] = false;
+        sVrPhysicalClimbLastPositionValid[hand] = false;
+        if (hand != sVrPhysicalClimbHand) {
+            return;
+        }
+
+        for (u32 otherHand = 0;
+             otherHand < VR_CONTROLLER_COUNT;
+             otherHand++) {
+            if (sVrPhysicalClimbHands[otherHand] &&
+                sVrGripPressed[otherHand] &&
+                sVrPhysicalClimbLastPositionValid[otherHand]) {
+                vr_hand_interaction_set_physical_climb_owner(
+                    otherHand,
+                    sVrPhysicalClimbLastPosition[otherHand]
+                );
+                return;
+            }
+        }
+
+        vr_hand_interaction_release_physical_climb(
+            mario,
+            climbPositionValid ? handVelocity : NULL,
+            climbPositionValid && !sVrGripPressed[hand]
+        );
+        return;
+    }
+
+    if (!vr_hand_interaction_physical_climb_matches_action(mario)) {
+        vr_hand_interaction_commit_physical_climb_offset(mario);
+        return;
+    }
+
+    if (sVrPhysicalClimbType != VR_PHYSICAL_CLIMB_POLE &&
+        (mario->input & INPUT_A_PRESSED) != 0) {
+        const s16 viewYaw = vr_get_first_person_view_yaw();
+        vr_hand_interaction_commit_physical_climb_offset(mario);
+        mario->faceAngle[0] = 0;
+        mario->faceAngle[1] = viewYaw;
+        mario->faceAngle[2] = 0;
+        mario->intendedYaw = viewYaw;
+        set_mario_action(mario, ACT_WALL_KICK_AIR, 0);
+        vr_apply_haptic(hand, 0.3f, 0.05f, -1.0f);
+        return;
+    }
+
+    if (hand == sVrPhysicalClimbHand) {
+        vr_hand_interaction_prepare_climb_offset_update();
+        for (u32 axis = 0; axis < 3; axis++) {
+            sVrPhysicalClimbCameraOffset[axis] +=
+                sVrPhysicalClimbContactPosition[axis] -
+                climbPosition[axis];
+            // Consume this tracked delta once. Leaving the original contact
+            // in place caused the complete displacement to be accumulated
+            // again every tick, producing the post/tree position drift.
+            sVrPhysicalClimbContactPosition[axis] =
+                climbPosition[axis];
+        }
+
+        if (sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_POLE &&
+            mario->controller != NULL &&
+            mario->controller->stickY < -16.0f) {
+            const f32 slideInput = clamp(
+                (-mario->controller->stickY - 16.0f) / 48.0f,
+                0.0f,
+                1.0f
+            );
+            const f32 poleBottom = sVrPhysicalClimbPole != NULL
+                ? sVrPhysicalClimbPole->oPosY -
+                    sVrPhysicalClimbPole->hitboxDownOffset
+                : mario->floorHeight;
+            const f32 minimumHeight = fmaxf(
+                mario->floorHeight,
+                poleBottom
+            );
+            const f32 availableDrop = fmaxf(
+                0.0f,
+                mario->pos[1] - minimumHeight
+            );
+            sVrPhysicalClimbCameraOffset[1] -= fminf(
+                availableDrop,
+                slideInput * VR_PHYSICAL_POLE_SLIDE_MAX_SPEED
+            );
+        }
+        vr_invalidate_first_person_tracked_world_cache();
+    }
+
+    if (hand == sVrPhysicalClimbHand) {
+        vr_hand_interaction_sync_climb_collider_to_headset(mario);
+    }
+
+    // The native climbable remains the gameplay anchor while room-scale HMD
+    // and hand tracking can render the torso away from it. Suppress stick
+    // locomotion so a closed physical grip behaves as a stationary,
+    // weightless one-hand hold. Jump input is deliberately preserved.
+    mario->input &= ~INPUT_NONZERO_ANALOG;
+    mario->input |= INPUT_ZERO_MOVEMENT;
+    if (mario->controller != NULL) {
+        mario->controller->stickX = 0.0f;
+        mario->controller->stickY = 0.0f;
+        mario->controller->stickMag = 0.0f;
+    }
+    if (sVrPhysicalClimbType != VR_PHYSICAL_CLIMB_POLE) {
+        mario->input |= INPUT_A_DOWN;
+    }
 }
 
 static bool vr_hand_interaction_object_can_be_anchored(
@@ -1249,17 +3355,23 @@ static bool vr_hand_interaction_try_grab(
         return false;
     }
 
-    // The native pickup animation is deliberately bypassed. The object still
-    // uses its normal HELD_HELD behavior, preserving fuses, NPC state, Lua
-    // hooks, and network ownership while its local transform follows the hand.
+    const bool nativeCarry =
+        vr_hand_interaction_requires_native_carry(object);
+
+    // Normal grabbables bypass Mario's pickup animation and follow the hand.
+    // Native carry objects retain the Mario-moving action they require.
     mario->input &= ~INPUT_INTERACT_OBJ_GRABBABLE;
-    sVrTrackedHeldObject = object;
-    sVrTrackedHeldHand = hand;
-    vr_hand_interaction_update_held_position(
-        object,
-        handPosition,
-        handVelocity
-    );
+    if (nativeCarry) {
+        set_mario_action(mario, ACT_CRAZY_BOX_BOUNCE, 0);
+    } else {
+        sVrTrackedHeldObject = object;
+        sVrTrackedHeldHand = hand;
+        vr_hand_interaction_update_held_position(
+            object,
+            handPosition,
+            handVelocity
+        );
+    }
 
     if (object->oSyncID != 0) {
         network_send_object_reliability(object, true);
@@ -1592,6 +3704,255 @@ static bool vr_hand_interaction_process_lists(
     return false;
 }
 
+static void vr_hand_interaction_collect_coins_at_headset(
+    struct MarioState* mario
+) {
+    if (mario == NULL ||
+        gObjectLists == NULL ||
+        sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_NONE) {
+        return;
+    }
+
+    Vec3f headsetPosition;
+    if (!vr_get_stabilized_headset_world_position(
+            headsetPosition,
+            false
+        )) {
+        return;
+    }
+
+    const f32 headsetBottom = headsetPosition[1] -
+        VR_HEADSET_INTERACTION_HEIGHT * 0.5f;
+    const f32 headsetTop = headsetBottom +
+        VR_HEADSET_INTERACTION_HEIGHT;
+
+    // Object collision is normally generated before Mario's late-frame HMD
+    // collider update. Scan only while physically climbing and only for coins,
+    // giving the headset a small, safe collectible extension without moving
+    // Mario's environment collider or triggering enemies, hazards, and warps.
+    for (s32 listIndex = 0;
+         listIndex < NUM_OBJ_LISTS;
+         listIndex++) {
+        struct ObjectNode* list = &gObjectLists[listIndex];
+        struct ObjectNode* node = list->next;
+
+        while (node != NULL && node != list) {
+            struct Object* object = (struct Object*)node;
+            node = node->next;
+
+            if ((object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
+                object->oIntangibleTimer != 0 ||
+                (object->oInteractType & INTERACT_COIN) == 0 ||
+                (object->oInteractStatus & INT_STATUS_INTERACTED) != 0) {
+                continue;
+            }
+
+            const f32 dx = object->oPosX - headsetPosition[0];
+            const f32 dz = object->oPosZ - headsetPosition[2];
+            const f32 combinedRadius =
+                VR_HEADSET_INTERACTION_RADIUS +
+                MAX(object->hitboxRadius, 0.0f);
+            if (dx * dx + dz * dz >
+                combinedRadius * combinedRadius) {
+                continue;
+            }
+
+            const f32 objectBottom =
+                object->oPosY - object->hitboxDownOffset;
+            const f32 objectTop =
+                objectBottom + MAX(object->hitboxHeight, 0.0f);
+            if (headsetBottom > objectTop || headsetTop < objectBottom) {
+                continue;
+            }
+
+            process_interaction(
+                mario,
+                INTERACT_COIN,
+                object,
+                interact_coin
+            );
+        }
+    }
+}
+
+static bool vr_hand_interaction_point_overlaps_object(
+    const Vec3f position,
+    f32 radius,
+    f32 height,
+    struct Object* object
+) {
+    if (position == NULL || object == NULL) {
+        return false;
+    }
+
+    const f32 objectRadius = fmaxf(
+        object->hitboxRadius,
+        object->hurtboxRadius
+    );
+    const f32 objectHeight = fmaxf(
+        object->hitboxHeight,
+        object->hurtboxHeight
+    );
+    if (objectRadius <= 0.0f || objectHeight <= 0.0f) {
+        return false;
+    }
+
+    const f32 dx = object->oPosX - position[0];
+    const f32 dz = object->oPosZ - position[2];
+    const f32 combinedRadius = radius + objectRadius;
+    if (dx * dx + dz * dz > combinedRadius * combinedRadius) {
+        return false;
+    }
+
+    const f32 pointBottom = position[1] - height * 0.5f;
+    const f32 pointTop = pointBottom + height;
+    const f32 objectBottom =
+        object->oPosY - object->hitboxDownOffset;
+    const f32 objectTop = objectBottom + objectHeight;
+    return pointBottom <= objectTop && pointTop >= objectBottom;
+}
+
+static bool vr_hand_interaction_is_collectible_star(
+    struct Object* object
+) {
+    return object != NULL &&
+        (object->oInteractType & INTERACT_STAR_OR_KEY) != 0 &&
+        // Preserve the original requirement that Bowser's keys are collected
+        // by Mario rather than remotely touched with a tracked extremity.
+        !obj_has_behavior(object, bhvBowserKey);
+}
+
+static bool vr_hand_interaction_process_star_contacts(
+    struct MarioState* mario,
+    const Vec3f handPositions[VR_CONTROLLER_COUNT],
+    const bool handPositionValid[VR_CONTROLLER_COUNT]
+) {
+    if (mario == NULL || gObjectLists == NULL) {
+        return false;
+    }
+
+    const f32 handRadius = vr_hand_interaction_fist_radius();
+    for (s32 listIndex = 0;
+         listIndex < NUM_OBJ_LISTS;
+         listIndex++) {
+        struct ObjectNode* list = &gObjectLists[listIndex];
+        struct ObjectNode* node = list->next;
+
+        while (node != NULL && node != list) {
+            struct Object* object = (struct Object*)node;
+            node = node->next;
+
+            if ((object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
+                object->oIntangibleTimer != 0 ||
+                (object->oInteractStatus & INT_STATUS_INTERACTED) != 0 ||
+                !vr_hand_interaction_is_collectible_star(object)) {
+                continue;
+            }
+
+            bool touching = false;
+            u32 touchedHand = VR_CONTROLLER_COUNT;
+            for (u32 hand = 0;
+                 !touching && hand < VR_CONTROLLER_COUNT;
+                 hand++) {
+                if (handPositionValid != NULL &&
+                    handPositions != NULL &&
+                    handPositionValid[hand] &&
+                    vr_hand_interaction_point_overlaps_object(
+                        handPositions[hand],
+                        handRadius,
+                        handRadius * 2.0f,
+                        object
+                    )) {
+                    touching = true;
+                    touchedHand = hand;
+                }
+            }
+            if (!touching) {
+                continue;
+            }
+
+            if (process_interaction(
+                    mario,
+                    INTERACT_STAR_OR_KEY,
+                    object,
+                    interact_star_or_key
+                )) {
+                if (touchedHand < VR_CONTROLLER_COUNT) {
+                    vr_apply_haptic(
+                        touchedHand,
+                        0.45f,
+                        0.08f,
+                        -1.0f
+                    );
+                }
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool vr_hand_interaction_process_head_contacts(
+    struct MarioState* mario,
+    const Vec3f headsetPosition
+) {
+    if (mario == NULL ||
+        headsetPosition == NULL ||
+        gObjectLists == NULL) {
+        return false;
+    }
+
+    for (s32 listIndex = 0;
+         listIndex < NUM_OBJ_LISTS;
+         listIndex++) {
+        struct ObjectNode* list = &gObjectLists[listIndex];
+        struct ObjectNode* node = list->next;
+
+        while (node != NULL && node != list) {
+            struct Object* object = (struct Object*)node;
+            node = node->next;
+
+            const bool collectibleStar =
+                vr_hand_interaction_is_collectible_star(object);
+            if ((object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
+                object->oIntangibleTimer != 0 ||
+                (object->oInteractStatus & INT_STATUS_INTERACTED) != 0 ||
+                (!collectibleStar &&
+                 (object->oInteractType & INTERACT_DAMAGE) == 0) ||
+                !vr_hand_interaction_point_overlaps_object(
+                    headsetPosition,
+                    VR_HEADSET_INTERACTION_RADIUS,
+                    VR_HEADSET_INTERACTION_HEIGHT,
+                    object
+                )) {
+                continue;
+            }
+
+            // Match the native interaction priority: a real star wins over a
+            // simultaneous damage contact. Bowser keys remain body-only.
+            if (collectibleStar &&
+                process_interaction(
+                    mario,
+                    INTERACT_STAR_OR_KEY,
+                    object,
+                    interact_star_or_key
+                )) {
+                return true;
+            }
+            if ((object->oInteractType & INTERACT_DAMAGE) != 0 &&
+                process_interaction(
+                    mario,
+                    INTERACT_DAMAGE,
+                    object,
+                    interact_damage
+                )) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 void vr_hand_interaction_update(struct MarioState* mario) {
     // Remote Mario states run through the same interaction function. They
     // must not reset the local player's tracked fist state.
@@ -1599,11 +3960,30 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         return;
     }
 
-    const bool trackingAvailable =
+    const bool headsetTrackingAvailable =
         vr_is_active() &&
         configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
-        configVrMotionControllerInput &&
         mario->marioObj != NULL;
+    Vec3f headsetPosition;
+    const bool headsetPositionValid =
+        headsetTrackingAvailable &&
+        vr_get_stabilized_headset_world_position(
+            headsetPosition,
+            false
+        );
+    if (headsetPositionValid &&
+        (mario->action & ACT_FLAG_INTANGIBLE) == 0) {
+        if (vr_hand_interaction_process_head_contacts(
+                mario,
+                headsetPosition
+            )) {
+            return;
+        }
+    }
+
+    const bool trackingAvailable =
+        headsetTrackingAvailable &&
+        configVrMotionControllerInput;
     const bool canStartInteraction =
         trackingAvailable &&
         (mario->action & ACT_FLAG_INTANGIBLE) == 0;
@@ -1611,12 +3991,21 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         if (sVrInteractionTrackingActive ||
             sVrTrackedHeldObject != NULL ||
             sVrTrackedAnchorObject != NULL ||
-            sVrTrackedHootObject != NULL) {
+            sVrTrackedHootObject != NULL ||
+            sVrPhysicalClimbType != VR_PHYSICAL_CLIMB_NONE) {
             if (sVrTrackedHeldObject != NULL) {
                 vr_hand_interaction_release_grab(mario, false);
             }
             if (sVrTrackedAnchorObject != NULL) {
                 vr_hand_interaction_release_player_anchor(mario);
+            }
+            if (sVrPhysicalClimbType !=
+                VR_PHYSICAL_CLIMB_NONE) {
+                vr_hand_interaction_release_physical_climb(
+                    mario,
+                    NULL,
+                    false
+                );
             }
             vr_hand_interaction_force_release_hoot(mario);
             vr_hand_interaction_reset();
@@ -1625,6 +4014,16 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         return;
     }
     sVrInteractionTrackingActive = true;
+
+    if (sVrTrackedHeldObject != NULL &&
+        mario->heldObj == sVrTrackedHeldObject &&
+        (mario->hurtCounter != 0 || mario->knockbackTimer != 0)) {
+        // Some native damage paths finish setting the hurt state after their
+        // normal drop opportunity. Force the tracked object through the same
+        // native drop path on the first damaged frame, even if grip stays
+        // closed. Re-grabbing still requires a fresh grip edge.
+        vr_hand_interaction_release_grab(mario, false);
+    }
 
     if (sVrTrackedHeldObject != NULL &&
         (mario->heldObj != sVrTrackedHeldObject ||
@@ -1669,6 +4068,14 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         vr_hand_interaction_release_player_anchor(mario);
     }
 
+    if (sVrPhysicalClimbType != VR_PHYSICAL_CLIMB_NONE &&
+        !vr_hand_interaction_physical_climb_matches_action(mario)) {
+        // A native action (including a pole jump) already took ownership.
+        // Preserve the physical camera position without overwriting that
+        // new action or its launch velocity.
+        vr_hand_interaction_commit_physical_climb_offset(mario);
+    }
+
     if (!configVrPhysicalGrabbing) {
         if (sVrTrackedHeldObject != NULL) {
             vr_hand_interaction_release_grab(mario, false);
@@ -1677,6 +4084,19 @@ void vr_hand_interaction_update(struct MarioState* mario) {
             vr_hand_interaction_release_player_anchor(mario);
         }
         vr_hand_interaction_clear_hoot_hold();
+    }
+    if (!configVrPhysicalClimbing &&
+        sVrPhysicalClimbType != VR_PHYSICAL_CLIMB_NONE) {
+        vr_hand_interaction_release_physical_climb(
+            mario,
+            NULL,
+            false
+        );
+    }
+
+    if (canStartInteraction &&
+        sVrPhysicalClimbType != VR_PHYSICAL_CLIMB_NONE) {
+        vr_hand_interaction_collect_coins_at_headset(mario);
     }
 
     if (!configVrMarioPunchSound) {
@@ -1689,6 +4109,15 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         }
     }
 
+    if (sVrPhysicalClimbRegrabFrames > 0) {
+        sVrPhysicalClimbRegrabFrames--;
+    }
+
+    Vec3f collectibleHandPositions[VR_CONTROLLER_COUNT];
+    bool collectibleHandPositionValid[VR_CONTROLLER_COUNT] = {
+        false,
+        false
+    };
     for (u32 hand = 0;
          hand < VR_CONTROLLER_COUNT;
          hand++) {
@@ -1719,11 +4148,35 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         vec3f_set(velocity, 0.0f, 0.0f, 0.0f);
         const bool positionValid =
             controllerAvailable &&
-            vr_get_controller_world_fist(
+            vr_get_controller_world_fist_from_state(
                 hand,
+                &state,
                 position,
                 velocity
             );
+        if (positionValid) {
+            vec3f_copy(
+                collectibleHandPositions[hand],
+                position
+            );
+            collectibleHandPositionValid[hand] = true;
+        }
+        Vec3f climbPosition;
+        vec3f_set(climbPosition, 0.0f, 0.0f, 0.0f);
+        const bool climbPositionValid =
+            positionValid &&
+            vr_get_controller_climb_fist(
+                position,
+                climbPosition
+            );
+
+        if (positionValid && canStartInteraction) {
+            vr_hand_interaction_try_collect_cap(
+                mario,
+                hand,
+                position
+            );
+        }
 
         if (positionValid &&
             sVrTrackedHeldObject == NULL &&
@@ -1760,6 +4213,14 @@ void vr_hand_interaction_update(struct MarioState* mario) {
                     velocity
                 );
             }
+        } else if (sVrPhysicalClimbHands[hand]) {
+            vr_hand_interaction_maintain_physical_climb(
+                mario,
+                hand,
+                climbPositionValid,
+                climbPosition,
+                velocity
+            );
         } else if (sVrTrackedHootHand == hand) {
             if (!positionValid ||
                 !sVrGripPressed[hand]) {
@@ -1778,37 +4239,92 @@ void vr_hand_interaction_update(struct MarioState* mario) {
                 );
             }
         } else if (canStartInteraction &&
-                   configVrPhysicalGrabbing &&
                    sVrGripPressed[hand] &&
-                   positionValid) {
-            const bool grabbedObject =
-                vr_hand_interaction_try_bowser_grab(
-                    mario,
-                    hand,
-                    position
-                );
-            if (!grabbedObject && !gripWasPressed) {
-                const bool grabbedRegularObject =
+                   positionValid &&
+                   climbPositionValid) {
+            bool interactionStarted = false;
+            if (sVrPhysicalClimbType !=
+                VR_PHYSICAL_CLIMB_NONE) {
+                interactionStarted =
+                    vr_hand_interaction_try_add_physical_climb_hand(
+                        mario,
+                        hand,
+                        position,
+                        climbPosition,
+                        !gripWasPressed
+                    );
+            }
+            if (!interactionStarted &&
+                configVrPhysicalGrabbing &&
+                sVrPhysicalClimbType ==
+                    VR_PHYSICAL_CLIMB_NONE) {
+                interactionStarted =
+                    vr_hand_interaction_try_bowser_grab(
+                        mario,
+                        hand,
+                        position
+                    );
+            }
+            if (!interactionStarted &&
+                !gripWasPressed &&
+                configVrPhysicalGrabbing &&
+                sVrPhysicalClimbType ==
+                    VR_PHYSICAL_CLIMB_NONE) {
+                interactionStarted =
                     vr_hand_interaction_try_grab(
                         mario,
                         hand,
                         position,
                         velocity
                     );
-                if (!grabbedRegularObject) {
-                    vr_hand_interaction_try_actor_hold(
+            }
+            if (!interactionStarted &&
+                sVrPhysicalClimbRegrabFrames == 0 &&
+                sVrPhysicalClimbType ==
+                    VR_PHYSICAL_CLIMB_NONE) {
+                // A held grip can auto-catch only native poles, trees, and
+                // hangables as the controller enters reach. Cheat-only wall
+                // and ceiling contacts require the fresh grip edge passed
+                // below, preventing invisible nearby geometry from latching.
+                interactionStarted =
+                    vr_hand_interaction_try_physical_climb(
                         mario,
                         hand,
-                        position
+                        position,
+                        sVrClimbPreviousPosition[hand],
+                        sVrClimbPreviousPositionValid[hand],
+                        climbPosition,
+                        !gripWasPressed
                     );
-                }
             }
+            if (!interactionStarted &&
+                !gripWasPressed &&
+                configVrPhysicalGrabbing &&
+                sVrPhysicalClimbType ==
+                    VR_PHYSICAL_CLIMB_NONE) {
+                vr_hand_interaction_try_actor_hold(
+                    mario,
+                    hand,
+                    position
+                );
+            }
+        }
+
+        if (positionValid) {
+            vec3f_copy(
+                sVrClimbPreviousPosition[hand],
+                position
+            );
+            sVrClimbPreviousPositionValid[hand] = true;
+        } else {
+            sVrClimbPreviousPositionValid[hand] = false;
         }
 
         const bool punchStarted =
             vr_consume_physical_punch(hand);
         const bool handIsHoldingObject =
             sVrTrackedHeldHand == hand ||
+            sVrPhysicalClimbHands[hand] ||
             sVrTrackedHootHand == hand ||
             sVrTrackedAnchorHand == hand ||
             sVrBowserGripHand == hand;
@@ -1881,5 +4397,13 @@ void vr_hand_interaction_update(struct MarioState* mario) {
             position
         );
         sVrFistPreviousPositionValid[hand] = true;
+    }
+
+    if (canStartInteraction) {
+        vr_hand_interaction_process_star_contacts(
+            mario,
+            collectibleHandPositions,
+            collectibleHandPositionValid
+        );
     }
 }

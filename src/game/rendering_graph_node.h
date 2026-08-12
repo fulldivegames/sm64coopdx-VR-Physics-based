@@ -5,6 +5,8 @@
 
 #include "engine/graph_node.h"
 
+struct VrControllerState;
+
 #define MATRIX_STACK_SIZE 64
 extern Mat4 gMatStack[MATRIX_STACK_SIZE];
 extern Mat4 gMatStackPrev[MATRIX_STACK_SIZE];
@@ -44,6 +46,7 @@ extern f32 gOverrideFar;
 void geo_process_node_and_siblings(struct GraphNode *firstNode);
 void geo_process_root(struct GraphNodeRoot *node, Vp *b, Vp *c, s32 clearColor);
 void register_mtx_vr_ui(Mtx *matrix);
+void register_mtx_vr_hud(Mtx *matrix);
 void vr_reset_first_person_calibration(void);
 void vr_handle_camera_mode_change(void);
 void vr_adjust_first_person_camera_direction(Vec3f direction);
@@ -54,6 +57,21 @@ bool vr_get_controller_world_fist(
     Vec3f worldPosition,
     Vec3f worldVelocity
 );
+bool vr_get_controller_world_fist_from_state(
+    u32 handIndex,
+    const struct VrControllerState* state,
+    Vec3f worldPosition,
+    Vec3f worldVelocity
+);
+bool vr_get_controller_climb_fist(
+    const Vec3f worldPosition,
+    Vec3f climbPosition
+);
+bool vr_get_stabilized_headset_world_position(
+    Vec3f worldPosition,
+    bool previousFrame
+);
+void vr_invalidate_first_person_tracked_world_cache(void);
 
 struct GraphNodeInterpData {
     Vec3s translation;

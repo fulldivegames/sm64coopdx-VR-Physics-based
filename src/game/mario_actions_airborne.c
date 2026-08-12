@@ -20,6 +20,7 @@
 #include "pc/configfile.h"
 #include "pc/network/network.h"
 #include "pc/lua/smlua.h"
+#include "pc/vr/vr.h"
 #include "hardcoded.h"
 #include "vr_hand_interaction.h"
 
@@ -380,6 +381,17 @@ static bool vr_get_horizontal_view_yaw(
     return true;
 }
 
+static f32 vr_flying_speed_scale(void) {
+    if (!vr_is_active()) {
+        return 1.0f;
+    }
+    return (f32)clamp(
+        configVrFlyingSpeed,
+        VR_FLYING_SPEED_MIN,
+        VR_FLYING_SPEED_MAX
+    ) / 100.0f;
+}
+
 void update_flying_yaw(struct MarioState *m) {
     if (!m) { return; }
     s16 targetYawVel = -(s16)(m->controller->stickX * (m->forwardVel / 4.0f));
@@ -445,10 +457,12 @@ static bool update_vr_headset_flying(struct MarioState* m) {
         m->forwardVel = 4.0f;
     }
 
-    m->vel[0] = m->forwardVel *
+    const f32 flightSpeed =
+        m->forwardVel * vr_flying_speed_scale();
+    m->vel[0] = flightSpeed *
         coss(m->faceAngle[0]) * sins(m->faceAngle[1]);
-    m->vel[1] = m->forwardVel * sins(m->faceAngle[0]);
-    m->vel[2] = m->forwardVel *
+    m->vel[1] = flightSpeed * sins(m->faceAngle[0]);
+    m->vel[2] = flightSpeed *
         coss(m->faceAngle[0]) * coss(m->faceAngle[1]);
     m->slideVelX = m->vel[0];
     m->slideVelZ = m->vel[2];
@@ -525,9 +539,11 @@ void update_flying(struct MarioState *m) {
         m->faceAngle[0] = -0x2AAA;
     }
 
-    m->vel[0] = m->forwardVel * coss(m->faceAngle[0]) * sins(m->faceAngle[1]);
-    m->vel[1] = m->forwardVel * sins(m->faceAngle[0]);
-    m->vel[2] = m->forwardVel * coss(m->faceAngle[0]) * coss(m->faceAngle[1]);
+    const f32 flightSpeed =
+        m->forwardVel * vr_flying_speed_scale();
+    m->vel[0] = flightSpeed * coss(m->faceAngle[0]) * sins(m->faceAngle[1]);
+    m->vel[1] = flightSpeed * sins(m->faceAngle[0]);
+    m->vel[2] = flightSpeed * coss(m->faceAngle[0]) * coss(m->faceAngle[1]);
 
     m->slideVelX = m->vel[0];
     m->slideVelZ = m->vel[2];
@@ -609,7 +625,12 @@ u32 common_air_action_step(struct MarioState *m, u32 landAction, s32 animation, 
             break;
 
         case AIR_STEP_GRABBED_CEILING:
-            set_mario_action(m, ACT_START_HANGING, 0);
+            if (!(m->playerIndex == 0 &&
+                  vr_is_active() &&
+                  configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
+                  !configVrStandardClimbing)) {
+                set_mario_action(m, ACT_START_HANGING, 0);
+            }
             break;
 
         case AIR_STEP_HIT_LAVA_WALL:

@@ -185,6 +185,11 @@ void rom_assets_load(void) {
         sCurrentSegmentMemory = NULL;
     }
 
+    // Correct a tiny original Castle Grounds mesh split after its vertices
+    // have been populated from the user's ROM.
+    extern void castle_grounds_fix_exterior_corner_seam(void);
+    castle_grounds_fix_exterior_corner_seam();
+
     fclose(sRomFile);
 }
 

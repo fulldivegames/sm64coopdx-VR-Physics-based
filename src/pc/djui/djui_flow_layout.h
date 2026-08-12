@@ -5,6 +5,9 @@ struct DjuiFlowLayout {
     struct DjuiBase base;
     enum DjuiFlowDirection flowDirection;
     struct DjuiScreenValue margin;
+    f32 contentHeight;
+    f32 scrollY;
+    struct DjuiBase* lastAutoScrollSelection;
 };
 
 void djui_flow_layout_set_flow_direction(struct DjuiFlowLayout* layout, enum DjuiFlowDirection flowDirection);

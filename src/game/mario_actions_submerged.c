@@ -21,6 +21,7 @@
 #include "pc/network/network.h"
 #include "pc/lua/smlua.h"
 #include "pc/lua/smlua_hooks.h"
+#include "pc/vr/vr.h"
 
 #define MIN_SWIM_STRENGTH 160
 #define MIN_SWIM_SPEED 16.0f
@@ -33,6 +34,8 @@ static s16 sSwimStrength[MAX_PLAYERS] = { MIN_SWIM_STRENGTH, MIN_SWIM_STRENGTH, 
                                           MIN_SWIM_STRENGTH, MIN_SWIM_STRENGTH, MIN_SWIM_STRENGTH, MIN_SWIM_STRENGTH,
                                           MIN_SWIM_STRENGTH, MIN_SWIM_STRENGTH, MIN_SWIM_STRENGTH, MIN_SWIM_STRENGTH,
                                           MIN_SWIM_STRENGTH, MIN_SWIM_STRENGTH, MIN_SWIM_STRENGTH, MIN_SWIM_STRENGTH };
+static s16 sVrSwimStableYaw[MAX_PLAYERS] = { 0 };
+static bool sVrSwimStableYawValid[MAX_PLAYERS] = { false };
 
 static s16 sWaterCurrentSpeeds[] = { 28, 12, 8, 4 };
 
@@ -265,7 +268,15 @@ static void stationary_slow_down(struct MarioState *m) {
 static void update_swimming_speed(struct MarioState *m, f32 decelThreshold) {
     if (!m) { return; }
     f32 buoyancy = get_buoyancy(m);
-    f32 maxSpeed = 28.0f;
+    const f32 speedScale = vr_is_active()
+        ? (f32)clamp(
+            configVrSwimmingSpeed,
+            VR_SWIMMING_SPEED_MIN,
+            VR_SWIMMING_SPEED_MAX
+        ) / 100.0f
+        : 1.0f;
+    f32 maxSpeed = 28.0f * speedScale;
+    decelThreshold *= speedScale;
 
     if (m->action & ACT_FLAG_STATIONARY) {
         m->forwardVel -= 2.0f;
@@ -350,9 +361,18 @@ static bool update_vr_swimming_direction(struct MarioState* m) {
         direction[0] * direction[0] +
         direction[2] * direction[2]
     );
-    if (horizontalLength > 0.0001f) {
-        m->faceAngle[1] = atan2s(direction[2], direction[0]);
+    // Yaw is undefined when the view vector is nearly vertical. Preserve the
+    // last reliable horizontal heading through that pole instead of allowing
+    // tiny tracking noise to flip Mario sideways while looking up or down.
+    if (horizontalLength > 0.15f) {
+        sVrSwimStableYaw[m->playerIndex] =
+            atan2s(direction[2], direction[0]);
+        sVrSwimStableYawValid[m->playerIndex] = true;
+    } else if (!sVrSwimStableYawValid[m->playerIndex]) {
+        sVrSwimStableYaw[m->playerIndex] = m->faceAngle[1];
+        sVrSwimStableYawValid[m->playerIndex] = true;
     }
+    m->faceAngle[1] = sVrSwimStableYaw[m->playerIndex];
     m->faceAngle[0] = (s16)clamp(
         (s32)atan2s(horizontalLength, direction[1]),
         -0x3F00,
@@ -571,8 +591,19 @@ static s32 check_water_jump(struct MarioState *m) {
     if (!m) { return 0; }
     s32 probe = (s32)(m->pos[1] + 1.5f);
 
+    bool hasWaterJumpDirection =
+        m->faceAngle[0] >= 0 && m->controller->stickY < -60.0f;
+    Vec3f viewDirection;
+    if (vr_get_first_person_view_direction(m, viewDirection) &&
+        viewDirection[1] >= 0.70710678f &&
+        m->controller->stickY > 60.0f) {
+        // In first-person VR, looking at least 45 degrees upward and pressing
+        // forward replaces the original backward-stick water-exit input.
+        hasWaterJumpDirection = true;
+    }
+
     if (m->input & INPUT_A_PRESSED) {
-        if (probe >= m->waterLevel - 80 && m->faceAngle[0] >= 0 && m->controller->stickY < -60.0f) {
+        if (probe >= m->waterLevel - 80 && hasWaterJumpDirection) {
             bool allowForceAction = true;
             smlua_call_event_hooks(HOOK_ALLOW_FORCE_WATER_ACTION, m, true, &allowForceAction);
             if (!allowForceAction) { return FALSE; }
@@ -872,6 +903,11 @@ static s32 check_water_grab(struct MarioState *m) {
     // grabbable. Since water grabbing doesn't check the appropriate input flag,
     // you can use water grab to pick up heave ho.
     if (m->playerIndex != 0) { return FALSE; }
+    if (vr_is_active() &&
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
+        !configVrStandardGrabbing) {
+        return FALSE;
+    }
     if (m->marioObj->collidedObjInteractTypes & INTERACT_GRABBABLE) {
         struct Object *object = mario_get_collided_object(m, INTERACT_GRABBABLE);
         f32 dx = object->oPosX - m->pos[0];

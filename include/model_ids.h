@@ -616,5 +616,6 @@
 #define MODEL_WARIOS_WINGED_METAL_CAP     0xF6 // warios_winged_metal_cap_geo
 
 #define MODEL_ERROR_MODEL                 0xF7 // error_model_geo
+#define MODEL_VR_TWIRL_TORNADO            0xF8 // vr_twirl_tornado_geo
 
 #endif // MODEL_IDS_H

@@ -81,5 +81,8 @@ extern const Gfx pokey_seg5_dl_050130B0[];
 extern const Gfx tornado_seg5_dl_05014450[];
 extern const Gfx tornado_seg5_dl_050145C0[];
 extern const GeoLayout tweester_geo[];
+extern const Gfx vr_twirl_tornado_dl[];
+extern const Gfx vr_twirl_tornado_geometry_dl[];
+extern const GeoLayout vr_twirl_tornado_geo[];
 
 #endif

@@ -7,7 +7,9 @@
 #include "djui_panel_confirm.h"
 #include "pc/controller/controller_sdl.h"
 #include "pc/pc_main.h"
+#include "pc/network/version.h"
 #include "pc/update_checker.h"
+#include "pc/utils/misc.h"
 
 extern ALIGNED8 u8 texture_coopdx_logo[];
 
@@ -22,6 +24,133 @@ static void djui_panel_main_quit(struct DjuiBase* caller) {
                               DLANG(MAIN, QUIT_TITLE),
                               DLANG(MAIN, QUIT_CONFIRM),
                               djui_panel_main_quit_yes);
+}
+
+static void djui_panel_main_open_vr_releases(
+    UNUSED struct DjuiBase* caller
+) {
+    open_url(VR_RELEASES_URL);
+}
+
+static void djui_panel_main_create_vr_version_status(
+    struct DjuiThreePanel* panel
+) {
+    char versionText[96] = { 0 };
+    snprintf(
+        versionText,
+        sizeof(versionText),
+        "SM64 Co-Op DX VR %s",
+        get_vr_version()
+    );
+
+    struct DjuiText* version = djui_text_create(
+        &panel->base,
+        versionText
+    );
+    djui_base_set_size_type(
+        &version->base,
+        DJUI_SVT_ABSOLUTE,
+        DJUI_SVT_ABSOLUTE
+    );
+    djui_base_set_size(&version->base, 460.0f, 32.0f);
+    djui_base_set_alignment(
+        &version->base,
+        DJUI_HALIGN_LEFT,
+        DJUI_VALIGN_BOTTOM
+    );
+    djui_base_set_location(&version->base, 12.0f, 44.0f);
+    djui_base_set_color(&version->base, 220, 220, 220, 255);
+    djui_text_set_alignment(
+        version,
+        DJUI_HALIGN_LEFT,
+        DJUI_VALIGN_BOTTOM
+    );
+    djui_text_set_font_scale(
+        version,
+        version->fontScale * 0.62f
+    );
+    djui_text_set_drop_shadow(version, 0, 0, 0, 180);
+
+    const enum VrUpdateStatus status = vr_update_get_status();
+    if (status == VR_UPDATE_AVAILABLE) {
+        char updateText[128] = { 0 };
+        snprintf(
+            updateText,
+            sizeof(updateText),
+            "Update available: %s - Open GitHub",
+            vr_update_get_latest_version()
+        );
+        struct DjuiButton* updateButton = djui_button_create(
+            &panel->base,
+            updateText,
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_main_open_vr_releases
+        );
+        djui_base_set_size_type(
+            &updateButton->base,
+            DJUI_SVT_ABSOLUTE,
+            DJUI_SVT_ABSOLUTE
+        );
+        djui_base_set_size(&updateButton->base, 440.0f, 36.0f);
+        djui_base_set_alignment(
+            &updateButton->base,
+            DJUI_HALIGN_LEFT,
+            DJUI_VALIGN_BOTTOM
+        );
+        djui_base_set_location(&updateButton->base, 8.0f, 6.0f);
+        djui_base_set_border_width(&updateButton->base, 1.0f);
+        djui_text_set_font_scale(
+            updateButton->text,
+            updateButton->text->fontScale * 0.52f
+        );
+        return;
+    }
+
+    const char* statusText = "Update not checked";
+    struct DjuiColor statusColor = { 170, 170, 170, 255 };
+    if (status == VR_UPDATE_UP_TO_DATE) {
+        statusText = "Up to date";
+        statusColor = (struct DjuiColor){ 140, 255, 160, 255 };
+    } else if (status == VR_UPDATE_CHECKING) {
+        statusText = "Checking for updates...";
+    } else if (status == VR_UPDATE_CHECK_FAILED) {
+        statusText = "Update check unavailable";
+        statusColor = (struct DjuiColor){ 255, 220, 140, 255 };
+    }
+
+    struct DjuiText* statusLabel = djui_text_create(
+        &panel->base,
+        statusText
+    );
+    djui_base_set_size_type(
+        &statusLabel->base,
+        DJUI_SVT_ABSOLUTE,
+        DJUI_SVT_ABSOLUTE
+    );
+    djui_base_set_size(&statusLabel->base, 440.0f, 30.0f);
+    djui_base_set_alignment(
+        &statusLabel->base,
+        DJUI_HALIGN_LEFT,
+        DJUI_VALIGN_BOTTOM
+    );
+    djui_base_set_location(&statusLabel->base, 12.0f, 10.0f);
+    djui_base_set_color(
+        &statusLabel->base,
+        statusColor.r,
+        statusColor.g,
+        statusColor.b,
+        statusColor.a
+    );
+    djui_text_set_alignment(
+        statusLabel,
+        DJUI_HALIGN_LEFT,
+        DJUI_VALIGN_BOTTOM
+    );
+    djui_text_set_font_scale(
+        statusLabel,
+        statusLabel->fontScale * 0.55f
+    );
+    djui_text_set_drop_shadow(statusLabel, 0, 0, 0, 180);
 }
 
 void djui_panel_main_create(struct DjuiBase* caller) {
@@ -53,27 +182,7 @@ void djui_panel_main_create(struct DjuiBase* caller) {
             if (!configExCoopTheme) { djui_base_set_location(&button4->base, 0, -30); }
         }
 
-        // these two cannot co-exist for some reason
-        if (gUpdateMessage) {
-            struct DjuiText* message = djui_text_create(&panel->base, DLANG(NOTIF, UPDATE_AVAILABLE));
-            djui_base_set_size_type(&message->base, DJUI_SVT_RELATIVE, DJUI_SVT_ABSOLUTE);
-            djui_base_set_size(&message->base, 1.0f, 1.0f);
-            djui_base_set_color(&message->base, 255, 255, 160, 255);
-            djui_text_set_alignment(message, DJUI_HALIGN_CENTER, DJUI_VALIGN_BOTTOM);
-        } else {
-            struct DjuiText* version = djui_text_create(
-                &panel->base,
-                #ifdef COMPILE_TIME
-                    get_version_with_build_date()
-                #else
-                    get_version()
-                #endif
-            );
-            djui_base_set_size_type(&version->base, DJUI_SVT_RELATIVE, DJUI_SVT_ABSOLUTE);
-            djui_base_set_size(&version->base, 1.0f, 1.0f);
-            djui_base_set_color(&version->base, 50, 50, 50, 255);
-            djui_text_set_alignment(version, configExCoopTheme ? DJUI_HALIGN_CENTER : DJUI_HALIGN_RIGHT, DJUI_VALIGN_BOTTOM);
-        }
+        djui_panel_main_create_vr_version_status(panel);
     }
 
     djui_panel_add(caller, panel, NULL);

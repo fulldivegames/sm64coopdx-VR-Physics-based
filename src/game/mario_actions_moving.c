@@ -17,6 +17,7 @@
 #include "pc/configfile.h"
 #include "pc/network/network.h"
 #include "pc/lua/smlua.h"
+#include "pc/vr/vr.h"
 
 struct LandingAction {
     s16 numFrames;
@@ -113,8 +114,59 @@ void align_with_floor(struct MarioState *m) {
 /* |description|
 Sets Mario's facing yaw to his intended yaw, applies a specified forward velocity, and transitions to the given action (e.g., `ACT_WALKING`).
 |descriptionEnd| */
+static void vr_set_direction_locked_ground_velocity(
+    struct MarioState* m,
+    f32 speed,
+    s16 travelYaw
+) {
+    speed = clamp(fabsf(speed), 0.0f, 48.0f);
+    m->faceAngle[1] = vr_get_first_person_view_yaw();
+    m->forwardVel = speed;
+    m->slideYaw = travelYaw;
+    m->slideVelX = speed * sins(travelYaw);
+    m->slideVelZ = speed * coss(travelYaw);
+    m->vel[0] = m->slideVelX;
+    m->vel[2] = m->slideVelZ;
+}
+
+static bool vr_get_horizontal_motion(
+    struct MarioState* m,
+    f32* speed,
+    s16* travelYaw
+) {
+    if (m == NULL || speed == NULL || travelYaw == NULL ||
+        !isfinite(m->vel[0]) || !isfinite(m->vel[2])) {
+        return false;
+    }
+
+    *speed = sqrtf(
+        m->vel[0] * m->vel[0] +
+        m->vel[2] * m->vel[2]
+    );
+    if (!isfinite(*speed)) {
+        return false;
+    }
+
+    // SM64's atan2s convention receives Z first and X second when converting
+    // a horizontal movement vector back into yaw. Reversing these arguments
+    // makes the inferred travel direction roughly a quarter-turn wrong and
+    // causes the steering code to fight its own velocity every gameplay tick.
+    *travelYaw = *speed > 0.01f
+        ? atan2s(m->vel[2], m->vel[0])
+        : m->intendedYaw;
+    return true;
+}
+
 s32 begin_walking_action(struct MarioState *m, f32 forwardVel, u32 action, u32 actionArg) {
     if (!m) { return 0; }
+    if (vr_first_person_movement_overhaul_active(m)) {
+        vr_set_direction_locked_ground_velocity(
+            m,
+            forwardVel,
+            m->intendedYaw
+        );
+        return set_mario_action(m, action, actionArg);
+    }
     m->faceAngle[1] = vr_first_person_backpedal_active(m)
         ? (s16)(m->intendedYaw + 0x8000)
         : m->intendedYaw;
@@ -122,13 +174,187 @@ s32 begin_walking_action(struct MarioState *m, f32 forwardVel, u32 action, u32 a
     return set_mario_action(m, action, actionArg);
 }
 
+#define VR_ASSISTED_SIDE_FLIP_SKID_MAX_FRAMES 12
+#define VR_ASSISTED_SIDE_FLIP_SKID_DECEL 2.5f
+#define VR_ASSISTED_SIDE_FLIP_SKID_MAX_SPEED 48.0f
+#define VR_LATERAL_SIDE_FLIP_SKID_MAX_FRAMES 12
+#define VR_LATERAL_SIDE_FLIP_SKID_DECEL 2.5f
+#define VR_LATERAL_SIDE_FLIP_MIN_SPEED 6.0f
+#define VR_FORWARD_MOVEMENT_MAX_SPEED 32.0f
+#define VR_LOCOMOTION_GROUND_SPEED_LIMIT 48.0f
+
+static f32 vr_running_speed_scale(void) {
+    if (!vr_is_active()) {
+        return 1.0f;
+    }
+    return (f32)clamp(
+        configVrRunningSpeed,
+        VR_RUNNING_SPEED_MIN,
+        VR_RUNNING_SPEED_MAX
+    ) / 100.0f;
+}
+
+static f32 vr_backpedal_target_speed(struct MarioState* m) {
+    f32 maximumSpeed = (f32)clamp(
+        configVrBackpedalSpeed,
+        VR_BACKPEDAL_SPEED_MIN,
+        VR_BACKPEDAL_SPEED_MAX
+    );
+    if (m->floor != NULL && m->floor->type == SURFACE_SLOW) {
+        maximumSpeed *= 0.7f;
+    }
+
+    f32 targetSpeed = MIN(m->intendedMag, maximumSpeed);
+    if (m->quicksandDepth > 10.0f) {
+        targetSpeed *= 6.25f / m->quicksandDepth;
+    }
+    return targetSpeed;
+}
+
 static s32 begin_vr_backpedal_from_skid(struct MarioState* m) {
-    // Do not use begin_walking_action here: while ACT_TURNING_AROUND is still
-    // active, the side-flip grace state deliberately reports that the skid is
-    // not backpedaling yet. Set the head-facing reverse orientation directly.
     m->faceAngle[1] = (s16)(m->intendedYaw + 0x8000);
     mario_set_forward_vel(m, 0.0f);
     return set_mario_action(m, ACT_WALKING, 0);
+}
+
+s32 analog_stick_held_back(struct MarioState *m);
+
+static s32 update_vr_assisted_side_flip_skid(struct MarioState* m) {
+    // The native turnaround action can be accelerated indefinitely by slope
+    // handling while the VR backpedal grace window keeps it alive. Own this
+    // short transition completely: rebuild every horizontal velocity from a
+    // bounded, non-negative scalar and guarantee an exit after a few ticks.
+    if (m->input & INPUT_A_PRESSED) {
+        vr_finish_first_person_assisted_skid();
+        return set_jumping_action(m, ACT_SIDE_FLIP, 0);
+    }
+    if ((m->input & INPUT_ZERO_MOVEMENT) ||
+        !analog_stick_held_back(m)) {
+        return begin_vr_backpedal_from_skid(m);
+    }
+
+    // This is a bounded reversal skid, not a locomotion state of its own. Its
+    // twelve simulation ticks bleed off normal running momentum and leave a
+    // forgiving opportunity to press Jump before ordinary travel resumes.
+    if (m->actionTimer >= VR_ASSISTED_SIDE_FLIP_SKID_MAX_FRAMES) {
+        return begin_vr_backpedal_from_skid(m);
+    }
+
+    f32 speed;
+    s16 travelYaw;
+    if (!vr_get_horizontal_motion(m, &speed, &travelYaw)) {
+        speed = 0.0f;
+        travelYaw = m->intendedYaw;
+    }
+    speed = fminf(speed, VR_ASSISTED_SIDE_FLIP_SKID_MAX_SPEED);
+    speed = fmaxf(0.0f, speed - VR_ASSISTED_SIDE_FLIP_SKID_DECEL);
+    vr_set_direction_locked_ground_velocity(m, speed, travelYaw);
+
+    play_sound(
+        SOUND_MOVING_TERRAIN_SLIDE + m->terrainSoundAddend,
+        m->marioObj->header.gfx.cameraToObject
+    );
+    adjust_sound_for_speed(m);
+    set_mario_particle_flags(m, PARTICLE_DUST, FALSE);
+    set_character_animation(m, CHAR_ANIM_SKID_ON_GROUND);
+
+    switch (perform_ground_step(m)) {
+        case GROUND_STEP_LEFT_GROUND:
+            return set_mario_action(m, ACT_FREEFALL, 0);
+        case GROUND_STEP_HIT_WALL:
+            mario_set_forward_vel(m, 0.0f);
+            return begin_vr_backpedal_from_skid(m);
+    }
+
+    m->actionTimer++;
+    if (speed <= 0.0f ||
+        m->actionTimer >= VR_ASSISTED_SIDE_FLIP_SKID_MAX_FRAMES) {
+        return begin_vr_backpedal_from_skid(m);
+    }
+    return FALSE;
+}
+
+static s32 finish_vr_lateral_side_flip_skid(struct MarioState* m) {
+    f32 speed;
+    s16 travelYaw;
+    if (!vr_get_horizontal_motion(m, &speed, &travelYaw)) {
+        speed = 0.0f;
+        travelYaw = m->intendedYaw;
+    }
+    vr_finish_first_person_lateral_skid();
+    // Keep the skid's remaining momentum and let ordinary walking steer it
+    // toward the held stick. Snapping directly to intendedYaw here made the
+    // release pull Mario in a direction that the player never traversed.
+    vr_set_direction_locked_ground_velocity(
+        m,
+        speed,
+        travelYaw
+    );
+    return set_mario_action(m, ACT_WALKING, 0);
+}
+
+static s32 update_vr_lateral_side_flip_skid(struct MarioState* m) {
+    if (m->input & INPUT_A_PRESSED) {
+        vr_finish_first_person_lateral_skid();
+        return set_jumping_action(m, ACT_SIDE_FLIP, 0);
+    }
+    if ((m->input & INPUT_ZERO_MOVEMENT) ||
+        m->actionTimer >= VR_LATERAL_SIDE_FLIP_SKID_MAX_FRAMES) {
+        return finish_vr_lateral_side_flip_skid(m);
+    }
+
+    f32 speed = sqrtf(
+        m->vel[0] * m->vel[0] +
+        m->vel[2] * m->vel[2]
+    );
+    if (!isfinite(speed)) {
+        speed = 0.0f;
+    }
+    speed = clamp(
+        speed - VR_LATERAL_SIDE_FLIP_SKID_DECEL,
+        0.0f,
+        VR_LOCOMOTION_GROUND_SPEED_LIMIT
+    );
+
+    const f32 oldSpeed = sqrtf(
+        m->slideVelX * m->slideVelX +
+        m->slideVelZ * m->slideVelZ
+    );
+    if (oldSpeed > 0.001f && isfinite(oldSpeed)) {
+        const f32 scale = speed / oldSpeed;
+        m->slideVelX *= scale;
+        m->slideVelZ *= scale;
+    } else {
+        m->slideVelX = 0.0f;
+        m->slideVelZ = 0.0f;
+    }
+    m->vel[0] = m->slideVelX;
+    m->vel[2] = m->slideVelZ;
+    m->forwardVel = speed;
+    m->faceAngle[1] = vr_get_first_person_view_yaw();
+
+    play_sound(
+        SOUND_MOVING_TERRAIN_SLIDE + m->terrainSoundAddend,
+        m->marioObj->header.gfx.cameraToObject
+    );
+    adjust_sound_for_speed(m);
+    set_mario_particle_flags(m, PARTICLE_DUST, FALSE);
+    set_character_animation(m, CHAR_ANIM_SKID_ON_GROUND);
+
+    switch (perform_ground_step(m)) {
+        case GROUND_STEP_LEFT_GROUND:
+            vr_finish_first_person_lateral_skid();
+            return set_mario_action(m, ACT_FREEFALL, 0);
+        case GROUND_STEP_HIT_WALL:
+            return finish_vr_lateral_side_flip_skid(m);
+    }
+
+    m->actionTimer++;
+    if (speed <= 0.0f ||
+        m->actionTimer >= VR_LATERAL_SIDE_FLIP_SKID_MAX_FRAMES) {
+        return finish_vr_lateral_side_flip_skid(m);
+    }
+    return FALSE;
 }
 
 /* |description|
@@ -524,23 +750,7 @@ Updates Mario's walking speed based on player input and floor conditions (e.g., 
 Caps speed at a certain value and may reduce it slightly on steep slopes
 |descriptionEnd| */
 static void update_vr_backpedal_speed(struct MarioState* m) {
-    f32 maximumSpeed = (f32)clamp(
-        configVrBackpedalSpeed,
-        VR_BACKPEDAL_SPEED_MIN,
-        VR_BACKPEDAL_SPEED_MAX
-    );
-    if (m->floor != NULL && m->floor->type == SURFACE_SLOW) {
-        maximumSpeed *= 0.7f;
-    }
-
-    f32 targetSpeed = MIN(m->intendedMag, maximumSpeed);
-    if (m->quicksandDepth > 10.0f) {
-        targetSpeed *= 6.25f / m->quicksandDepth;
-    }
-
-    // Brake existing forward momentum before building the deliberately
-    // slower reverse speed. The negative velocity keeps all normal ground
-    // collision, wall, floor, and moving-platform steps intact.
+    const f32 targetSpeed = vr_backpedal_target_speed(m);
     const f32 speedStep = m->forwardVel > 0.0f ? 2.5f : 1.4f;
     m->forwardVel = approach_f32(
         m->forwardVel,
@@ -562,10 +772,6 @@ static void update_vr_backpedal_speed(struct MarioState* m) {
 static void update_vr_forward_recovery_speed(
     struct MarioState* m
 ) {
-    // Remove reverse velocity before handing control back to Mario's normal
-    // forward acceleration. Keep the existing movement direction while speed
-    // remains negative; rotating a negative velocity vector during the brake
-    // made diagonal transitions curve in the opposite direction.
     m->forwardVel = approach_f32(
         m->forwardVel,
         0.0f,
@@ -574,8 +780,6 @@ static void update_vr_forward_recovery_speed(
     );
 
     if (m->forwardVel == 0.0f) {
-        // With no movement vector left to reverse, changing to the new
-        // forward-facing direction cannot introduce a sideways position snap.
         m->faceAngle[1] = m->intendedYaw;
         mario_set_forward_vel(m, 0.0f);
         mario_update_moving_sand(m);
@@ -587,27 +791,109 @@ static void update_vr_forward_recovery_speed(
     apply_slope_accel(m);
 }
 
+static void update_vr_direction_locked_walking_speed(
+    struct MarioState* m
+) {
+    const f32 runningScale = vr_running_speed_scale();
+    f32 maxTargetSpeed =
+        m->floor != NULL && m->floor->type == SURFACE_SLOW
+            ? 24.0f * runningScale
+            : VR_FORWARD_MOVEMENT_MAX_SPEED * runningScale;
+    f32 targetSpeed = MIN(m->intendedMag * runningScale, maxTargetSpeed);
+    if (m->quicksandDepth > 10.0f) {
+        targetSpeed *= 6.25f / m->quicksandDepth;
+    }
+
+    // Treat speed and direction as separate values. The horizontal vector is
+    // authoritative when landing from a jump; once grounded, stick yaw chooses
+    // travel direction without ever rotating Mario's body away from the
+    // selected HMD/controller facing source.
+    f32 speed = sqrtf(
+        m->vel[0] * m->vel[0] +
+        m->vel[2] * m->vel[2]
+    );
+    if (!isfinite(speed)) {
+        speed = 0.0f;
+    }
+    speed = MAX(speed, fabsf(m->forwardVel));
+    if (speed <= targetSpeed) {
+        speed += 1.1f - speed / 43.0f;
+    } else if (m->floor != NULL && m->floor->normal.y >= 0.95f) {
+        speed -= 1.0f;
+    }
+    const f32 groundSpeedLimit =
+        VR_LOCOMOTION_GROUND_SPEED_LIMIT * runningScale;
+    speed = clamp(speed, 0.0f, groundSpeedLimit);
+
+    f32 horizontalSpeed;
+    s16 previousTravelYaw;
+    if (!vr_get_horizontal_motion(
+            m,
+            &horizontalSpeed,
+            &previousTravelYaw)) {
+        horizontalSpeed = 0.0f;
+        previousTravelYaw = m->intendedYaw;
+    }
+    // Match Mario's original 0x800-per-gameplay-tick steering inertia, but
+    // apply it to travel yaw rather than body yaw. Speed and momentum now feel
+    // like Mario in every direction while his body remains headset-locked.
+    const s16 travelYaw = m->intendedYaw - approach_s32(
+        (s16)(m->intendedYaw - previousTravelYaw),
+        0,
+        0x800,
+        0x800
+    );
+    // Reuse native slope, moving-sand, and wind behavior in the requested
+    // travel direction, then restore the independently locked body direction.
+    m->faceAngle[1] = travelYaw;
+    m->forwardVel = speed;
+    apply_slope_accel(m);
+    if (!isfinite(m->forwardVel) || m->forwardVel < 0.0f) {
+        m->forwardVel = 0.0f;
+        m->slideVelX = 0.0f;
+        m->slideVelZ = 0.0f;
+        m->vel[0] = 0.0f;
+        m->vel[2] = 0.0f;
+    } else if (m->forwardVel > groundSpeedLimit) {
+        const f32 scale =
+            groundSpeedLimit / m->forwardVel;
+        m->forwardVel = groundSpeedLimit;
+        m->slideVelX *= scale;
+        m->slideVelZ *= scale;
+        m->vel[0] *= scale;
+        m->vel[2] *= scale;
+    }
+    m->faceAngle[1] = vr_get_first_person_view_yaw();
+}
+
 void update_walking_speed(struct MarioState *m) {
     if (!m) { return; }
+    if (vr_first_person_movement_overhaul_active(m)) {
+        update_vr_direction_locked_walking_speed(m);
+        return;
+    }
     if (vr_first_person_backpedal_active(m)) {
         update_vr_backpedal_speed(m);
         return;
     }
     if (vr_first_person_forward_recovery_active(m)) {
         update_vr_forward_recovery_speed(m);
-        return;
+        if (vr_first_person_forward_recovery_active(m)) {
+            return;
+        }
     }
 
     f32 maxTargetSpeed;
     f32 targetSpeed;
 
+    const f32 runningScale = vr_running_speed_scale();
     if (m->floor != NULL && m->floor->type == SURFACE_SLOW) {
-        maxTargetSpeed = 24.0f;
+        maxTargetSpeed = 24.0f * runningScale;
     } else {
-        maxTargetSpeed = 32.0f;
+        maxTargetSpeed = 32.0f * runningScale;
     }
 
-    targetSpeed = m->intendedMag < maxTargetSpeed ? m->intendedMag : maxTargetSpeed;
+    targetSpeed = MIN(m->intendedMag * runningScale, maxTargetSpeed);
 
     if (m->quicksandDepth > 10.0f) {
         targetSpeed *= 6.25 / m->quicksandDepth;
@@ -621,8 +907,8 @@ void update_walking_speed(struct MarioState *m) {
         m->forwardVel -= 1.0f;
     }
 
-    if (m->forwardVel > 48.0f) {
-        m->forwardVel = 48.0f;
+    if (m->forwardVel > 48.0f * runningScale) {
+        m->forwardVel = 48.0f * runningScale;
     }
 
     m->faceAngle[1] = m->intendedYaw - approach_s32((s16)(m->intendedYaw - m->faceAngle[1]), 0, 0x800, 0x800);
@@ -1095,6 +1381,11 @@ s32 act_walking(struct MarioState *m) {
     }
 
     check_ledge_climb_down(m);
+    if (vr_first_person_movement_overhaul_active(m)) {
+        // Wall and ledge presentation code may temporarily change faceAngle.
+        // It must never become the locomotion heading in Movement Overhaul.
+        m->faceAngle[1] = vr_get_first_person_view_yaw();
+    }
     tilt_body_walking(m, startYaw);
     return FALSE;
 }
@@ -1226,6 +1517,15 @@ s32 act_hold_heavy_walking(struct MarioState *m) {
 
 s32 act_turning_around(struct MarioState *m) {
     if (!m) { return FALSE; }
+
+    if (vr_first_person_lateral_skid_active(m)) {
+        return update_vr_lateral_side_flip_skid(m);
+    }
+
+    if (vr_first_person_assisted_skid_active(m)) {
+        return update_vr_assisted_side_flip_skid(m);
+    }
+
     if (m->input & INPUT_ABOVE_SLIDE) {
         return set_mario_action(m, ACT_BEGIN_SLIDING, 0);
     }
