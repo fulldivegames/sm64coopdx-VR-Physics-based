@@ -200,8 +200,13 @@ static void handle_app_command(struct android_app *android_app, int32_t command)
         case APP_CMD_STOP:
             quest_game_flush_persistent_state();
             app->activity_resumed = false;
-            app->exit_requested = true;
-            LOGI("Android activity stopped; terminating standalone session.");
+            // Quest can briefly stop the NativeActivity while handing focus
+            // between the system shell, the ROM picker, and the immersive
+            // OpenXR session.  Treating every STOP as a permanent exit kills
+            // the native host before that handoff can complete.  Keep the
+            // process alive here; android_app->destroyRequested remains the
+            // authoritative signal for final teardown.
+            LOGI("Android activity stopped; persistent state flushed.");
             break;
         case APP_CMD_INIT_WINDOW:
             app->window_ready = android_app->window != NULL;
