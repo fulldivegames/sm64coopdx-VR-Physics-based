@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.1 - 2026-08-12
+
+- Fixed Android virtual-filesystem mounting when the app-data directory contains dots, restoring saved stars and settings after relaunch.
+- Automatically recovers and synchronizes existing v0.5.0 EEPROM save copies, so progress already written to storage can load again.
+- Updated the standalone version and release-tag handling so v0.5.0 installations can report v0.5.1 as available.
+
 - Synchronized moving-pole graphics with their live collision transform during physical grips.
 - Added the default-on 25%-opacity underwater filter and enabled all Immersion defaults.
 - Deepened Quest-only saturation and contrast slightly without changing the Brightness setting.

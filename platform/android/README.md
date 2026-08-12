@@ -1,4 +1,4 @@
-# SM64 Co-Op DX VR for Quest v0.5.0
+# SM64 Co-Op DX VR for Quest v0.5.1
 
 Player-facing installation, controls, gestures, features, and troubleshooting
 are documented in the repository's main `README.md`. The public release is a
@@ -72,7 +72,15 @@ rather than becoming climb anchors.
 Ground locomotion is restored to the v0.4.0 release baseline while retaining
 the current headset/controller-relative facing source and later jump features.
 
-## v0.5.0 test checklist
+## v0.5.1 test checklist
+
+- Install over v0.5.0 without clearing app data. Confirm existing stars and VR
+  settings load, collect another star, force-stop and reopen the app, and confirm
+  both progress and settings persist.
+- Confirm the main menu reports v0.5.1 and the update checker accepts the
+  `android-v0.5.1` standalone release tag.
+
+### Retained v0.5.0 coverage
 
 - Compare first-person ground movement directly with v0.4.0: facing-relative
   steering, reverse jogging, native skids/turnarounds, and acceleration.

@@ -19,7 +19,6 @@
 #if defined(__ANDROID__)
 #define VR_UPDATE_API_URL \
     "https://api.github.com/repos/fulldivegames/sm64coopdx-VR-Standalone/releases?per_page=20"
-#define VR_UPDATE_TAG_PREFIX "android-v"
 #else
 #define VR_UPDATE_API_URL \
     "https://api.github.com/repos/fulldivegames/sm64coopdx-VR-Standalone/releases/latest"
@@ -113,7 +112,9 @@ static bool is_version_newer(
 
 static bool parse_remote_version(const char* data) {
     static const char key[] = "\"tag_name\"";
+#if !defined(__ANDROID__)
     const size_t prefixLength = strlen(VR_UPDATE_TAG_PREFIX);
+#endif
     const char* cursor = data;
     while (cursor != NULL && (cursor = strstr(cursor, key)) != NULL) {
         const char* tag = strchr(cursor + sizeof(key) - 1, ':');
@@ -126,11 +127,21 @@ static bool parse_remote_version(const char* data) {
             return false;
         }
         cursor = end + 1;
+#if defined(__ANDROID__)
+        // v0.5.0 clients only recognize the historical android-v tag, while
+        // newer standalone releases also accept normal v tags. Preserve the
+        // leading v passed to string_to_version in either case.
+        if (strncmp(tag, "android-v", strlen("android-v")) == 0) {
+            tag += strlen("android-");
+        } else if (*tag != 'v' && *tag != 'V') {
+            continue;
+        }
+#else
         if (strncmp(tag, VR_UPDATE_TAG_PREFIX, prefixLength) != 0) {
             continue;
         }
-
         tag += prefixLength;
+#endif
         const size_t length = (size_t)(end - tag);
         if (length == 0 || length >= sizeof(sRemoteVersionStr)) {
             continue;

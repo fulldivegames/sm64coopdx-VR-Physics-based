@@ -63,6 +63,10 @@ public final class QuestNativeActivity extends NativeActivity {
                 JSONArray releases = new JSONArray(json.toString());
                 for (int i = 0; i < releases.length(); ++i) {
                     String tag = releases.getJSONObject(i).optString("tag_name", "");
+                    if (tag.startsWith("v")) {
+                        saveStandaloneUpdateStatus(true, tag);
+                        return;
+                    }
                     if (tag.startsWith("android-v")) {
                         saveStandaloneUpdateStatus(true, tag.substring("android-".length()));
                         return;

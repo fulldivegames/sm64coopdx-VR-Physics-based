@@ -178,8 +178,15 @@ const char *sys_resource_path(void) { return sys_user_path(); }
 const char *sys_exe_path_dir(void) { return sys_user_path(); }
 const char *sys_exe_path_file(void) { return "/proc/self/exe"; }
 const char *sys_file_extension(const char *path) {
-    const char *dot = path ? strrchr(path, '.') : NULL;
-    return dot ? dot + 1 : "";
+    if (path == NULL) return "";
+    const char *dot = strrchr(path, '.');
+    const char *slash = strrchr(path, '/');
+    // Dots in an Android package directory (for example
+    // com.fulldivegames.sm64coopdxvr/files) are not file extensions. The old
+    // implementation made fs_mount() reject the entire user-data directory,
+    // so EEPROM/config writes succeeded by absolute path but subsequent reads
+    // could never find them through the virtual filesystem.
+    return (dot != NULL && (slash == NULL || dot > slash)) ? dot + 1 : "";
 }
 const char *sys_file_name(const char *path) {
     const char *slash = path ? strrchr(path, '/') : NULL;

@@ -415,6 +415,20 @@ void save_file_do_save(s32 fileIndex, s8 forceSave) {
         return;
 
     if (gSaveFileModified) {
+#ifdef __ANDROID__
+        // Standalone does not expose the desktop backup-slot workflow. Keep
+        // both EEPROM copies synchronized so an inherited/transient backup
+        // selection cannot write one slot while the next launch reads the
+        // other. Always finish with the primary slot selected.
+        const u32 activeSlot = gSaveFileUsingBackupSlot ? 1 : 0;
+        add_save_block_signature(&gSaveBuffer.files[fileIndex][activeSlot],
+                                 sizeof(gSaveBuffer.files[fileIndex][activeSlot]), SAVE_FILE_MAGIC);
+        bcopy(&gSaveBuffer.files[fileIndex][activeSlot],
+              &gSaveBuffer.files[fileIndex][activeSlot ^ 1],
+              sizeof(gSaveBuffer.files[fileIndex][activeSlot ^ 1]));
+        write_eeprom_savefile(fileIndex, 0, 2);
+        gSaveFileUsingBackupSlot = FALSE;
+#else
         // Compute checksum
         add_save_block_signature(&gSaveBuffer.files[fileIndex][0],
                                  sizeof(gSaveBuffer.files[fileIndex][0]), SAVE_FILE_MAGIC);
@@ -425,6 +439,7 @@ void save_file_do_save(s32 fileIndex, s8 forceSave) {
 
         // Write to EEPROM
         write_eeprom_savefile(fileIndex, 0, 2);
+#endif
 
         gSaveFileModified = FALSE;
     }
@@ -489,6 +504,27 @@ void save_file_load_all(UNUSED u8 reload) {
 
     if (save_file_need_bswap(&gSaveBuffer))
         save_file_bswap(&gSaveBuffer);
+
+#ifdef __ANDROID__
+    // Repair old standalone saves produced while only one EEPROM copy was
+    // populated. Prefer the valid primary copy, fall back to the secondary,
+    // and immediately persist two identical valid copies.
+    for (s32 file = 0; file < NUM_SAVE_FILES; ++file) {
+        const s32 primaryValid = verify_save_block_signature(
+            &gSaveBuffer.files[file][0], sizeof(gSaveBuffer.files[file][0]), SAVE_FILE_MAGIC);
+        const s32 secondaryValid = verify_save_block_signature(
+            &gSaveBuffer.files[file][1], sizeof(gSaveBuffer.files[file][1]), SAVE_FILE_MAGIC);
+        if (primaryValid || secondaryValid) {
+            const s32 source = primaryValid ? 0 : 1;
+            bcopy(&gSaveBuffer.files[file][source], &gSaveBuffer.files[file][0],
+                  sizeof(gSaveBuffer.files[file][0]));
+            bcopy(&gSaveBuffer.files[file][source], &gSaveBuffer.files[file][1],
+                  sizeof(gSaveBuffer.files[file][1]));
+            write_eeprom_savefile(file, 0, 2);
+        }
+    }
+    gSaveFileUsingBackupSlot = FALSE;
+#endif
 
     // Verify the main menu data and create a backup copy if only one of the slots is valid.
     /* Disable this so the 'backup' slot can be used

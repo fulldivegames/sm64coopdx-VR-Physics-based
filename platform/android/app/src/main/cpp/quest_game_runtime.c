@@ -205,6 +205,11 @@ bool quest_game_initialize(void) {
     }
     network_player_init();
     thread5_game_loop(NULL);
+    LOGI("Loaded EEPROM progress: A=%d B=%d C=%d D=%d stars.",
+         save_file_get_total_star_count(0, COURSE_MIN - 1, COURSE_MAX - 1),
+         save_file_get_total_star_count(1, COURSE_MIN - 1, COURSE_MAX - 1),
+         save_file_get_total_star_count(2, COURSE_MIN - 1, COURSE_MAX - 1),
+         save_file_get_total_star_count(3, COURSE_MIN - 1, COURSE_MAX - 1));
     djui_init();
     djui_unicode_init();
     djui_init_late();
