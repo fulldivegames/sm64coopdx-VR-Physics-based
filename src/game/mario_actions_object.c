@@ -386,17 +386,29 @@ s32 act_holding_bowser(struct MarioState *m) {
     f32 vrTurnInput = 0.0f;
     bool vrGripReleased = false;
     bool vrFullPowerImpulse = false;
+    s16 vrReleaseYaw = 0;
+    bool vrReleaseYawValid = false;
     const bool vrBowserControls =
         vr_hand_interaction_get_bowser_controls(
             m,
             &vrTurnInput,
             &vrGripReleased,
-            &vrFullPowerImpulse
+            &vrFullPowerImpulse,
+            &vrReleaseYaw,
+            &vrReleaseYawValid
         );
 
     if (m->playerIndex == 0 &&
         ((m->input & INPUT_B_PRESSED) ||
          (vrBowserControls && vrGripReleased))) {
+        if (vrGripReleased && vrReleaseYawValid) {
+            m->faceAngle[1] = vrReleaseYaw;
+            if (m->marioObj != NULL) {
+                m->marioObj->oMoveAngleYaw = vrReleaseYaw;
+                m->marioObj->oFaceAngleYaw = vrReleaseYaw;
+                m->marioObj->header.gfx.angle[1] = vrReleaseYaw;
+            }
+        }
 #ifndef VERSION_JP
         if (m->angleVel[1] <= -0xE00 || m->angleVel[1] >= 0xE00) {
             play_character_sound(m, CHAR_SOUND_SO_LONGA_BOWSER);

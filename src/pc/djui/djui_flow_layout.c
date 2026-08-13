@@ -121,6 +121,34 @@ static bool djui_flow_layout_render(struct DjuiBase* base) {
     return true;
 }
 
+bool djui_flow_layout_on_mouse_scroll(
+    struct DjuiBase* focused,
+    f32 amount
+) {
+    if (!vr_is_active() || amount == 0.0f) {
+        return false;
+    }
+
+    for (struct DjuiBase* base = focused;
+         base != NULL;
+         base = base->parent) {
+        if (base->render != djui_flow_layout_render) {
+            continue;
+        }
+        struct DjuiFlowLayout* layout =
+            (struct DjuiFlowLayout*)base;
+        if (layout->flowDirection != DJUI_FLOW_DIR_DOWN) {
+            return false;
+        }
+        layout->scrollY += amount * 36.0f;
+        // Mouse scrolling is an explicit target. Prevent selection-driven
+        // auto-scroll from immediately undoing it on the next render.
+        layout->lastAutoScrollSelection = focused;
+        return true;
+    }
+    return false;
+}
+
 static void djui_flow_layout_destroy(struct DjuiBase* base) {
     struct DjuiFlowLayout* layout = (struct DjuiFlowLayout*)base;
     free(layout);

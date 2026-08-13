@@ -1,4 +1,4 @@
-SM64 CO-OP DX VR v0.5.0 - WINDOWS PLAYER GUIDE
+SM64 CO-OP DX VR v0.5.5 - WINDOWS PLAYER GUIDE
 ==============================================
 
 This is an active fan project. The PC and Quest standalone editions have not
@@ -107,7 +107,8 @@ stand back up. Crouching while airborne triggers a ground pound.
 BOWSER
 Reach either glove to Bowser's tail and hold that grip. Move the held hand in
 a turning arc around your body to build spin speed, then release the grip to
-throw. The camera stick can also help turn. Spin acceleration and maximum
+throw in the hand's physical swing direction. The camera stick can also help
+turn. Spin acceleration and maximum
 speed are adjustable.
 
 HOOT AND MOVING ACTORS
@@ -127,8 +128,10 @@ buttons or finishing the collection sequence restores the normal glove.
 PAINTING-EXIT HAT GESTURE
 While Mario is jumping back out of a painting, bring either tracked glove to
 the headset or just above it and hold that hand's Grip + Trigger. Either hand
-can pull off Mario's cap. You can hold it for about one minute. Let go to drop
-the cap onto the level; it lands, rests briefly, and then fades away.
+can pull off Mario's cap. You can hold it for about one minute. Let go to throw
+the cap into the level; it can land on geometry, be picked up again, or be
+returned to Mario's head. Immersion > Grab Cap at Any Time enables this outside
+successful exits and is disabled by default.
 
 
 PHYSICAL CLIMBING
@@ -188,12 +191,15 @@ Motion Control Settings
 
 Model Settings
   Body Settings and Hand Settings. Body Settings includes torso/legs, the
-  optional Feet Only view, crawling and mounted-action visibility, and body
-  placement. Hand Settings contains glove size, rotation, and positions.
+  optional Feet Only view, crawling, ledge, pole-flip, and mounted-action
+  visibility, and body placement. Hide Body While on Ledges is enabled by
+  default for native ledge hangs and pull-ups. Hand Settings contains glove
+  size, rotation, and positions.
 
 Performance
-  Render scale, desktop view on/off, and desktop mirror frame rate. Lower
-  render scale or disable Desktop View if more performance is needed.
+  Render scale, an optional fully opaque FPS counter beneath the lives counter,
+  desktop view on/off, and desktop mirror frame rate. Lower render scale or
+  disable Desktop View if more performance is needed.
 
 HUD Settings
   HUD opacity and corner spread.
@@ -228,7 +234,7 @@ Every submenu has a Set to Defaults button.
 
 V0.5.0 TEST CHECKLIST
 
-- Confirm the main menu shows the current v0.5.0 test version and the new VR logo.
+- Confirm the main menu shows the current v0.5.5 version and the VR logo.
 - Confirm long VR submenus scroll to keep the selected option visible.
 - Move repeatedly through long menus and change several sliders. Text and
   labels must remain attached to their controls and never jump off-screen.

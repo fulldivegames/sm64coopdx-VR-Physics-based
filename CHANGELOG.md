@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.5.5 - 2026-08-13
+
+- Added an optional fully opaque FPS counter beneath the lives counter. It follows HUD corner spread without inheriting HUD opacity.
+- Added the disabled-by-default **Immersion > Grab Cap at Any Time** option. A Grip + Trigger cap can be thrown with hand velocity, picked up again, returned to Mario's head, or safely faded while held without leaving stale hand state.
+- Made physical Bowser releases use the tracked hand's world-space swing direction rather than headset facing.
+- Added the default-on **Model Settings > Body Settings > Hide Body While on Ledges** option for native ledge grabs, hangs, climb-downs, and pull-ups.
+- Added PC mouse-wheel input for long VR settings panels, using the actively selected control when no mouse-hover target exists.
+- Added the default-hidden top-of-pole-flip body option and retained the tracked gloves during the flip.
+- Audited the new controller, cap, HUD, menu-scroll, and update-checker state paths for balanced lifetimes and stale references.
+
 - Synchronized a physically gripped moving pole's graphics transform with its live collision transform so the visible model rises and falls with the player.
 - Added the default-on **Immersion > Underwater Filter**, a low-cost 25%-opacity castle-water-blue veil that appears only when the tracked headset is below the water surface.
 - Enabled every visible Immersion option by default for v0.5.0, including the ledge-climb camera.

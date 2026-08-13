@@ -14,7 +14,7 @@
 </p>
 
 > [!IMPORTANT]
-> The current public release is **v0.5.0**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination.
+> The current public release is **v0.5.5**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination.
 
 SM64 Co-Op DX VR currently targets 64-bit Windows, OpenGL, and OpenXR. It keeps the original game's flat-screen mode and multiplayer foundation while adding native stereoscopic rendering, 6DoF tracking, VR-aware cameras, remappable motion-controller input, physical interactions, comfort options, and extensive calibration settings.
 
@@ -75,6 +75,7 @@ The lower-left corner of the main menu shows the installed VR version and checks
 - Corrected stereo skyboxes, lighting, billboard presentation, terrain projection, eye separation, clipping, and VR culling behavior
 - Head-locked menus, pause screens, text boxes, Star Select, and HUD elements
 - HUD opacity and corner-spread controls
+- Optional fully opaque FPS counter positioned beneath the lives counter
 - Full-resolution menu rendering even when gameplay Render Scale is reduced
 - Complete left-eye desktop mirror for capture, with an option to disable desktop presentation entirely
 - Startup shader preparation and a learned shader cache for shaders encountered in later levels and mods
@@ -149,13 +150,13 @@ With **Physical Crouching / Ground Pounds** enabled, lowering the headset below 
 
 ### Bowser
 
-Reach either tracked glove to Bowser's tail and hold that grip. Move the held hand around your body to build spin speed, then release to throw. One physical turning swing supplies useful initial power, and the normal camera stick can still help turn. Spin acceleration and maximum speed are adjustable.
+Reach either tracked glove to Bowser's tail and hold that grip. Move the held hand around your body to build spin speed, then release to throw in the physical hand-swing direction. One physical turning swing supplies useful initial power, and the normal camera stick can still help turn. Spin acceleration and maximum speed are adjustable.
 
 ### Hoot and supported moving actors
 
 Grip a supported interaction point to attach to it, then release the grip to let go. The implementation keeps the game's existing action and networking paths wherever possible.
 
-## Physical climbing (upcoming v0.5.0)
+## Physical climbing
 
 Physical climbing is enabled by default. **Enable Standard Climbing** is disabled by default so touching a pole or hangable ceiling does not automatically take control away from the player's hands.
 
@@ -170,6 +171,8 @@ Hold a grip before or while jumping into a native hangable ceiling, grate, or mo
 Mario's compact temporary object-interaction collider follows the tracked headset while climbing, allowing coins and supported pickups at the player's physical position to register without moving Mario's environment/physics collider. To climb onto a ledge, lift your headset over the ledge and let go of Grip; Mario finishes on top when a safe floor is available. The view is kept on the playable side of the grabbed surface. On other releases, the collider is resolved back to a safe floor/wall/ceiling position to reduce the chance of leaving Mario embedded in geometry.
 
 The torso and legs are hidden automatically during physical climbing; tracked gloves stay visible. **Swing Off While Releasing** converts a sufficiently fast release into a headset-directed jump, while a normal two-hand release simply drops Mario.
+
+**Model Settings > Body Settings > Hide Body While on Ledges** is enabled by default. It hides the local torso, legs, and feet throughout native ledge hanging, climbing down, and pull-up animations to prevent the first-person camera from clipping into Mario. Disable it if you prefer to see the body during those actions.
 
 ### Climb Any Wall or Ceiling cheat
 
@@ -209,8 +212,8 @@ The headset remains free inside the cannon. With the default Aim Direction Cone 
 | Camera Settings | Camera mode, third-person distance, character-specific first-person height, forward/back placement, headset/left-hand/right-hand facing source, facing calibration, FOV, and brightness |
 | Controller Settings | Motion-controller input, movement/camera stick selection, action mappings, and optional trigger punching |
 | Motion Control Settings | Physical punches, physical grabbing, physical climbing, standard grabbing/climbing, swing release, motion dives, jump turning, punch thresholds, collider length, and Bowser tuning |
-| Model Settings | Body and Hand pages; torso/legs, optional feet-only view, crawl and mounted-action visibility, body placement, glove size, rotation, and position |
-| Performance | Headset Render Scale, Desktop View, and desktop mirror frame rate |
+| Model Settings | Body and Hand pages; torso/legs, optional feet-only view, crawl, ledge, pole-flip, and mounted-action visibility, body placement, glove size, rotation, and position |
+| Performance | Headset Render Scale, optional FPS counter, Desktop View, and desktop mirror frame rate |
 | HUD Settings | HUD opacity and corner spread |
 | Immersion | Crouch/sand camera, face-stuck blackout, cannon cone, 3D sound, ledge camera, underwater filter, side-flip follow, wall-jump turn, and physical crouching |
 | Effects | Twirl Tornado Effect |
@@ -230,7 +233,7 @@ Every VR submenu includes **Set to Defaults**.
 
 This project keeps Super Mario 64's original 30 Hz gameplay simulation and renders interpolated headset frames at the OpenXR runtime's cadence. Raising the simulation rate globally would change physics, animation timing, multiplayer behavior, and mod assumptions, so high-refresh VR smoothness is handled through render interpolation and late headset/controller poses instead.
 
-## v0.5.0 summary
+## v0.5.5 summary
 
 - Physical pole, tree, monkey-bar, native ceiling, and hand-over-hand climbing
 - Optional climbing on any vertical wall or overhead ceiling
@@ -250,6 +253,10 @@ This project keeps Super Mario 64's original 30 Hz gameplay simulation and rende
 - Repeated skid/side-flip velocity validation to prevent rare ground-launch bugs
 - Additional OpenXR, controller tracking, shader-cache, billboard, UI, interaction, and render hot-path optimizations
 - New SM64 Co-Op DX VR branding used by the game and project page
+- Optional opaque FPS counter that follows HUD corner spread
+- Reusable physical cap handling with throwing, re-grabbing, head reattachment, and a disabled-by-default anytime-cap option
+- Hand-swing-directed physical Bowser releases
+- Default-on body hiding during native ledge grabs and pull-ups
 
 ## Troubleshooting
 

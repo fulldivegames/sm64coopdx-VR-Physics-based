@@ -195,10 +195,13 @@ void bhv_normal_cap_init(void) {
     o->oOpacity = 0xFF;
 }
 
-#define VR_PAINTING_EXIT_HAT_GROUND_FRAMES 150
-#define VR_PAINTING_EXIT_HAT_GROUND_FADE_FRAMES 30
+#define VR_PAINTING_EXIT_HAT_GROUND_FRAMES 900
+#define VR_PAINTING_EXIT_HAT_GROUND_FADE_FRAMES 90
+
+struct Object* gVrPaintingExitHatObject = NULL;
 
 static void vr_painting_exit_hat_loop(void) {
+    gVrPaintingExitHatObject = o;
     o->oInteractType = 0;
     o->oInteractionSubtype = 0;
     o->oInteractStatus = 0;
@@ -222,6 +225,9 @@ static void vr_painting_exit_hat_loop(void) {
 
     const s32 fadeFrame = o->oTimer - VR_PAINTING_EXIT_HAT_GROUND_FRAMES;
     if (fadeFrame >= VR_PAINTING_EXIT_HAT_GROUND_FADE_FRAMES) {
+        if (gVrPaintingExitHatObject == o) {
+            gVrPaintingExitHatObject = NULL;
+        }
         o->activeFlags = ACTIVE_FLAG_DEACTIVATED;
         return;
     }

@@ -7,14 +7,19 @@ struct DjuiFpsDisplay {
 };
 
 struct DjuiFpsDisplay *sFpsDisplay = NULL;
+static u32 sCurrentFps = 0;
 
 void djui_fps_display_update(u32 fps) {
+    sCurrentFps = fps > 99999 ? 99999 : fps;
     if (configShowFPS && sFpsDisplay != NULL) {
         char fpsText[30] = "";
-        fps = fps > 99999 ? 99999 : fps; // Prevent overflowing the FPS display (cap at 99999)
-        snprintf(fpsText, 30, "\\#dcdcdc\\FPS: \\#ffffff\\%d", fps);
+        snprintf(fpsText, 30, "\\#dcdcdc\\FPS: \\#ffffff\\%d", sCurrentFps);
         djui_text_set_text(sFpsDisplay->text, fpsText);
     }
+}
+
+u32 djui_fps_display_get(void) {
+    return sCurrentFps;
 }
 
 void djui_fps_display_render(void) {

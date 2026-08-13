@@ -88,6 +88,7 @@ static void djui_panel_vr_performance_defaults(struct DjuiBase* caller) {
     (void)caller;
 
     configVrRenderScale = 100;
+    configVrShowFps = false;
     configVrDesktopMirror = true;
     configVrDesktopMirrorFps = 60;
 }
@@ -156,6 +157,8 @@ static void djui_panel_vr_model_defaults(struct DjuiBase* caller) {
     configVrHideTorsoWhileCrawling = true;
     configVrFeetOnlyBody = false;
     configVrExperimentalMountedBody = false;
+    configVrTopPoleFlipBody = false;
+    configVrHideBodyOnLedge = true;
     configVrTorsoHeight = 100;
     configVrLegHeight = 100;
     configVrGloveSize = 70;
@@ -194,6 +197,7 @@ static void djui_panel_vr_immersion_defaults(struct DjuiBase* caller) {
     configVrImmersive3dSound = true;
     configVrImmersiveLedgeCamera = true;
     configVrImmersiveUnderwaterFilter = true;
+    configVrImmersiveRemovableCap = false;
     configVrExperimentalSideFlipFollow = true;
     configVrExperimentalWallJumpTurn = true;
     configVrPhysicalCrouching = true;
@@ -373,6 +377,13 @@ static void djui_panel_vr_performance_create(struct DjuiBase* caller) {
             &configVrRenderScale,
             VR_RENDER_SCALE_MIN,
             VR_RENDER_SCALE_MAX,
+            NULL
+        );
+
+        djui_checkbox_create(
+            body,
+            "FPS Counter",
+            &configVrShowFps,
             NULL
         );
 
@@ -990,6 +1001,18 @@ static void djui_panel_vr_model_body_settings_create(struct DjuiBase* caller) {
             &configVrExperimentalMountedBody,
             NULL
         );
+        djui_checkbox_create(
+            body,
+            "Body During Top-of-Pole Flip",
+            &configVrTopPoleFlipBody,
+            NULL
+        );
+        djui_checkbox_create(
+            body,
+            "Hide Body While on Ledges",
+            &configVrHideBodyOnLedge,
+            NULL
+        );
         djui_slider_create(
             body,
             "Torso Height (100 = Center)",
@@ -1234,6 +1257,13 @@ static void djui_panel_vr_immersion_create(struct DjuiBase* caller) {
             body,
             "Underwater Filter",
             &configVrImmersiveUnderwaterFilter,
+            NULL
+        );
+
+        djui_checkbox_create(
+            body,
+            "Grab Cap at Any Time",
+            &configVrImmersiveRemovableCap,
             NULL
         );
 

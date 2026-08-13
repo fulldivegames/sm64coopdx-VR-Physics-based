@@ -1,6 +1,7 @@
 #include "controller_mouse.h"
 #include "pc/gfx/gfx_pc.h"
 #include "pc/djui/djui.h"
+#include "pc/djui/djui_panel.h"
 #include "pc/pc_main.h"
 
 #include <SDL2/SDL.h>
@@ -182,6 +183,17 @@ void controller_mouse_leave_relative(void) {
 }
 
 void mouse_on_scroll(float x, float y) {
+    if (djui_panel_is_active()) {
+        struct DjuiBase* scrollFocus =
+            djui_cursor_get_input_controlled_base();
+        if (scrollFocus == NULL) {
+            scrollFocus = gInteractableFocus;
+        }
+        djui_flow_layout_on_mouse_scroll(
+            scrollFocus,
+            y
+        );
+    }
     djui_interactable_on_scroll(x, y);
     mouse_scroll_timestamp = gGlobalTimer;
     mouse_scroll_x += x;
