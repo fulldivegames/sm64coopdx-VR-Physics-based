@@ -21,6 +21,7 @@
 #include "bettercamera.h"
 #include "mario_actions_automatic.h"
 #include "pc/configfile.h"
+#include "pc/djui/djui_fps_display.h"
 #include "pc/vr/vr.h"
 #include "pc/network/network.h"
 #include "pc/utils/misc.h"
@@ -403,6 +404,24 @@ void render_hud_mario_lives(void) {
     print_text_fmt_int(vr_hud_group_x(GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(54), anchorX), vr_hud_group_y(HUD_TOP_Y, anchorY), "%d", gHudDisplay.lives);
 }
 
+static void render_vr_hud_fps(void) {
+    if (!vr_is_active() || !configVrShowFps) {
+        return;
+    }
+
+    const s32 anchorX = GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(22);
+    const s32 anchorY = HUD_TOP_Y;
+    const s32 x = vr_hud_group_x(
+        GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(22), anchorX);
+    const s32 y = vr_hud_group_y(HUD_TOP_Y - 20, anchorY);
+
+    // The performance readout deliberately stays legible regardless of the
+    // player's HUD-opacity setting.
+    gDPSetEnvColor(gDisplayListHead++, 0xFF, 0xFF, 0xFF, 0xFF);
+    print_text(x, y, "FPS");
+    print_text_fmt_int(x + 32, y, "%d", djui_fps_display_get());
+}
+
 /**
  * Renders the number of seconds remaining of the current cap power-ups.
  */
@@ -417,6 +436,9 @@ void render_hud_cap_timer(void) {
         [MARIO_WING_CAP | MARIO_METAL_CAP | MARIO_VANISH_CAP] = { exclamation_box_seg8_texture_08015E28, exclamation_box_seg8_texture_08014628, exclamation_box_seg8_texture_08014628, exclamation_box_seg8_texture_08012E28 },
     };
     struct MarioState *m = &gMarioStates[0];
+    const s32 fpsOffset =
+        (vr_is_active() && configVrShowFps) ? 20 : 0;
+    const s32 capTopY = HUD_TOP_Y - fpsOffset;
     u32 capFlags = m->flags & MARIO_SPECIAL_CAPS;
     if (capFlags) {
         s32 capTimer = m->capTimer;
@@ -425,12 +447,12 @@ void render_hud_cap_timer(void) {
             const u8 **capIcons = sHudCapIcons[capFlags];
             gDPSetEnvColor(gDisplayListHead++, 0xFF, 0xFF, 0xFF,
                            get_hud_opacity_alpha(0xFF));
-            render_hud_icon(NULL, capIcons[0], G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32, GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(22), HUD_TOP_Y - 4, 5, 16,  0, 0, 10, 32);
-            render_hud_icon(NULL, capIcons[1], G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32, GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(27), HUD_TOP_Y - 4, 3, 16, 10, 0,  6, 32);
-            render_hud_icon(NULL, capIcons[2], G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32, GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(30), HUD_TOP_Y - 4, 3, 16, 16, 0,  6, 32);
-            render_hud_icon(NULL, capIcons[3], G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32, GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(33), HUD_TOP_Y - 4, 5, 16, 22, 0, 10, 32);
-            print_text(GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(38), HUD_TOP_Y - 20, "*"); // 'X' glyph
-            print_text_fmt_int(GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(54), HUD_TOP_Y - 20, "%d", capSeconds);
+            render_hud_icon(NULL, capIcons[0], G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32, GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(22), capTopY - 4, 5, 16,  0, 0, 10, 32);
+            render_hud_icon(NULL, capIcons[1], G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32, GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(27), capTopY - 4, 3, 16, 10, 0,  6, 32);
+            render_hud_icon(NULL, capIcons[2], G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32, GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(30), capTopY - 4, 3, 16, 16, 0,  6, 32);
+            render_hud_icon(NULL, capIcons[3], G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32, GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(33), capTopY - 4, 5, 16, 22, 0, 10, 32);
+            print_text(GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(38), capTopY - 20, "*"); // 'X' glyph
+            print_text_fmt_int(GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(54), capTopY - 20, "%d", capSeconds);
         }
     }
 }
@@ -859,6 +881,9 @@ void render_hud(void) {
 
         if (hudDisplayFlags & HUD_DISPLAY_FLAG_LIVES && showHud) {
             render_hud_mario_lives();
+        }
+        if (showHud) {
+            render_vr_hud_fps();
         }
 
         // coop hud elements

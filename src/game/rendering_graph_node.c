@@ -245,15 +245,23 @@ static Mtx* sVrControllerHandMatrices[VR_CONTROLLER_COUNT] = { 0 };
 static bool sVrControllerHandClosed[VR_CONTROLLER_COUNT] = { false };
 
 #define VR_PAINTING_EXIT_HAT_HOLD_FRAMES 1800U
-#define VR_PAINTING_EXIT_HAT_FADE_FRAMES 18U
-#define VR_PAINTING_EXIT_HAT_GRAB_HEIGHT 25.0f
-#define VR_PAINTING_EXIT_HAT_HORIZONTAL_REACH 110.0f
-#define VR_PAINTING_EXIT_HAT_REACH_BELOW 70.0f
-#define VR_PAINTING_EXIT_HAT_REACH_ABOVE 120.0f
+#define VR_PAINTING_EXIT_HAT_FADE_FRAMES 90U
+#define VR_PAINTING_EXIT_HAT_GRAB_HEIGHT 22.0f
+#define VR_PAINTING_EXIT_HAT_HORIZONTAL_REACH 65.0f
+#define VR_PAINTING_EXIT_HAT_REACH_BELOW 35.0f
+#define VR_PAINTING_EXIT_HAT_REACH_ABOVE 60.0f
+#define VR_PAINTING_EXIT_HAT_REATTACH_RADIUS 44.0f
+#define VR_PAINTING_EXIT_HAT_REATTACH_ARM_RADIUS 90.0f
+#define VR_PAINTING_EXIT_HAT_THROW_SCALE 0.125f
+#define VR_PAINTING_EXIT_HAT_MAX_THROW_SPEED 75.0f
 
 static u32 sVrPaintingExitHatHand = VR_CONTROLLER_COUNT;
 static u32 sVrPaintingExitHatStartFrame = 0;
 static Vec3f sVrPaintingExitHatLastPosition = { 0.0f, 0.0f, 0.0f };
+static Vec3f sVrPaintingExitHatVelocity = { 0.0f, 0.0f, 0.0f };
+static bool sVrPaintingExitHatCanReattach = false;
+static bool sVrPaintingExitHatPickupLatched = false;
+extern struct Object* gVrPaintingExitHatObject;
 
 static bool vr_victory_hand_gesture_available(void) {
     switch (gMarioStates[0].action) {
@@ -283,10 +291,41 @@ static bool vr_painting_exit_hat_action_active(void) {
     }
 }
 
-static void vr_drop_painting_exit_hat(void) {
+static void vr_clear_painting_exit_hat_hold(void) {
+    sVrPaintingExitHatHand = VR_CONTROLLER_COUNT;
+    sVrPaintingExitHatStartFrame = 0;
+    sVrPaintingExitHatCanReattach = false;
+    vec3f_set(sVrPaintingExitHatVelocity, 0.0f, 0.0f, 0.0f);
+}
+
+static bool vr_get_painting_exit_hat_head_position(Vec3f head) {
+    if (!vr_get_stabilized_headset_world_position(head, false)) {
+        return false;
+    }
+    head[1] += VR_PAINTING_EXIT_HAT_GRAB_HEIGHT;
+    return true;
+}
+
+static f32 vr_painting_exit_hat_distance_squared(
+    const Vec3f a,
+    const Vec3f b
+) {
+    const f32 dx = a[0] - b[0];
+    const f32 dy = a[1] - b[1];
+    const f32 dz = a[2] - b[2];
+    return dx * dx + dy * dy + dz * dz;
+}
+
+static void vr_throw_painting_exit_hat(void) {
     struct MarioState* mario = &gMarioStates[0];
     if (mario->marioObj == NULL || mario->character == NULL) {
         return;
+    }
+
+    if (gVrPaintingExitHatObject != NULL &&
+        (gVrPaintingExitHatObject->activeFlags & ACTIVE_FLAG_ACTIVE)) {
+        gVrPaintingExitHatObject->activeFlags =
+            ACTIVE_FLAG_DEACTIVATED;
     }
 
     struct Object* cap = spawn_object(
@@ -298,13 +337,37 @@ static void vr_drop_painting_exit_hat(void) {
         return;
     }
 
+    gVrPaintingExitHatObject = cap;
     cap->oBehParams2ndByte = VR_PAINTING_EXIT_HAT_BEH_PARAM;
     cap->oPosX = sVrPaintingExitHatLastPosition[0];
     cap->oPosY = sVrPaintingExitHatLastPosition[1];
     cap->oPosZ = sVrPaintingExitHatLastPosition[2];
     vec3f_copy(cap->header.gfx.pos, sVrPaintingExitHatLastPosition);
-    cap->oForwardVel = 0.0f;
-    cap->oVelY = 0.0f;
+    Vec3f throwVelocity = {
+        sVrPaintingExitHatVelocity[0] *
+            VR_PAINTING_EXIT_HAT_THROW_SCALE,
+        sVrPaintingExitHatVelocity[1] *
+            VR_PAINTING_EXIT_HAT_THROW_SCALE,
+        sVrPaintingExitHatVelocity[2] *
+            VR_PAINTING_EXIT_HAT_THROW_SCALE
+    };
+    const f32 speed = sqrtf(
+        throwVelocity[0] * throwVelocity[0] +
+        throwVelocity[1] * throwVelocity[1] +
+        throwVelocity[2] * throwVelocity[2]
+    );
+    if (speed > VR_PAINTING_EXIT_HAT_MAX_THROW_SPEED) {
+        const f32 scale =
+            VR_PAINTING_EXIT_HAT_MAX_THROW_SPEED / speed;
+        vec3f_mul(throwVelocity, scale);
+    }
+    cap->oMoveAngleYaw = atan2s(throwVelocity[2], throwVelocity[0]);
+    cap->oFaceAngleYaw = cap->oMoveAngleYaw;
+    cap->oForwardVel = sqrtf(
+        throwVelocity[0] * throwVelocity[0] +
+        throwVelocity[2] * throwVelocity[2]
+    );
+    cap->oVelY = throwVelocity[1];
     cap->oInteractType = 0;
     cap->oIntangibleTimer = -1;
 }
@@ -312,6 +375,7 @@ static void vr_drop_painting_exit_hat(void) {
 static void vr_update_painting_exit_hat_gesture(void) {
     struct VrControllerState states[VR_CONTROLLER_COUNT] = { 0 };
     Vec3f hands[VR_CONTROLLER_COUNT];
+    Vec3f velocities[VR_CONTROLLER_COUNT];
     Vec3f head;
     bool tracked[VR_CONTROLLER_COUNT] = { false, false };
 
@@ -323,46 +387,123 @@ static void vr_update_painting_exit_hat_gesture(void) {
             hand,
             &states[hand],
             hands[hand],
-            NULL
+            velocities[hand]
         );
     }
 
     const bool successfulExitActive =
         vr_painting_exit_hat_action_active();
     if (!vr_is_active()) {
-        sVrPaintingExitHatHand = VR_CONTROLLER_COUNT;
-        sVrPaintingExitHatStartFrame = 0;
+        vr_clear_painting_exit_hat_hold();
+        sVrPaintingExitHatPickupLatched = false;
         return;
+    }
+
+    bool pickupInputDown = false;
+    for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
+        pickupInputDown = pickupInputDown ||
+            (tracked[hand] &&
+             states[hand].squeeze >= 0.55f &&
+             states[hand].trigger >= 0.55f);
+    }
+    if (!pickupInputDown) {
+        sVrPaintingExitHatPickupLatched = false;
     }
 
     // Once pulled free, only the chosen hand controls it. Releasing either
-    // grab input drops a separate, non-interactive cap into the world.
+    // grab input throws a separate, non-interactive cap into the world.
     if (sVrPaintingExitHatHand < VR_CONTROLLER_COUNT) {
         const u32 hand = sVrPaintingExitHatHand;
-        const bool stillHeld = tracked[hand] &&
-            states[hand].squeeze >= 0.35f &&
-            states[hand].trigger >= 0.35f;
         if (tracked[hand]) {
             vec3f_copy(sVrPaintingExitHatLastPosition, hands[hand]);
+            vec3f_copy(sVrPaintingExitHatVelocity, velocities[hand]);
         }
-        if (!stillHeld) {
-            vr_drop_painting_exit_hat();
-            sVrPaintingExitHatHand = VR_CONTROLLER_COUNT;
-            sVrPaintingExitHatStartFrame = 0;
+        // A transition can briefly invalidate controller poses. Do not turn
+        // that tracking gap into a release behind the player; only a sampled
+        // open hand may throw the cap.
+        const bool released = tracked[hand] &&
+            (states[hand].squeeze < 0.35f ||
+             states[hand].trigger < 0.35f);
+        if (released) {
+            vr_throw_painting_exit_hat();
+            vr_clear_painting_exit_hat_hold();
+            return;
+        }
+
+        if (vr_get_painting_exit_hat_head_position(head)) {
+            const f32 distanceSquared =
+                vr_painting_exit_hat_distance_squared(
+                    hands[hand], head);
+            if (distanceSquared >=
+                VR_PAINTING_EXIT_HAT_REATTACH_ARM_RADIUS *
+                    VR_PAINTING_EXIT_HAT_REATTACH_ARM_RADIUS) {
+                sVrPaintingExitHatCanReattach = true;
+            } else if (sVrPaintingExitHatCanReattach &&
+                       distanceSquared <=
+                        VR_PAINTING_EXIT_HAT_REATTACH_RADIUS *
+                            VR_PAINTING_EXIT_HAT_REATTACH_RADIUS) {
+                vr_apply_haptic(hand, 0.25f, 0.06f, -1.0f);
+                vr_clear_painting_exit_hat_hold();
+            }
         }
         return;
     }
 
-    if (!successfulExitActive) {
+    if (sVrPaintingExitHatPickupLatched) {
         return;
     }
 
-    if (!vr_get_stabilized_headset_world_position(head, false)) {
+    // A thrown cap remains a physics object until it is grabbed again or its
+    // slow fade completes. Prefer it over pulling a fresh copy from the head.
+    if (gVrPaintingExitHatObject != NULL) {
+        struct Object* cap = gVrPaintingExitHatObject;
+        const bool validCap =
+            (cap->activeFlags & ACTIVE_FLAG_ACTIVE) != 0 &&
+            obj_has_behavior(cap, bhvNormalCap) &&
+            cap->oBehParams2ndByte ==
+                VR_PAINTING_EXIT_HAT_BEH_PARAM;
+        if (!validCap) {
+            gVrPaintingExitHatObject = NULL;
+        } else {
+            Vec3f capPosition = {
+                cap->oPosX,
+                cap->oPosY + 10.0f,
+                cap->oPosZ
+            };
+            const f32 pickupRadiusSquared =
+                VR_PAINTING_EXIT_HAT_HORIZONTAL_REACH *
+                VR_PAINTING_EXIT_HAT_HORIZONTAL_REACH;
+            for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
+                if (!tracked[hand] ||
+                    states[hand].squeeze < 0.55f ||
+                    states[hand].trigger < 0.55f ||
+                    vr_painting_exit_hat_distance_squared(
+                        hands[hand], capPosition) >
+                            pickupRadiusSquared) {
+                    continue;
+                }
+                cap->activeFlags = ACTIVE_FLAG_DEACTIVATED;
+                gVrPaintingExitHatObject = NULL;
+                sVrPaintingExitHatHand = hand;
+                sVrPaintingExitHatStartFrame = gGlobalTimer;
+                sVrPaintingExitHatCanReattach = false;
+                sVrPaintingExitHatPickupLatched = true;
+                vec3f_copy(sVrPaintingExitHatLastPosition, hands[hand]);
+                vec3f_copy(sVrPaintingExitHatVelocity, velocities[hand]);
+                vr_apply_haptic(hand, 0.35f, 0.08f, -1.0f);
+                return;
+            }
+        }
+    }
+
+    if (!successfulExitActive &&
+        !configVrImmersiveRemovableCap) {
         return;
     }
-    // The removable cap sits just above the tracked headset instead of at its
-    // center, matching the physical reach the player is asked to perform.
-    head[1] += VR_PAINTING_EXIT_HAT_GRAB_HEIGHT;
+
+    if (!vr_get_painting_exit_hat_head_position(head)) {
+        return;
+    }
 
     const f32 horizontalReachSquared =
         VR_PAINTING_EXIT_HAT_HORIZONTAL_REACH *
@@ -394,7 +535,10 @@ static void vr_update_painting_exit_hat_gesture(void) {
     if (nearestHand < VR_CONTROLLER_COUNT) {
         sVrPaintingExitHatHand = nearestHand;
         sVrPaintingExitHatStartFrame = gGlobalTimer;
+        sVrPaintingExitHatCanReattach = false;
+        sVrPaintingExitHatPickupLatched = true;
         vec3f_copy(sVrPaintingExitHatLastPosition, hands[nearestHand]);
+        vec3f_copy(sVrPaintingExitHatVelocity, velocities[nearestHand]);
         vr_apply_haptic(nearestHand, 0.35f, 0.08f, -1.0f);
     }
 }
@@ -409,7 +553,10 @@ static u8 vr_painting_exit_hat_alpha(void) {
     }
     const u32 fadeElapsed = elapsed - VR_PAINTING_EXIT_HAT_HOLD_FRAMES;
     if (fadeElapsed >= VR_PAINTING_EXIT_HAT_FADE_FRAMES) {
-        sVrPaintingExitHatHand = VR_CONTROLLER_COUNT;
+        // Clear every piece of held state when the cap fades while still in a
+        // closed hand. This prevents a later release from spawning a ghost
+        // cap or leaving the glove permanently marked as occupied.
+        vr_clear_painting_exit_hat_hold();
         return 0;
     }
     return (u8)clamp(
@@ -3536,6 +3683,16 @@ static bool vr_hide_local_first_person_mario_part(void) {
         (action == ACT_FLYING ||
          (action & ACT_FLAG_SWIMMING) != 0 ||
          (action & ACT_FLAG_RIDING_SHELL) != 0);
+    const bool hideTopPoleFlipBody =
+        !configVrTopPoleFlipBody &&
+        action == ACT_TOP_OF_POLE_JUMP;
+    const bool hideLedgeBody =
+        configVrHideBodyOnLedge &&
+        (action == ACT_LEDGE_GRAB ||
+         action == ACT_LEDGE_CLIMB_SLOW_1 ||
+         action == ACT_LEDGE_CLIMB_SLOW_2 ||
+         action == ACT_LEDGE_CLIMB_DOWN ||
+         action == ACT_LEDGE_CLIMB_FAST);
     const bool hideCrawlingTorso =
         configVrHideTorsoWhileCrawling &&
         (action == ACT_START_CRAWLING ||
@@ -3566,6 +3723,8 @@ static bool vr_hide_local_first_person_mario_part(void) {
             return configVrFeetOnlyBody ||
                 !configVrFirstPersonBody ||
                 hideMountedBody ||
+                hideTopPoleFlipBody ||
+                hideLedgeBody ||
                 hideCrawlingTorso ||
                 hidePhysicalClimbBody;
         case MARIO_ANIM_PART_LOWER_LEFT:
@@ -3577,12 +3736,16 @@ static bool vr_hide_local_first_person_mario_part(void) {
             return configVrFeetOnlyBody ||
                 !configVrFirstPersonBody ||
                 hideMountedBody ||
+                hideTopPoleFlipBody ||
+                hideLedgeBody ||
                 hidePhysicalClimbBody;
         case MARIO_ANIM_PART_LEFT_FOOT:
         case MARIO_ANIM_PART_RIGHT_FOOT:
             return (!configVrFeetOnlyBody &&
                     !configVrFirstPersonBody) ||
                 hideMountedBody ||
+                hideTopPoleFlipBody ||
+                hideLedgeBody ||
                 hidePhysicalClimbBody;
         default:
             // True First Person and Arms Mode still traverse hidden skeletons

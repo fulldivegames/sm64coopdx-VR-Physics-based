@@ -94,6 +94,7 @@ static void djui_panel_vr_performance_defaults(struct DjuiBase* caller) {
 #else
     configVrRenderScale = 100;
 #endif
+    configVrShowFps = false;
     configVrDesktopMirror = true;
     configVrDesktopMirrorFps = 60;
 #ifdef __ANDROID__
@@ -174,6 +175,8 @@ static void djui_panel_vr_model_defaults(struct DjuiBase* caller) {
     configVrHideTorsoWhileCrawling = true;
     configVrFeetOnlyBody = false;
     configVrExperimentalMountedBody = false;
+    configVrTopPoleFlipBody = false;
+    configVrHideBodyOnLedge = true;
     configVrTorsoHeight = 100;
     configVrLegHeight = 100;
     configVrGloveSize = 70;
@@ -210,6 +213,7 @@ static void djui_panel_vr_immersion_defaults(struct DjuiBase* caller) {
     configVrImmersive3dSound = true;
     configVrImmersiveLedgeCamera = true;
     configVrImmersiveUnderwaterFilter = true;
+    configVrImmersiveRemovableCap = false;
     configVrExperimentalSideFlipFollow = true;
     configVrExperimentalWallJumpTurn = true;
     configVrPhysicalCrouching = true;
@@ -413,6 +417,13 @@ static void djui_panel_vr_performance_create(struct DjuiBase* caller) {
             VR_RENDER_SCALE_MIN,
             VR_RENDER_SCALE_MAX,
             djui_panel_vr_render_scale_changed
+        );
+
+        djui_checkbox_create(
+            body,
+            "FPS Counter",
+            &configVrShowFps,
+            NULL
         );
 
 #ifndef __ANDROID__
@@ -1120,6 +1131,8 @@ static void djui_panel_vr_model_body_settings_create(struct DjuiBase* caller) {
         djui_checkbox_create(body, "Feet Only (Hide Torso and Legs)", &configVrFeetOnlyBody, NULL);
         djui_checkbox_create(body, "Hide Torso While Crawling", &configVrHideTorsoWhileCrawling, NULL);
         djui_checkbox_create(body, "Body During Flying, Swimming, and Shell Riding", &configVrExperimentalMountedBody, NULL);
+        djui_checkbox_create(body, "Body During Top-of-Pole Flip", &configVrTopPoleFlipBody, NULL);
+        djui_checkbox_create(body, "Hide Body While on Ledges", &configVrHideBodyOnLedge, NULL);
         djui_slider_create(body, "Torso Height (100 = Center)", &configVrTorsoHeight, 0, 200, NULL);
         djui_slider_create(body, "Leg Height (100 = Center)", &configVrLegHeight, 0, 200, NULL);
         djui_button_create(body, "Set to Defaults", DJUI_BUTTON_STYLE_NORMAL, djui_panel_vr_model_defaults);
@@ -1158,6 +1171,8 @@ static void djui_panel_vr_immersion_create(struct DjuiBase* caller) {
         &configVrImmersiveLedgeCamera, NULL);
     djui_checkbox_create(body, "Underwater Filter",
         &configVrImmersiveUnderwaterFilter, NULL);
+    djui_checkbox_create(body, "Grab Cap at Any Time",
+        &configVrImmersiveRemovableCap, NULL);
     djui_checkbox_create(body, "Side-Flip Camera Follow",
         &configVrExperimentalSideFlipFollow, NULL);
     djui_checkbox_create(body, "180 Degree Wall-Jump Camera Turn",

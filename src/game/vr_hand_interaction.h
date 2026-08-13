@@ -55,7 +55,9 @@ bool vr_hand_interaction_get_bowser_controls(
     struct MarioState* mario,
     f32* turnInput,
     bool* gripReleased,
-    bool* fullPowerImpulse
+    bool* fullPowerImpulse,
+    s16* releaseYaw,
+    bool* releaseYawValid
 );
 bool vr_hand_interaction_bowser_spin_active(void);
 

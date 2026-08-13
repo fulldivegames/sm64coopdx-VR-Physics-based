@@ -34,7 +34,7 @@ The release is a single APK. Players do not need Git, Android Studio, Gradle, AD
 ### Install the APK
 
 1. Open this repository's [latest release](https://github.com/fulldivegames/sm64coopdx-VR-Standalone/releases/latest).
-2. Download `SM64-Co-Op-DX-VR-Quest-v0.5.1.apk` under **Assets**.
+2. Download `SM64-Co-Op-DX-VR-Quest-v0.5.5.apk` under **Assets**.
 3. Connect the Quest to your computer and allow the USB debugging prompt inside the headset.
 4. Open SideQuest and confirm that the headset indicator is connected.
 5. Click **Install APK file from folder** in SideQuest, choose the downloaded APK, and wait for the install-success message.
@@ -46,7 +46,7 @@ The release is a single APK. Players do not need Git, Android Studio, Gradle, AD
 Updates can be installed over the existing app through SideQuest. Keep the same Android application installed if you want its private ROM/configuration data to remain available. Back up important saves before testing a new release.
 
 > [!IMPORTANT]
-> **v0.5.1 is a required persistence hotfix.** It fixes progress and settings being written but not loaded on the next launch. Install it directly over v0.5.0 so your existing ROM, save, and settings remain in place; do not uninstall the app first.
+> Install v0.5.5 directly over an existing v0.5.0 or v0.5.1 installation so the private ROM, save, and settings remain available. Do not uninstall the app first.
 
 > [!IMPORTANT]
 > The APK contains no ROM and no Nintendo game assets. Do not upload, bundle, or redistribute a ROM with this project. The app validates the unmodified US ROM before importing it into private application storage.
@@ -98,7 +98,7 @@ Lower the headset below roughly two-thirds of the calibrated standing height to 
 
 ### Bowser
 
-Reach either glove to Bowser's tail and hold that Grip. Swing the held hand around your body to build spin speed, then release to throw. The camera stick can assist turning, and acceleration/maximum speed are adjustable.
+Reach either glove to Bowser's tail and hold that Grip. Swing the held hand around your body to build spin speed, then release to throw in the physical hand-swing direction. The camera stick can assist turning, and acceleration/maximum speed are adjustable.
 
 ### Physical climbing
 
@@ -108,12 +108,13 @@ Physical climbing is enabled by default, while Mario's standard automatic climbi
 - **Moving poles:** the player, grip anchor, collision, and visible pole follow the platform together.
 - **Hangable ceilings and monkey bars:** hold Grip before or while jumping into the actual underside, then alternate hands to move. The body is hidden during the physical climb to prevent clipping.
 - **Ledges:** move the headset over a safe ledge and release Grip to finish onto the top. A fast release can swing off toward the configured facing direction.
+- **Native ledge body:** Model Settings > Body Settings > Hide Body While on Ledges is enabled by default for ledge grabs, hangs, climb-downs, and pull-ups.
 - **Climb Any Wall or Ceiling:** the disabled-by-default Cheats option permits close fresh grips on ordinary walls and overhead ceilings. Floors, boxes, cap blocks, and breakable blocks remain excluded.
 
 ### Collection gestures
 
 - During a star/key collection screen, hold **Grip + Trigger** on either hand to show Mario's peace-sign glove.
-- During a successful painting/course exit, bring either **Grip + Trigger** hand to the headset or just above it to pull off the cap. Keep holding to carry it; release it to drop it onto geometry before it fades.
+- During a successful painting/course exit, bring either **Grip + Trigger** hand to the headset or just above it to pull off the cap. Keep holding to carry it; release to throw it. The cap can be picked up again or returned to Mario's head. The disabled-by-default **Grab Cap at Any Time** option enables this throughout play.
 
 ## Comfort, immersion, and visual options
 
@@ -138,8 +139,8 @@ Painting entries use a short white comfort fade. The optional True First Person 
 | Camera Settings | Camera mode, height/position, FOV, facing source, facing calibration, and standalone color controls |
 | Controller Settings | Motion-controller enablement, stick selection, button mappings, and optional trigger punch |
 | Motion Control Settings | Punching, grabbing, climbing, dives, jump turning, hit ranges, and Bowser tuning |
-| Model Settings | Body visibility/placement, feet-only view, glove scale, rotation, and position |
-| Performance | Render scale from 10%-100% (80% default) and standalone performance options |
+| Model Settings | Body visibility/placement, feet-only, ledge and pole-flip visibility, glove scale, rotation, and position |
+| Performance | Render scale from 10%-100% (80% default), optional FPS counter, and standalone performance options |
 | HUD Settings | HUD opacity and corner spread |
 | Immersion | Default-on comfort, audio, camera, underwater, cannon, and physical-crouch options |
 | Effects | Twirl tornado visual effect |

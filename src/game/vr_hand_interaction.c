@@ -195,6 +195,8 @@ static s16 sVrBowserPreviousHandYaw = 0;
 static s32 sVrBowserAccumulatedHandYaw = 0;
 static f32 sVrBowserPhysicalTurnInput = 0.0f;
 static bool sVrBowserFullPowerImpulse = false;
+static bool sVrBowserReleaseYawValid = false;
+static s16 sVrBowserReleaseYaw = 0;
 static bool sVrInteractionTrackingActive = false;
 static bool sVrHeadsetColliderActive = false;
 static f32 sVrHeadsetColliderSavedRadius = 50.0f;
@@ -458,6 +460,8 @@ static void vr_hand_interaction_clear_bowser_motion(void) {
     sVrBowserAccumulatedHandYaw = 0;
     sVrBowserPhysicalTurnInput = 0.0f;
     sVrBowserFullPowerImpulse = false;
+    sVrBowserReleaseYawValid = false;
+    sVrBowserReleaseYaw = 0;
 }
 
 static void vr_hand_interaction_reset(void) {
@@ -850,6 +854,27 @@ static void vr_hand_interaction_update_bowser_hand_turn(
         return;
     }
 
+    Vec3f handWorldPosition;
+    Vec3f handWorldVelocity;
+    if (vr_get_controller_world_fist_from_state(
+            hand,
+            controllerState,
+            handWorldPosition,
+            handWorldVelocity)) {
+        const f32 horizontalSpeedSquared =
+            handWorldVelocity[0] * handWorldVelocity[0] +
+            handWorldVelocity[2] * handWorldVelocity[2];
+        if (horizontalSpeedSquared >= 25.0f * 25.0f) {
+            // The physical hand-swing tangent is the release direction. It
+            // deliberately does not depend on HMD or Mario facing yaw.
+            sVrBowserReleaseYaw = atan2s(
+                handWorldVelocity[2],
+                handWorldVelocity[0]
+            );
+            sVrBowserReleaseYawValid = true;
+        }
+    }
+
     float headPosition[3];
     if (!vr_get_head_translation(headPosition)) {
         sVrBowserHandYawValid = false;
@@ -919,7 +944,9 @@ bool vr_hand_interaction_get_bowser_controls(
     struct MarioState* mario,
     f32* turnInput,
     bool* gripReleased,
-    bool* fullPowerImpulse
+    bool* fullPowerImpulse,
+    s16* releaseYaw,
+    bool* releaseYawValid
 ) {
     if (turnInput != NULL) {
         *turnInput = 0.0f;
@@ -929,6 +956,12 @@ bool vr_hand_interaction_get_bowser_controls(
     }
     if (fullPowerImpulse != NULL) {
         *fullPowerImpulse = false;
+    }
+    if (releaseYaw != NULL) {
+        *releaseYaw = 0;
+    }
+    if (releaseYawValid != NULL) {
+        *releaseYawValid = false;
     }
 
     if (!vr_is_active() ||
@@ -954,6 +987,12 @@ bool vr_hand_interaction_get_bowser_controls(
     }
 
     if (!sVrGripPressed[sVrBowserGripHand]) {
+        if (releaseYaw != NULL) {
+            *releaseYaw = sVrBowserReleaseYaw;
+        }
+        if (releaseYawValid != NULL) {
+            *releaseYawValid = sVrBowserReleaseYawValid;
+        }
         sVrBowserGripHand = VR_CONTROLLER_COUNT;
         if (gripReleased != NULL) {
             *gripReleased = true;

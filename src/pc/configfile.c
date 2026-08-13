@@ -110,6 +110,7 @@ unsigned int configVrRenderScale                  = 80;
 #else
 unsigned int configVrRenderScale                  = 100;
 #endif
+bool         configVrShowFps                      = false;
 bool         configVrDesktopMirror                = true;
 unsigned int configVrDesktopMirrorFps             = 60;
 unsigned int configVrHudOpacity                   = 100;
@@ -140,6 +141,7 @@ bool         configVrImmersiveCannonCone           = true;
 bool         configVrImmersive3dSound              = true;
 bool         configVrImmersiveLedgeCamera           = true;
 bool         configVrImmersiveUnderwaterFilter      = true;
+bool         configVrImmersiveRemovableCap          = false;
 bool         configVrMovementOverhaul              = false;
 bool         configVrMarioPunchSound              = true;
 bool         configVrMotionControlledDive         = true;
@@ -178,6 +180,8 @@ bool         configVrExperimentalTrueFirstPerson  = false;
 bool         configVrExperimentalTrueDiving       = false;
 bool         configVrExperimentalArmsMode         = false;
 bool         configVrExperimentalMountedBody      = false;
+bool         configVrTopPoleFlipBody              = false;
+bool         configVrHideBodyOnLedge              = true;
 bool         configVrTwirlTornadoEffect           = true;
 bool         configVrPhysicalCrouching             = true;
 bool         configVrOriginalMarioMovement        = false;
@@ -432,6 +436,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_saturation",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrSaturation},
     {.name = "vr_contrast",                    .type = CONFIG_TYPE_UINT, .uintValue = &configVrContrast},
     {.name = "vr_render_scale",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrRenderScale},
+    {.name = "vr_show_fps",                    .type = CONFIG_TYPE_BOOL, .boolValue = &configVrShowFps},
     {.name = "vr_desktop_mirror",              .type = CONFIG_TYPE_BOOL, .boolValue = &configVrDesktopMirror},
     {.name = "vr_desktop_mirror_fps",          .type = CONFIG_TYPE_UINT, .uintValue = &configVrDesktopMirrorFps},
     {.name = "vr_hud_opacity",                 .type = CONFIG_TYPE_UINT, .uintValue = &configVrHudOpacity},
@@ -462,6 +467,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_immersive_3d_sound",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersive3dSound},
     {.name = "vr_immersive_ledge_camera",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveLedgeCamera},
     {.name = "vr_immersive_underwater_filter",  .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveUnderwaterFilter},
+    {.name = "vr_immersive_removable_cap",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveRemovableCap},
     {.name = "vr_mario_punch_sound",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMarioPunchSound},
     {.name = "vr_motion_controlled_dive",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControlledDive},
     {.name = "vr_motion_controlled_ground_dive",.type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControlledGroundDive},
@@ -499,6 +505,8 @@ static const struct ConfigOption options[] = {
     {.name = "vr_experimental_true_diving",      .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalTrueDiving},
     {.name = "vr_experimental_arms_mode",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalArmsMode},
     {.name = "vr_experimental_mounted_body",    .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalMountedBody},
+    {.name = "vr_top_pole_flip_body",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrTopPoleFlipBody},
+    {.name = "vr_hide_body_on_ledge",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrHideBodyOnLedge},
     {.name = "vr_twirl_tornado_effect",         .type = CONFIG_TYPE_BOOL, .boolValue = &configVrTwirlTornadoEffect},
     {.name = "vr_physical_crouching",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrPhysicalCrouching},
     {.name = "vr_original_mario_movement",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrOriginalMarioMovement},

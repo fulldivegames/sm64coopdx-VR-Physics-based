@@ -302,6 +302,7 @@ static bool get_version_remote(void) {
     }
     CURL* curl = curl_easy_init();
     if (curl == NULL) {
+        curl_global_cleanup();
         return false;
     }
 
@@ -333,6 +334,7 @@ static bool get_version_remote(void) {
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
     free(response.data);
+    curl_global_cleanup();
     return success;
 }
 #endif

@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.5.5 - 2026-08-13
+
+- Added an optional opaque FPS counter beneath the lives display that follows HUD corner spread.
+- Added reusable physical cap throwing, re-grabbing, head reattachment, safe held fading, and the disabled-by-default **Grab Cap at Any Time** option.
+- Made physical Bowser releases use tracked hand-swing direction.
+- Added default-on body hiding for native ledge grabs, hangs, climb-downs, and pull-ups.
+- Added default-hidden body presentation during top-of-pole flips.
+- Retained the v0.5.1 save/settings persistence fixes and audited new state lifetimes for stale references.
+
 ## v0.5.1 - 2026-08-12
 
 - Fixed Android virtual-filesystem mounting when the app-data directory contains dots, restoring saved stars and settings after relaunch.
