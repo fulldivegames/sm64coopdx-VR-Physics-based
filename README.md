@@ -51,6 +51,28 @@ Updates can be installed over the existing app through SideQuest. Keep the same 
 > [!IMPORTANT]
 > The APK contains no ROM and no Nintendo game assets. Do not upload, bundle, or redistribute a ROM with this project. The app validates the unmodified US ROM before importing it into private application storage.
 
+## Install mods
+
+The standalone build loads compatible SM64 Co-Op DX mods from this folder on the Quest:
+
+```text
+/sdcard/Android/data/com.fulldivegames.sm64coopdxvr/files/mods/
+```
+
+1. Download a mod that is compatible with SM64 Co-Op DX. The official community browser is [mods.sm64coopdx.com](https://mods.sm64coopdx.com/mods/).
+2. Extract the downloaded archive. Copy the **extracted mod folder**, not the `.zip` file, into the `mods` folder shown above. The mod's files must be directly inside its own folder rather than inside an extra duplicate folder.
+3. With the Quest connected, open SideQuest's file manager and browse to `Android/data/com.fulldivegames.sm64coopdxvr/files/`. Create the `mods` folder if it does not already exist, then copy the extracted mod folder into it.
+4. Fully close and reopen **SM64 Co-Op DX VR**. From the main menu, open **Host > Mods**, select the installed mod, and then start the game. Use **Refresh** if the mod was copied while the app was open.
+
+If SideQuest cannot open `Android/data` on your headset, use ADB from SideQuest's tools or Android Platform Tools. Replace the example paths and folder name with the mod you downloaded:
+
+```powershell
+adb shell mkdir -p /sdcard/Android/data/com.fulldivegames.sm64coopdxvr/files/mods
+adb push "C:\path\to\ExtractedModFolder" /sdcard/Android/data/com.fulldivegames.sm64coopdxvr/files/mods/
+```
+
+Not every desktop mod is compatible with the standalone ARM64/OpenGL ES build. Mods that depend on desktop-only code, very large model or texture packs, and demanding ROM hacks may fail to load or run poorly. Install one mod at a time when troubleshooting. Only download mods you trust, and do not redistribute copyrighted game assets.
+
 ## Default Quest controls
 
 | Action | Default input |
