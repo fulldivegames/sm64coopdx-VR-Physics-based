@@ -39,6 +39,26 @@ static void ScanPackBinsFolder(struct PackData* aPack, const SysPath& aFolder) {
     closedir(_PackDir);
 }
 
+static const void* DynOS_Pack_GetActorGeoRef(
+    const std::pair<std::string, GfxData *>& pair
+) {
+    const void* georef =
+        DynOS_Builtin_Actor_GetFromName(pair.first.c_str());
+    if (georef != NULL || pair.second == NULL ||
+        pair.second->mGeoLayouts.Count() == 0) {
+        return georef;
+    }
+
+    // The graph name stored inside the binary is authoritative. Some packs
+    // rename mario_geo.bin (or place it inside a wrapper) while retaining a
+    // valid built-in mario_geo graph, so resolving only the filename silently
+    // loads the actor but never activates the player replacement.
+    auto* geoNode = *(pair.second->mGeoLayouts.end() - 1);
+    return geoNode != NULL
+        ? DynOS_Builtin_Actor_GetFromName(geoNode->mName.begin())
+        : NULL;
+}
+
 static void ScanPackBins(struct PackData* aPack) {
     ScanPackBinsFolder(aPack, aPack->mPath);
 
@@ -59,7 +79,7 @@ static void DynOS_Pack_ActivateActor(s32 aPackIndex, std::pair<std::string, GfxD
     GraphNode* graphNode = DynOS_Model_LoadGeo(&id, MODEL_POOL_PERMANENT, geoNode->mData, true);
     if (graphNode == NULL) { return; }
 
-    const void* georef = DynOS_Builtin_Actor_GetFromName(aActorName);
+    const void* georef = DynOS_Pack_GetActorGeoRef(pair);
     graphNode->georef = georef;
 
     ActorGfx actorGfx;
@@ -79,7 +99,7 @@ static void DynOS_Pack_ActivateActor(s32 aPackIndex, std::pair<std::string, GfxD
 
 static void DynOS_Pack_DeactivateActor(s32 aPackIndex, std::pair<std::string, GfxData *> &pair) {
     const char* aActorName = pair.first.c_str();
-    const void* georef = DynOS_Builtin_Actor_GetFromName(aActorName);
+    const void* georef = DynOS_Pack_GetActorGeoRef(pair);
     DynOS_Actor_Invalid(georef, aPackIndex);
 
     // figure out which actor to replace it with

@@ -8,6 +8,15 @@ import android.os.Build;
 import android.os.Environment;
 import android.provider.Settings;
 import android.util.Log;
+import android.graphics.Color;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
+import android.view.Gravity;
+import android.view.inputmethod.InputMethodManager;
+import android.content.Context;
+import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import java.io.File;
@@ -31,10 +40,68 @@ public final class QuestNativeActivity extends NativeActivity {
     private static final String SHARED_DYNOS_PACK_DIRECTORY =
             "/sdcard/SM64VR/dynos/packs";
     private boolean requestedSharedStorageAccess;
+    private EditText vrKeyboardInput;
+    private boolean suppressVrKeyboardText;
     private static final String US_ROM_SHA1 =
             "9bef1128717f958171a4afac3ed78ee2bb4e86ce";
     private static final String RELEASES_API =
             "https://api.github.com/repos/fulldivegames/sm64coopdx-VR-Standalone/releases?per_page=20";
+
+    private static native void nativeOnVrKeyboardText(String text);
+
+    public void showVrKeyboard(final String initialText) {
+        runOnUiThread(() -> {
+            if (vrKeyboardInput == null) {
+                vrKeyboardInput = new EditText(this);
+                vrKeyboardInput.setSingleLine(true);
+                vrKeyboardInput.setInputType(InputType.TYPE_CLASS_TEXT |
+                        InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+                vrKeyboardInput.setTextColor(Color.TRANSPARENT);
+                vrKeyboardInput.setBackgroundColor(Color.TRANSPARENT);
+                vrKeyboardInput.setAlpha(0.01f);
+                vrKeyboardInput.addTextChangedListener(new TextWatcher() {
+                    @Override public void beforeTextChanged(CharSequence s,
+                            int start, int count, int after) {}
+                    @Override public void onTextChanged(CharSequence s,
+                            int start, int before, int count) {}
+                    @Override public void afterTextChanged(Editable editable) {
+                        if (!suppressVrKeyboardText) {
+                            nativeOnVrKeyboardText(editable.toString());
+                        }
+                    }
+                });
+                FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                        2, 2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+                addContentView(vrKeyboardInput, params);
+            }
+            suppressVrKeyboardText = true;
+            vrKeyboardInput.setText(initialText != null ? initialText : "");
+            vrKeyboardInput.setSelection(vrKeyboardInput.length());
+            suppressVrKeyboardText = false;
+            vrKeyboardInput.setVisibility(EditText.VISIBLE);
+            vrKeyboardInput.requestFocus();
+            InputMethodManager inputMethod = (InputMethodManager)
+                    getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (inputMethod != null) {
+                inputMethod.showSoftInput(vrKeyboardInput,
+                        InputMethodManager.SHOW_IMPLICIT);
+            }
+        });
+    }
+
+    public void hideVrKeyboard() {
+        runOnUiThread(() -> {
+            if (vrKeyboardInput == null) return;
+            InputMethodManager inputMethod = (InputMethodManager)
+                    getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (inputMethod != null) {
+                inputMethod.hideSoftInputFromWindow(
+                        vrKeyboardInput.getWindowToken(), 0);
+            }
+            vrKeyboardInput.clearFocus();
+            vrKeyboardInput.setVisibility(EditText.GONE);
+        });
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
