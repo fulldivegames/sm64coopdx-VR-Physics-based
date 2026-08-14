@@ -159,6 +159,7 @@ extern unsigned int configVrFov;
 extern unsigned int configVrBrightness;
 extern unsigned int configVrRenderScale;
 extern bool         configVrShowFps;
+extern bool         configVrFlameOptimizations;
 extern bool         configVrDesktopMirror;
 extern unsigned int configVrDesktopMirrorFps;
 extern unsigned int configVrHudOpacity;

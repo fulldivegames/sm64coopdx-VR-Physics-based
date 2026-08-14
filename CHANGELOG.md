@@ -4,6 +4,7 @@
 
 - Heavy rear-grab enemies such as King Bob-omb and Chuckya can now be physically grabbed with either hand.
 - Rear-position validation remains required, and dive pickup remains supported.
+- Added Flame & Lava Optimizations in Performance (off by default on PC), reducing dense transparent flame rendering, visual trail particles, lava bubbles, and avoidable distance work without changing hazard collisions.
 
 ## v0.5.8 - 2026-08-14
 

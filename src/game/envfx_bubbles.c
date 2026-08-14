@@ -1,4 +1,5 @@
 #include "pc/rom_assets.h"
+#include "pc/configfile.h"
 #include <ultra64.h>
 
 #include "sm64.h"
@@ -609,6 +610,11 @@ Gfx *envfx_update_bubble_particles(s32 mode, UNUSED Vec3s marioPos, Vec3s camFro
  */
 void envfx_set_max_bubble_particles(s32 mode) {
     switch (mode) {
+        case ENVFX_LAVA_BUBBLES:
+            // Keep the full allocation so this option can be toggled safely
+            // while reducing transparent particles and floor queries.
+            sBubbleParticleMaxCount = configVrFlameOptimizations ? 10 : 15;
+            break;
         case ENVFX_WHIRLPOOL_BUBBLES:
             sBubbleParticleMaxCount = gEnvFxBubbleConfig[ENVFX_STATE_PARTICLECOUNT];
             break;

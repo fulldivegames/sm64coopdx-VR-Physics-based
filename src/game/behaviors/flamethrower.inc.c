@@ -42,7 +42,10 @@ void bhv_flamethrower_loop(void) {
     }
     struct MarioState* marioState = nearest_mario_state_to_object(o);
     struct Object* player = marioState ? marioState->marioObj : NULL;
-    s32 distanceToPlayer = player ? dist_between_objects(o, player) : 10000;
+    const f32 dx = player ? o->oPosX - player->oPosX : 10000.0f;
+    const f32 dy = player ? o->oPosY - player->oPosY : 0.0f;
+    const f32 dz = player ? o->oPosZ - player->oPosZ : 0.0f;
+    const f32 distanceToPlayerSq = dx * dx + dy * dy + dz * dz;
 
     struct Object *flame;
     f32 flameVel;
@@ -51,7 +54,7 @@ void bhv_flamethrower_loop(void) {
     UNUSED u8 pad[8];
     if (o->oAction == 0) {
         if (gCurrLevelNum != LEVEL_BBH || gMarioOnMerryGoRound == TRUE) {
-            if (marioState && marioState->playerIndex == 0 && distanceToPlayer < 2000.0f) {
+            if (marioState && marioState->playerIndex == 0 && distanceToPlayerSq < 2000.0f * 2000.0f) {
                 o->oAction++;
                 network_send_object(o);
             }
@@ -71,7 +74,13 @@ void bhv_flamethrower_loop(void) {
         else
             o->oAction++;
         o->oFlameThowerUnk110 = sp34;
-        flame = spawn_object_relative(o->oBehParams2ndByte, 0, 0, 0, o, model, bhvFlamethrowerFlame);
+        // Preserve every collision sample while drawing only half of dense
+        // flame streams. This reduces transparent overdraw without changing
+        // the flamethrower's reach or damage coverage.
+        const s32 flameModel = configVrFlameOptimizations && (o->oTimer & 1)
+            ? MODEL_NONE
+            : model;
+        flame = spawn_object_relative(o->oBehParams2ndByte, 0, 0, 0, o, flameModel, bhvFlamethrowerFlame);
         if (flame != NULL) { flame->oForwardVel = flameVel; }
         cur_obj_play_sound_1(SOUND_AIR_BLOW_FIRE);
     } else if (o->oTimer > 60)

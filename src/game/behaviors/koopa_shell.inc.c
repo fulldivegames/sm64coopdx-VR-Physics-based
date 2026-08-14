@@ -45,8 +45,9 @@ void bhv_koopa_shell_flame_loop(void) {
 }
 
 void bhv_koopa_shell_flame_spawn(void) {
+    const s32 flameCount = configVrFlameOptimizations ? 1 : 2;
     s32 i;
-    for (i = 0; i < 2; i++)
+    for (i = 0; i < flameCount; i++)
         spawn_object(o, MODEL_RED_FLAME, bhvKoopaShellFlame);
 }
 

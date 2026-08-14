@@ -101,6 +101,7 @@ unsigned int configVrFov                          = 100;
 unsigned int configVrBrightness                   = 100;
 unsigned int configVrRenderScale                  = 100;
 bool         configVrShowFps                      = false;
+bool         configVrFlameOptimizations            = false;
 bool         configVrDesktopMirror                = true;
 unsigned int configVrDesktopMirrorFps             = 60;
 unsigned int configVrHudOpacity                   = 100;
@@ -425,6 +426,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_brightness",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrBrightness},
     {.name = "vr_render_scale",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrRenderScale},
     {.name = "vr_show_fps",                    .type = CONFIG_TYPE_BOOL, .boolValue = &configVrShowFps},
+    {.name = "vr_flame_optimizations",          .type = CONFIG_TYPE_BOOL, .boolValue = &configVrFlameOptimizations},
     {.name = "vr_desktop_mirror",              .type = CONFIG_TYPE_BOOL, .boolValue = &configVrDesktopMirror},
     {.name = "vr_desktop_mirror_fps",          .type = CONFIG_TYPE_UINT, .uintValue = &configVrDesktopMirrorFps},
     {.name = "vr_hud_opacity",                 .type = CONFIG_TYPE_UINT, .uintValue = &configVrHudOpacity},
