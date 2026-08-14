@@ -31,6 +31,7 @@
 #include "pc/debug_context.h"
 #include "pc/pc_main.h"
 #include "pc/platform.h"
+#include "pc/utils/misc.h"
 
 #include "pc/fs/fs.h"
 
@@ -265,9 +266,22 @@ static void gfx_shader_cache_write_definition(
 static struct ShaderProgram *gfx_lookup_or_create_shader_program(struct ColorCombiner* cc) {
     struct ShaderProgram *prg = gfx_rapi->lookup_shader(cc);
     if (prg == NULL) {
+        const f64 compileStart = clock_elapsed_f64();
         gfx_rapi->unload_shader(rendering_state.shader_program);
         prg = gfx_rapi->create_and_load_new_shader(cc);
         rendering_state.shader_program = prg;
+        const f64 compileSeconds = clock_elapsed_f64() - compileStart;
+        if (gGfxInited && compileSeconds >= 0.020) {
+            // This is intentionally emitted only for a real runtime miss. It
+            // makes a driver-side shader hitch distinguishable from game,
+            // Lua, network, OpenXR, and desktop-capture stalls.
+            printf(
+                "[GFX] Runtime shader cache miss took %.1f ms "
+                "(hash %016" PRIx64 ").\n",
+                compileSeconds * 1000.0,
+                cc->hash
+            );
+        }
     }
     return prg;
 }

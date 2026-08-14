@@ -96,6 +96,7 @@ static f64 sFrameTimeStart = 0;
 static u32 sDrawnFrames = 0;
 static bool sVrFramePacingEnabled = false;
 static f64 sVrDesktopMirrorNextTime = 0.0;
+static f64 sVrLastHitchLogTime = 0.0;
 
 bool gGameInited = false;
 bool gGfxInited = false;
@@ -553,20 +554,75 @@ void *audio_thread(UNUSED void *arg) {
 }
 
 void produce_one_frame(void) {
+    const bool measureVrFrame = vr_is_active();
+    const f64 frameStart = measureVrFrame ? clock_elapsed_f64() : 0.0;
+    f64 stageStart = frameStart;
+    f64 networkSeconds = 0.0;
+    f64 interpolationSeconds = 0.0;
+    f64 gameSeconds = 0.0;
+    f64 luaSeconds = 0.0;
+    f64 audioSeconds = 0.0;
+
     CTX_EXTENT(CTX_NETWORK, network_update);
+    if (measureVrFrame) {
+        const f64 now = clock_elapsed_f64();
+        networkSeconds = now - stageStart;
+        stageStart = now;
+    }
 
     CTX_EXTENT(CTX_INTERP, patch_interpolations_before);
+    if (measureVrFrame) {
+        const f64 now = clock_elapsed_f64();
+        interpolationSeconds = now - stageStart;
+        stageStart = now;
+    }
 
     CTX_EXTENT(CTX_GAME_LOOP, game_loop_one_iteration);
+    if (measureVrFrame) {
+        const f64 now = clock_elapsed_f64();
+        gameSeconds = now - stageStart;
+        stageStart = now;
+    }
 
     CTX_EXTENT(CTX_SMLUA, smlua_update);
+    if (measureVrFrame) {
+        const f64 now = clock_elapsed_f64();
+        luaSeconds = now - stageStart;
+        stageStart = now;
+    }
 
     // If we aren't threaded
     if (gAudioThread.state == INVALID) {
         CTX_EXTENT(CTX_AUDIO, buffer_audio);
     }
+    if (measureVrFrame) {
+        const f64 now = clock_elapsed_f64();
+        audioSeconds = now - stageStart;
+        stageStart = now;
+    }
 
     CTX_EXTENT(CTX_RENDER, produce_interpolation_frames_and_delay);
+    if (measureVrFrame) {
+        const f64 frameEnd = clock_elapsed_f64();
+        const f64 renderSeconds = frameEnd - stageStart;
+        const f64 totalSeconds = frameEnd - frameStart;
+        if (totalSeconds >= 0.150 &&
+            frameEnd - sVrLastHitchLogTime >= 1.0) {
+            printf(
+                "[VR] Frame hitch %.1f ms | network %.1f | "
+                "interp %.1f | game %.1f | Lua %.1f | "
+                "audio %.1f | render/OpenXR %.1f.\n",
+                totalSeconds * 1000.0,
+                networkSeconds * 1000.0,
+                interpolationSeconds * 1000.0,
+                gameSeconds * 1000.0,
+                luaSeconds * 1000.0,
+                audioSeconds * 1000.0,
+                renderSeconds * 1000.0
+            );
+            sVrLastHitchLogTime = frameEnd;
+        }
+    }
 }
 
 // used for rendering 2D scenes fullscreen like the loading or crash screens

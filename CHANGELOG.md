@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.5.6 - 2026-08-14
+
+- Added **Cheats > Shaking Hat Gives Wing Cap**. With **Grab Cap at Any Time** enabled, a deliberately vigorous physical shake converts the held cap before it is placed back on Mario's head.
+- Completed reusable cap behavior: either hand can remove, hold, throw, recover, or physically re-equip the cap; dropped caps begin their five-second fade only after touching geometry or the water surface.
+- Made thrown shaken Wing Caps rise without gravity, retain physical throw direction, and fade out after fifteen seconds instead of snapping back onto Mario.
+- Added configurable body opacity and a smooth, adjustable look-down transparency effect while keeping the tracked gloves fully opaque.
+- Reworked physical Bowser ownership for one or two hands. Releasing one controller transfers a two-handed hold; releasing the final grip throws using averaged hand-swing direction while preserving native weight, spin power, mines, and networking.
+- Added low-overhead PC hitch attribution and explicit runtime shader-miss timing so severe stalls can be separated between game, Lua, network, audio, shader, rendering, and OpenXR work.
+- Rechecked the VR hot paths for per-frame allocation and file-I/O regressions, retained the preallocated texture/interpolation storage, and rebuilt both editions successfully.
+
 ## v0.5.5 - 2026-08-13
 
 - Added an optional fully opaque FPS counter beneath the lives counter. It follows HUD corner spread without inheriting HUD opacity.

@@ -156,6 +156,8 @@ static void djui_panel_vr_model_defaults(struct DjuiBase* caller) {
     configVrFirstPersonBody = true;
     configVrHideTorsoWhileCrawling = true;
     configVrFeetOnlyBody = false;
+    configVrBodyOpacity = 100;
+    configVrLookDownTransparencyAngle = 25;
     configVrExperimentalMountedBody = false;
     configVrTopPoleFlipBody = false;
     configVrHideBodyOnLedge = true;
@@ -183,6 +185,7 @@ static void djui_panel_vr_cheat_defaults(struct DjuiBase* caller) {
     (void)caller;
 
     configVrCheatSurfaceClimbing = false;
+    configVrCheatShakingHatWingCap = false;
     configVrFlyingSpeed = VR_FLYING_SPEED_DEFAULT;
     configVrSwimmingSpeed = VR_SWIMMING_SPEED_DEFAULT;
     configVrRunningSpeed = VR_RUNNING_SPEED_DEFAULT;
@@ -198,6 +201,7 @@ static void djui_panel_vr_immersion_defaults(struct DjuiBase* caller) {
     configVrImmersiveLedgeCamera = true;
     configVrImmersiveUnderwaterFilter = true;
     configVrImmersiveRemovableCap = false;
+    configVrImmersiveLookDownTransparency = true;
     configVrExperimentalSideFlipFollow = true;
     configVrExperimentalWallJumpTurn = true;
     configVrPhysicalCrouching = true;
@@ -961,6 +965,16 @@ static void djui_panel_vr_model_hand_settings_create(struct DjuiBase* caller) {
 }
 
 static void djui_panel_vr_model_body_settings_create(struct DjuiBase* caller) {
+    configVrBodyOpacity = djui_panel_vr_clamp_uint(
+        configVrBodyOpacity,
+        0U,
+        100U
+    );
+    configVrLookDownTransparencyAngle = djui_panel_vr_clamp_uint(
+        configVrLookDownTransparencyAngle,
+        5U,
+        60U
+    );
     configVrTorsoHeight = djui_panel_vr_clamp_uint(
         configVrTorsoHeight,
         0U,
@@ -1011,6 +1025,22 @@ static void djui_panel_vr_model_body_settings_create(struct DjuiBase* caller) {
             body,
             "Hide Body While on Ledges",
             &configVrHideBodyOnLedge,
+            NULL
+        );
+        djui_slider_create(
+            body,
+            "Body Opacity (%)",
+            &configVrBodyOpacity,
+            0,
+            100,
+            NULL
+        );
+        djui_slider_create(
+            body,
+            "Look-Down Fade Angle",
+            &configVrLookDownTransparencyAngle,
+            5,
+            60,
             NULL
         );
         djui_slider_create(
@@ -1148,6 +1178,12 @@ static void djui_panel_vr_cheats_create(struct DjuiBase* caller) {
             &configVrCheatSurfaceClimbing,
             NULL
         );
+        djui_checkbox_create(
+            body,
+            "Shaking Hat Gives Wing Cap (Grab Cap at Any Time Required)",
+            &configVrCheatShakingHatWingCap,
+            NULL
+        );
 
         if (configVrFlyingSpeed < VR_FLYING_SPEED_MIN) {
             configVrFlyingSpeed = VR_FLYING_SPEED_MIN;
@@ -1264,6 +1300,12 @@ static void djui_panel_vr_immersion_create(struct DjuiBase* caller) {
             body,
             "Grab Cap at Any Time",
             &configVrImmersiveRemovableCap,
+            NULL
+        );
+        djui_checkbox_create(
+            body,
+            "Mario Transparency While Looking Down",
+            &configVrImmersiveLookDownTransparency,
             NULL
         );
 

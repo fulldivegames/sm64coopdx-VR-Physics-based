@@ -14,7 +14,7 @@
 </p>
 
 > [!IMPORTANT]
-> The current public release is **v0.5.5**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination.
+> The current public release is **v0.5.6**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination.
 
 SM64 Co-Op DX VR currently targets 64-bit Windows, OpenGL, and OpenXR. It keeps the original game's flat-screen mode and multiplayer foundation while adding native stereoscopic rendering, 6DoF tracking, VR-aware cameras, remappable motion-controller input, physical interactions, comfort options, and extensive calibration settings.
 
@@ -233,7 +233,7 @@ Every VR submenu includes **Set to Defaults**.
 
 This project keeps Super Mario 64's original 30 Hz gameplay simulation and renders interpolated headset frames at the OpenXR runtime's cadence. Raising the simulation rate globally would change physics, animation timing, multiplayer behavior, and mod assumptions, so high-refresh VR smoothness is handled through render interpolation and late headset/controller poses instead.
 
-## v0.5.5 summary
+## v0.5.6 summary
 
 - Physical pole, tree, monkey-bar, native ceiling, and hand-over-hand climbing
 - Optional climbing on any vertical wall or overhead ceiling
@@ -257,6 +257,10 @@ This project keeps Super Mario 64's original 30 Hz gameplay simulation and rende
 - Reusable physical cap handling with throwing, re-grabbing, head reattachment, and a disabled-by-default anytime-cap option
 - Hand-swing-directed physical Bowser releases
 - Default-on body hiding during native ledge grabs and pull-ups
+- Optional cap removal at any time, physical re-equipping, throwing, grounded fading, and a deliberately vigorous shake gesture that grants the Wing Cap
+- Configurable Mario-body opacity plus a smooth look-down transparency comfort effect that excludes the tracked gloves
+- Weight-preserving one- and two-handed physical Bowser control with controller-swing-directed releases
+- Runtime hitch attribution for game, Lua, network, audio, shader compilation, rendering, and OpenXR stalls
 
 ## Troubleshooting
 
