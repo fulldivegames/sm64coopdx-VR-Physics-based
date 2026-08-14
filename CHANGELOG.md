@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.7 - 2026-08-14
+
+- Added `/sdcard/SM64VR/mods/` as the primary Quest mod directory so SideQuest can transfer large mods without entering Android's restricted `Android/data` tree.
+- Added a one-time Android all-files-access settings prompt and automatic shared mod-folder creation.
+- Retained the previous private mod directory as a compatibility fallback; shared mods take priority when names overlap.
+- Updated the standalone mod installation and ADB instructions for the new directory.
+
 ## v0.5.6 - 2026-08-14
 
 - Added **Shaking Hat Gives Wing Cap**, reusable physical cap removal, throwing, recovery, head reattachment, grounded/water fade timing, and rising thrown Wing Caps.

@@ -4,6 +4,9 @@ import android.app.NativeActivity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
+import android.os.Environment;
+import android.provider.Settings;
 import android.util.Log;
 import android.widget.Toast;
 
@@ -24,6 +27,8 @@ public final class QuestNativeActivity extends NativeActivity {
     private static final String TAG = "SM64CoopDXVR";
     private static final int OPEN_ROM_REQUEST = 6401;
     private static final String ROM_NAME = "baserom.us.z64";
+    private static final String SHARED_MOD_DIRECTORY = "/sdcard/SM64VR/mods";
+    private boolean requestedSharedStorageAccess;
     private static final String US_ROM_SHA1 =
             "9bef1128717f958171a4afac3ed78ee2bb4e86ce";
     private static final String RELEASES_API =
@@ -33,10 +38,54 @@ public final class QuestNativeActivity extends NativeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         installBundledResources();
         super.onCreate(savedInstanceState);
+        prepareSharedModDirectory();
         checkForStandaloneUpdate();
         File rom = new File(getExternalFilesDir(null), ROM_NAME);
         if (!rom.isFile() && savedInstanceState == null) {
             openRomPicker();
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (Build.VERSION.SDK_INT < 30 || Environment.isExternalStorageManager()) {
+            File directory = new File(SHARED_MOD_DIRECTORY);
+            if (!directory.isDirectory() && !directory.mkdirs()) {
+                Log.w(TAG, "Could not create shared mod directory: " + directory);
+            }
+            return;
+        }
+        if (!requestedSharedStorageAccess) {
+            requestedSharedStorageAccess = true;
+            requestSharedStorageAccess();
+        }
+    }
+
+    private void prepareSharedModDirectory() {
+        if (Build.VERSION.SDK_INT < 30 || Environment.isExternalStorageManager()) {
+            File directory = new File(SHARED_MOD_DIRECTORY);
+            if (!directory.isDirectory() && !directory.mkdirs()) {
+                Log.w(TAG, "Could not create shared mod directory: " + directory);
+            }
+        }
+    }
+
+    private void requestSharedStorageAccess() {
+        try {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+            intent.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        } catch (Exception exception) {
+            Log.w(TAG, "App-specific file access settings unavailable.", exception);
+            try {
+                startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+            } catch (Exception fallbackException) {
+                Log.e(TAG, "File access settings unavailable.", fallbackException);
+                Toast.makeText(this,
+                        "File access is required for /sdcard/SM64VR/mods.",
+                        Toast.LENGTH_LONG).show();
+            }
         }
     }
 

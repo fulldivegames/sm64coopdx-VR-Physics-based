@@ -46,30 +46,33 @@ The release is a single APK. Players do not need Git, Android Studio, Gradle, AD
 Updates can be installed over the existing app through SideQuest. Keep the same Android application installed if you want its private ROM/configuration data to remain available. Back up important saves before testing a new release.
 
 > [!IMPORTANT]
-> Install v0.5.6 directly over an existing installation so the private ROM, save, and settings remain available. Do not uninstall the app first.
+> Install v0.5.7 directly over an existing installation so the private ROM, save, and settings remain available. Do not uninstall the app first.
 
 > [!IMPORTANT]
 > The APK contains no ROM and no Nintendo game assets. Do not upload, bundle, or redistribute a ROM with this project. The app validates the unmodified US ROM before importing it into private application storage.
 
 ## Install mods
 
-The standalone build loads compatible SM64 Co-Op DX mods from this folder on the Quest:
+Starting with v0.5.7, the standalone build loads compatible SM64 Co-Op DX mods from this easy-to-access folder on the Quest:
 
 ```text
-/sdcard/Android/data/com.fulldivegames.sm64coopdxvr/files/mods/
+/sdcard/SM64VR/mods/
 ```
 
-1. Download a mod that is compatible with SM64 Co-Op DX. The official community browser is [mods.sm64coopdx.com](https://mods.sm64coopdx.com/mods/).
-2. Extract the downloaded archive. Copy the **extracted mod folder**, not the `.zip` file, into the `mods` folder shown above. The mod's files must be directly inside its own folder rather than inside an extra duplicate folder.
-3. With the Quest connected, open SideQuest's file manager and browse to `Android/data/com.fulldivegames.sm64coopdxvr/files/`. Create the `mods` folder if it does not already exist, then copy the extracted mod folder into it.
-4. Fully close and reopen **SM64 Co-Op DX VR**. From the main menu, open **Host > Mods**, select the installed mod, and then start the game. Use **Refresh** if the mod was copied while the app was open.
+1. Install or update to v0.5.7 and launch it once. Android opens the **Allow access to manage all files** page; enable access for **SM64 Co-Op DX VR Standalone**. This permission is used only for the shared mod folder.
+2. Close and reopen the game once after granting access. The game creates `/sdcard/SM64VR/mods/` automatically.
+3. Download a mod compatible with SM64 Co-Op DX. The official community browser is [mods.sm64coopdx.com](https://mods.sm64coopdx.com/mods/).
+4. Extract the archive. Copy the **extracted mod folder**, not the `.zip`, into `SM64VR/mods` with SideQuest's file manager. The mod files must be directly inside their own folder rather than inside an extra duplicate folder.
+5. Fully close and reopen **SM64 Co-Op DX VR**. From the main menu, open **Host > Mods**, select the installed mod, and start the game. Use **Refresh** if the mod was copied while the app was open.
 
-If SideQuest cannot open `Android/data` on your headset, use ADB from SideQuest's tools or Android Platform Tools. Replace the example paths and folder name with the mod you downloaded:
+You can also create the folder and transfer an extracted mod with ADB:
 
 ```powershell
-adb shell mkdir -p /sdcard/Android/data/com.fulldivegames.sm64coopdxvr/files/mods
-adb push "C:\path\to\ExtractedModFolder" /sdcard/Android/data/com.fulldivegames.sm64coopdxvr/files/mods/
+adb shell mkdir -p /sdcard/SM64VR/mods
+adb push "C:\path\to\ExtractedModFolder" /sdcard/SM64VR/mods/
 ```
+
+The previous private `Android/data/com.fulldivegames.sm64coopdxvr/files/mods/` location remains a compatibility fallback. If the special file-access permission is declined, mods already stored there continue to load, but `/sdcard/SM64VR/mods/` is unavailable.
 
 Not every desktop mod is compatible with the standalone ARM64/OpenGL ES build. Mods that depend on desktop-only code, very large model or texture packs, and demanding ROM hacks may fail to load or run poorly. Install one mod at a time when troubleshooting. Only download mods you trust, and do not redistribute copyrighted game assets.
 

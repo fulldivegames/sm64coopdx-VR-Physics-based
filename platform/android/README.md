@@ -1,4 +1,4 @@
-# SM64 Co-Op DX VR for Quest v0.5.6
+# SM64 Co-Op DX VR for Quest v0.5.7
 
 Player-facing installation, controls, gestures, features, and troubleshooting
 are documented in the repository's main `README.md`. The public release is a
@@ -56,6 +56,7 @@ Do not commit the ROM, place it in a release archive, or upload it to GitHub.
 - Full SM64 Co-Op DX game loop and menus running natively on ARM64
 - First-person VR locomotion, tracked gloves, physical interactions, and climbing
 - Quest performance levels, foveation, render scale, and learned shader cache
+- Shared `/sdcard/SM64VR/mods/` loading with the legacy private mod directory retained as a fallback
 
 ## Physical climbing
 

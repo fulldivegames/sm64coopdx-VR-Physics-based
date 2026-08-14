@@ -273,11 +273,24 @@ void mods_refresh_local(void) {
     mods_clear(&gLocalMods);
 
     // load mods
+#if defined(__ANDROID__)
+    // Load the Quest shared-storage mod directory first. This lets players
+    // transfer large mods without navigating Android/data while retaining the
+    // private directory below as a compatibility fallback.
+    extern const char *quest_android_shared_mod_path(void);
+    char sharedModPath[SYS_MAX_PATH] = { 0 };
+    snprintf(sharedModPath, SYS_MAX_PATH, "%s", quest_android_shared_mod_path());
+    if (fs_sys_dir_exists(sharedModPath)) {
+        mods_load(&gLocalMods, sharedModPath, true);
+    }
+#endif
     if (hasUserPath) { mods_load(&gLocalMods, userModPath, true); }
 
+#if !defined(__ANDROID__)
     char defaultModsPath[SYS_MAX_PATH] = { 0 };
     snprintf(defaultModsPath, SYS_MAX_PATH, "%s/%s", sys_resource_path(), MOD_DIRECTORY);
     mods_load(&gLocalMods, defaultModsPath, false);
+#endif
 
     // sort
     mods_sort(&gLocalMods);

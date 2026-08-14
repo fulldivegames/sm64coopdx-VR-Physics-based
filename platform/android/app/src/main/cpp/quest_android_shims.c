@@ -32,6 +32,7 @@ float gRenderingDelta;
 uint8_t gRenderingInterpolated;
 static char sQuestUserPath[4096] =
     "/sdcard/Android/data/com.fulldivegames.sm64coopdxvr/files";
+static const char sQuestSharedModPath[] = "/sdcard/SM64VR/mods";
 char gRomFilename[4096] =
     "/sdcard/Android/data/com.fulldivegames.sm64coopdxvr/files/baserom.us.z64";
 bool gGameInited;
@@ -174,6 +175,7 @@ void quest_android_set_user_path(const char *path) {
 }
 
 const char *sys_user_path(void) { return sQuestUserPath; }
+const char *quest_android_shared_mod_path(void) { return sQuestSharedModPath; }
 const char *sys_resource_path(void) { return sys_user_path(); }
 const char *sys_exe_path_dir(void) { return sys_user_path(); }
 const char *sys_exe_path_file(void) { return "/proc/self/exe"; }
