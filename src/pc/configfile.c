@@ -132,6 +132,7 @@ bool         configVrStandardGrabbing              = true;
 bool         configVrStandardClimbing              = false;
 bool         configVrSwingClimbRelease             = true;
 bool         configVrCheatSurfaceClimbing          = false;
+bool         configVrCheatShakingHatWingCap        = false;
 unsigned int configVrFlyingSpeed                   = VR_FLYING_SPEED_DEFAULT;
 unsigned int configVrSwimmingSpeed                 = VR_SWIMMING_SPEED_DEFAULT;
 unsigned int configVrRunningSpeed                  = VR_RUNNING_SPEED_DEFAULT;
@@ -142,6 +143,7 @@ bool         configVrImmersive3dSound              = true;
 bool         configVrImmersiveLedgeCamera           = true;
 bool         configVrImmersiveUnderwaterFilter      = true;
 bool         configVrImmersiveRemovableCap          = false;
+bool         configVrImmersiveLookDownTransparency = true;
 bool         configVrMovementOverhaul              = false;
 bool         configVrMarioPunchSound              = true;
 bool         configVrMotionControlledDive         = true;
@@ -170,6 +172,8 @@ unsigned int configVrRightGlovePositionZ          = 100;
 bool         configVrFirstPersonBody              = true;
 bool         configVrHideTorsoWhileCrawling       = true;
 bool         configVrFeetOnlyBody                 = false;
+unsigned int configVrBodyOpacity                  = 100;
+unsigned int configVrLookDownTransparencyAngle    = 25;
 unsigned int configVrTorsoHeight                  = 100;
 unsigned int configVrLegHeight                    = 100;
 static unsigned int configVrGloveCalibrationVersion = 0;
@@ -458,6 +462,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_standard_climbing",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrStandardClimbing},
     {.name = "vr_swing_climb_release",         .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSwingClimbRelease},
     {.name = "vr_cheat_surface_climbing",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrCheatSurfaceClimbing},
+    {.name = "vr_cheat_shaking_hat_wing_cap",  .type = CONFIG_TYPE_BOOL, .boolValue = &configVrCheatShakingHatWingCap},
     {.name = "vr_flying_speed",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrFlyingSpeed},
     {.name = "vr_swimming_speed",              .type = CONFIG_TYPE_UINT, .uintValue = &configVrSwimmingSpeed},
     {.name = "vr_running_speed",               .type = CONFIG_TYPE_UINT, .uintValue = &configVrRunningSpeed},
@@ -468,6 +473,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_immersive_ledge_camera",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveLedgeCamera},
     {.name = "vr_immersive_underwater_filter",  .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveUnderwaterFilter},
     {.name = "vr_immersive_removable_cap",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveRemovableCap},
+    {.name = "vr_immersive_look_down_transparency", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveLookDownTransparency},
     {.name = "vr_mario_punch_sound",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMarioPunchSound},
     {.name = "vr_motion_controlled_dive",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControlledDive},
     {.name = "vr_motion_controlled_ground_dive",.type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControlledGroundDive},
@@ -495,6 +501,8 @@ static const struct ConfigOption options[] = {
     {.name = "vr_first_person_body",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrFirstPersonBody},
     {.name = "vr_hide_torso_while_crawling",   .type = CONFIG_TYPE_BOOL, .boolValue = &configVrHideTorsoWhileCrawling},
     {.name = "vr_feet_only_body",              .type = CONFIG_TYPE_BOOL, .boolValue = &configVrFeetOnlyBody},
+    {.name = "vr_body_opacity",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrBodyOpacity},
+    {.name = "vr_look_down_transparency_angle", .type = CONFIG_TYPE_UINT, .uintValue = &configVrLookDownTransparencyAngle},
     {.name = "vr_torso_height",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrTorsoHeight},
     {.name = "vr_leg_height",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrLegHeight},
     {.name = "vr_glove_calibration_version",   .type = CONFIG_TYPE_UINT, .uintValue = &configVrGloveCalibrationVersion},

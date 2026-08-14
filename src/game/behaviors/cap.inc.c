@@ -102,6 +102,15 @@ void cap_sink_quicksand(void) {
 }
 
 void bhv_wing_cap_init(void) {
+    if (o->oBehParams2ndByte == VR_PAINTING_EXIT_HAT_BEH_PARAM) {
+        o->oGravity = 0.0f;
+        o->oFriction = 1.0f;
+        o->oBuoyancy = 0.0f;
+        o->oOpacity = 255;
+        o->oInteractType = 0;
+        o->oIntangibleTimer = -1;
+        return;
+    }
     o->oGravity = 1.2f;
     o->oFriction = 0.999f;
     o->oBuoyancy = 0.9f;
@@ -135,6 +144,34 @@ void wing_vanish_cap_act_0(void) {
 }
 
 void bhv_wing_vanish_cap_loop(void) {
+    if (o->oBehParams2ndByte == VR_PAINTING_EXIT_HAT_BEH_PARAM) {
+        // A shaken Wing Cap that is thrown instead of worn escapes under its
+        // own lift. It retains the horizontal hand throw, ignores gravity and
+        // collision, and vanishes after fifteen gameplay seconds.
+        o->oInteractType = 0;
+        o->oInteractionSubtype = 0;
+        o->oInteractStatus = 0;
+        o->oIntangibleTimer = -1;
+        o->oPosX += sins(o->oMoveAngleYaw) * o->oForwardVel;
+        o->oPosY += o->oVelY;
+        o->oPosZ += coss(o->oMoveAngleYaw) * o->oForwardVel;
+        o->oVelY = approach_f32_symmetric(o->oVelY, 4.0f, 0.08f);
+        o->oFaceAngleYaw += 0x500;
+        o->oFaceAnglePitch += 0x180;
+
+        if (o->oTimer >= 420) {
+            o->oOpacity = (u8)clamp(
+                255 - (o->oTimer - 420) * 255 / 30,
+                0,
+                255
+            );
+        }
+        if (o->oTimer >= 450) {
+            o->activeFlags = ACTIVE_FLAG_DEACTIVATED;
+        }
+        return;
+    }
+
     switch (o->oAction) {
         case 0:
             wing_vanish_cap_act_0();
@@ -195,7 +232,7 @@ void bhv_normal_cap_init(void) {
     o->oOpacity = 0xFF;
 }
 
-#define VR_PAINTING_EXIT_HAT_GROUND_FRAMES 900
+#define VR_PAINTING_EXIT_HAT_GROUND_FRAMES 150
 #define VR_PAINTING_EXIT_HAT_GROUND_FADE_FRAMES 90
 
 struct Object* gVrPaintingExitHatObject = NULL;
@@ -210,10 +247,17 @@ static void vr_painting_exit_hat_loop(void) {
     if (o->oAction == 0) {
         o->oFaceAngleYaw += 0x400;
         const s16 collisionFlags = object_step();
-        if (collisionFlags & OBJ_COL_FLAG_GROUNDED) {
+        const f32 waterLevel = find_water_level(o->oPosX, o->oPosZ);
+        const bool reachedWater =
+            waterLevel > FLOOR_LOWER_LIMIT &&
+            o->oPosY <= waterLevel + 5.0f;
+        if ((collisionFlags & OBJ_COL_FLAG_GROUNDED) || reachedWater) {
             o->oForwardVel = 0.0f;
             o->oVelY = 0.0f;
             o->oFaceAnglePitch = 0;
+            if (reachedWater) {
+                o->oPosY = waterLevel;
+            }
             o->oAction = 1;
         }
         return;

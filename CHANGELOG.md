@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.5.6 - 2026-08-14
+
+- Added **Shaking Hat Gives Wing Cap**, reusable physical cap removal, throwing, recovery, head reattachment, grounded/water fade timing, and rising thrown Wing Caps.
+- Added configurable body opacity and smooth adjustable transparency while looking down, without fading the tracked gloves.
+- Reworked physical Bowser ownership for one or two hands. The final grip release uses averaged physical hand-swing direction while preserving native Bowser throw behavior.
+- Kept the v0.5.5 save/settings compatibility, Quest performance defaults, climbing, immersion, and mod-loading behavior unchanged.
+- Audited the shared VR hot paths for allocation and stale-state regressions and rebuilt the ARM64 APK successfully.
+
 ## v0.5.5 - 2026-08-13
 
 - Added an optional opaque FPS counter beneath the lives display that follows HUD corner spread.

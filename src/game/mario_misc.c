@@ -341,6 +341,44 @@ static Gfx *make_gfx_mario_alpha(struct GraphNodeGenerated *node, s16 alpha) {
     return gfxHead;
 }
 
+static u8 geo_get_processing_object_index(void);
+
+static f32 sVrMarioBodyAlpha = 255.0f;
+static u32 sVrMarioBodyAlphaFrame = UINT32_MAX;
+
+static u8 vr_get_local_mario_body_alpha(void) {
+    if (!vr_is_active() ||
+        configVrCameraMode != VR_CAMERA_MODE_FIRST_PERSON ||
+        geo_get_processing_object_index() != 0) {
+        return 255;
+    }
+
+    u8 targetAlpha = (u8)(clamp(configVrBodyOpacity, 0U, 100U) * 255U / 100U);
+    if (configVrImmersiveLookDownTransparency) {
+        float rotation[4] = { 0 };
+        if (vr_get_head_rotation(rotation)) {
+            const float forwardY = 2.0f * (
+                rotation[3] * rotation[0] -
+                rotation[1] * rotation[2]
+            );
+            const f32 angle = clamp(configVrLookDownTransparencyAngle, 5U, 60U) * (f32)(M_PI / 180.0);
+            if (forwardY <= -cosf(angle)) {
+                targetAlpha = MIN(targetAlpha, 128);
+            }
+        }
+    }
+    if (sVrMarioBodyAlphaFrame != gGlobalTimer) {
+        sVrMarioBodyAlphaFrame = gGlobalTimer;
+        const f32 step = 12.0f;
+        if (sVrMarioBodyAlpha < targetAlpha) {
+            sVrMarioBodyAlpha = MIN(sVrMarioBodyAlpha + step, targetAlpha);
+        } else if (sVrMarioBodyAlpha > targetAlpha) {
+            sVrMarioBodyAlpha = MAX(sVrMarioBodyAlpha - step, targetAlpha);
+        }
+    }
+    return (u8)clamp(sVrMarioBodyAlpha, 0.0f, 255.0f);
+}
+
 // Calculates if the processing geo is a mirror mario
 static s8 geo_get_processing_mirror_mario_index(struct Object *obj) {
     ptrdiff_t ptrDiff = (struct GraphNodeObject *) obj - gMirrorMario;
@@ -421,6 +459,7 @@ Gfx* geo_mirror_mario_set_alpha(s32 callContext, struct GraphNode* node, UNUSED 
 
     if (callContext == GEO_CONTEXT_RENDER) {
         alpha = (bodyState->modelState & 0x100) ? (bodyState->modelState & 0xFF) : 255;
+        alpha = MIN(alpha, vr_get_local_mario_body_alpha());
         gfx = make_gfx_mario_alpha(asGenerated, alpha);
     }
     return gfx;
@@ -619,6 +658,11 @@ Gfx* geo_switch_mario_cap_effect(s32 callContext, struct GraphNode* node, UNUSED
 
     if (callContext == GEO_CONTEXT_RENDER) {
         switchCase->selectedCase = bodyState->modelState >> 8;
+        // VR opacity uses the vanish-style geometry branch. Tracked gloves
+        // are rendered separately and intentionally remain fully opaque.
+        if (vr_get_local_mario_body_alpha() < 255) {
+            switchCase->selectedCase |= 1;
+        }
     }
     return NULL;
 }
@@ -893,7 +937,10 @@ Gfx* geo_mario_set_player_colors(s32 callContext, struct GraphNode* node, UNUSED
         u32 layer = LAYER_OPAQUE;
         if (asGenerated->parameter == 0) {
             // put on transparent layer if vanish effect, opaque otherwise
-            layer = ((bodyState->modelState >> 8) & 1) ? LAYER_TRANSPARENT : LAYER_OPAQUE;
+            layer = (((bodyState->modelState >> 8) & 1) ||
+                     vr_get_local_mario_body_alpha() < 255)
+                ? LAYER_TRANSPARENT
+                : LAYER_OPAQUE;
         } else if (asGenerated->parameter == 1) {
             layer = LAYER_OPAQUE;
         } else if (asGenerated->parameter == 2) {

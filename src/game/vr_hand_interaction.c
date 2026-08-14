@@ -189,14 +189,20 @@ static Vec3f sVrClimbPreviousPosition[VR_CONTROLLER_COUNT] = {
     { 0.0f, 0.0f, 0.0f },
     { 0.0f, 0.0f, 0.0f }
 };
-static u32 sVrBowserGripHand = VR_CONTROLLER_COUNT;
-static bool sVrBowserHandYawValid = false;
-static s16 sVrBowserPreviousHandYaw = 0;
-static s32 sVrBowserAccumulatedHandYaw = 0;
+static u8 sVrBowserGripMask = 0;
+static bool sVrBowserHandYawValid[VR_CONTROLLER_COUNT] = {
+    false,
+    false
+};
+static s16 sVrBowserPreviousHandYaw[VR_CONTROLLER_COUNT] = { 0, 0 };
+static s32 sVrBowserAccumulatedHandYaw[VR_CONTROLLER_COUNT] = { 0, 0 };
 static f32 sVrBowserPhysicalTurnInput = 0.0f;
 static bool sVrBowserFullPowerImpulse = false;
 static bool sVrBowserReleaseYawValid = false;
 static s16 sVrBowserReleaseYaw = 0;
+static u32 sVrBowserMotionTimestamp = 0;
+static Vec3f sVrBowserFrameVelocity = { 0.0f, 0.0f, 0.0f };
+static u8 sVrBowserFrameVelocitySamples = 0;
 static bool sVrInteractionTrackingActive = false;
 static bool sVrHeadsetColliderActive = false;
 static f32 sVrHeadsetColliderSavedRadius = 50.0f;
@@ -455,13 +461,18 @@ bool vr_hand_interaction_is_physical_surface_climb_active(
 }
 
 static void vr_hand_interaction_clear_bowser_motion(void) {
-    sVrBowserHandYawValid = false;
-    sVrBowserPreviousHandYaw = 0;
-    sVrBowserAccumulatedHandYaw = 0;
+    for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
+        sVrBowserHandYawValid[hand] = false;
+        sVrBowserPreviousHandYaw[hand] = 0;
+        sVrBowserAccumulatedHandYaw[hand] = 0;
+    }
     sVrBowserPhysicalTurnInput = 0.0f;
     sVrBowserFullPowerImpulse = false;
     sVrBowserReleaseYawValid = false;
     sVrBowserReleaseYaw = 0;
+    sVrBowserMotionTimestamp = 0;
+    vec3f_set(sVrBowserFrameVelocity, 0.0f, 0.0f, 0.0f);
+    sVrBowserFrameVelocitySamples = 0;
 }
 
 static void vr_hand_interaction_reset(void) {
@@ -482,7 +493,7 @@ static void vr_hand_interaction_reset(void) {
     }
     sVrPunchSoundComboStep = 0;
     sVrPunchSoundComboResetFrames = 0;
-    sVrBowserGripHand = VR_CONTROLLER_COUNT;
+    sVrBowserGripMask = 0;
     sVrPhysicalClimbRegrabFrames = 0;
     vr_hand_interaction_clear_physical_climb();
     vr_hand_interaction_clear_bowser_motion();
@@ -841,17 +852,24 @@ static void vr_hand_interaction_update_bowser_hand_turn(
     bool controllerAvailable,
     const struct VrControllerState* controllerState
 ) {
-    sVrBowserPhysicalTurnInput = 0.0f;
+    const u8 handBit = (u8)(1U << hand);
     if (!vr_hand_interaction_is_bowser_hold(mario) ||
-        hand != sVrBowserGripHand ||
+        (sVrBowserGripMask & handBit) == 0 ||
         !sVrGripPressed[hand] ||
         !controllerAvailable ||
         controllerState == NULL ||
         (!controllerState->gripPoseValid &&
          !controllerState->aimPoseValid)) {
-        sVrBowserHandYawValid = false;
-        sVrBowserAccumulatedHandYaw = 0;
+        sVrBowserHandYawValid[hand] = false;
+        sVrBowserAccumulatedHandYaw[hand] = 0;
         return;
+    }
+
+    if (sVrBowserMotionTimestamp != gGlobalTimer) {
+        sVrBowserMotionTimestamp = gGlobalTimer;
+        sVrBowserPhysicalTurnInput = 0.0f;
+        vec3f_set(sVrBowserFrameVelocity, 0.0f, 0.0f, 0.0f);
+        sVrBowserFrameVelocitySamples = 0;
     }
 
     Vec3f handWorldPosition;
@@ -861,15 +879,24 @@ static void vr_hand_interaction_update_bowser_hand_turn(
             controllerState,
             handWorldPosition,
             handWorldVelocity)) {
+        sVrBowserFrameVelocity[0] += handWorldVelocity[0];
+        sVrBowserFrameVelocity[1] += handWorldVelocity[1];
+        sVrBowserFrameVelocity[2] += handWorldVelocity[2];
+        sVrBowserFrameVelocitySamples++;
+        const f32 invSamples =
+            1.0f / (f32)sVrBowserFrameVelocitySamples;
+        const f32 averageX =
+            sVrBowserFrameVelocity[0] * invSamples;
+        const f32 averageZ =
+            sVrBowserFrameVelocity[2] * invSamples;
         const f32 horizontalSpeedSquared =
-            handWorldVelocity[0] * handWorldVelocity[0] +
-            handWorldVelocity[2] * handWorldVelocity[2];
+            averageX * averageX + averageZ * averageZ;
         if (horizontalSpeedSquared >= 25.0f * 25.0f) {
             // The physical hand-swing tangent is the release direction. It
             // deliberately does not depend on HMD or Mario facing yaw.
             sVrBowserReleaseYaw = atan2s(
-                handWorldVelocity[2],
-                handWorldVelocity[0]
+                averageZ,
+                averageX
             );
             sVrBowserReleaseYawValid = true;
         }
@@ -877,8 +904,8 @@ static void vr_hand_interaction_update_bowser_hand_turn(
 
     float headPosition[3];
     if (!vr_get_head_translation(headPosition)) {
-        sVrBowserHandYawValid = false;
-        sVrBowserAccumulatedHandYaw = 0;
+        sVrBowserHandYawValid[hand] = false;
+        sVrBowserAccumulatedHandYaw[hand] = 0;
         return;
     }
 
@@ -894,50 +921,54 @@ static void vr_hand_interaction_update_bowser_hand_turn(
     if (handX * handX + handZ * handZ <
         VR_BOWSER_MIN_HAND_RADIUS_METERS *
             VR_BOWSER_MIN_HAND_RADIUS_METERS) {
-        sVrBowserHandYawValid = false;
-        sVrBowserAccumulatedHandYaw = 0;
+        sVrBowserHandYawValid[hand] = false;
+        sVrBowserAccumulatedHandYaw[hand] = 0;
         return;
     }
 
     const s16 handYaw = atan2s(handZ, handX);
-    if (sVrBowserHandYawValid) {
+    if (sVrBowserHandYawValid[hand]) {
         const s16 yawDelta =
-            (s16)(handYaw - sVrBowserPreviousHandYaw);
+            (s16)(handYaw - sVrBowserPreviousHandYaw[hand]);
         const s32 delta = (s32)yawDelta;
         if (delta >= VR_BOWSER_HAND_TURN_JITTER ||
             delta <= -VR_BOWSER_HAND_TURN_JITTER) {
-            sVrBowserPhysicalTurnInput = clamp(
+            const f32 handTurnInput = clamp(
                 (f32)delta /
                     (f32)VR_BOWSER_HAND_TURN_FULL_INPUT,
                 -1.0f,
                 1.0f
             );
+            if (fabsf(handTurnInput) >
+                fabsf(sVrBowserPhysicalTurnInput)) {
+                sVrBowserPhysicalTurnInput = handTurnInput;
+            }
 
             // Direction reversals start a new swing. A deliberate 22.5-degree
             // hand arc is one physical turn and guarantees full throw power.
-            if ((sVrBowserAccumulatedHandYaw > 0 && delta < 0) ||
-                (sVrBowserAccumulatedHandYaw < 0 && delta > 0)) {
-                sVrBowserAccumulatedHandYaw = delta;
+            if ((sVrBowserAccumulatedHandYaw[hand] > 0 && delta < 0) ||
+                (sVrBowserAccumulatedHandYaw[hand] < 0 && delta > 0)) {
+                sVrBowserAccumulatedHandYaw[hand] = delta;
             } else {
-                sVrBowserAccumulatedHandYaw += delta;
+                sVrBowserAccumulatedHandYaw[hand] += delta;
             }
-            sVrBowserAccumulatedHandYaw = clamp(
-                sVrBowserAccumulatedHandYaw,
+            sVrBowserAccumulatedHandYaw[hand] = clamp(
+                sVrBowserAccumulatedHandYaw[hand],
                 -VR_BOWSER_FULL_POWER_ARC,
                 VR_BOWSER_FULL_POWER_ARC
             );
-            if (sVrBowserAccumulatedHandYaw ==
+            if (sVrBowserAccumulatedHandYaw[hand] ==
                     VR_BOWSER_FULL_POWER_ARC ||
-                sVrBowserAccumulatedHandYaw ==
+                sVrBowserAccumulatedHandYaw[hand] ==
                     -VR_BOWSER_FULL_POWER_ARC) {
                 sVrBowserFullPowerImpulse = true;
-                sVrBowserAccumulatedHandYaw = 0;
+                sVrBowserAccumulatedHandYaw[hand] = 0;
             }
         }
     }
 
-    sVrBowserPreviousHandYaw = handYaw;
-    sVrBowserHandYawValid = true;
+    sVrBowserPreviousHandYaw[hand] = handYaw;
+    sVrBowserHandYawValid[hand] = true;
 }
 
 bool vr_hand_interaction_get_bowser_controls(
@@ -968,32 +999,41 @@ bool vr_hand_interaction_get_bowser_controls(
         !configVrMotionControllerInput ||
         !configVrPhysicalGrabbing ||
         !vr_hand_interaction_is_bowser_hold(mario)) {
-        sVrBowserGripHand = VR_CONTROLLER_COUNT;
+        sVrBowserGripMask = 0;
         vr_hand_interaction_clear_bowser_motion();
         return false;
     }
 
-    if (sVrBowserGripHand >= VR_CONTROLLER_COUNT) {
-        // Bowser remains a native tail grab. Once either physical grip is
-        // closed, that hand owns the hold until it is released.
-        if (sVrGripPressed[VR_CONTROLLER_RIGHT]) {
-            sVrBowserGripHand = VR_CONTROLLER_RIGHT;
-        } else if (sVrGripPressed[VR_CONTROLLER_LEFT]) {
-            sVrBowserGripHand = VR_CONTROLLER_LEFT;
-        } else {
+    if (sVrBowserGripMask == 0) {
+        for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
+            if (sVrGripPressed[hand]) {
+                sVrBowserGripMask |= (u8)(1U << hand);
+            }
+        }
+        if (sVrBowserGripMask == 0) {
             return false;
         }
         vr_hand_interaction_clear_bowser_motion();
     }
 
-    if (!sVrGripPressed[sVrBowserGripHand]) {
+    const u8 previousGripMask = sVrBowserGripMask;
+    for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
+        const u8 handBit = (u8)(1U << hand);
+        if ((sVrBowserGripMask & handBit) != 0 &&
+            !sVrGripPressed[hand]) {
+            sVrBowserGripMask &= (u8)~handBit;
+            sVrBowserHandYawValid[hand] = false;
+            sVrBowserAccumulatedHandYaw[hand] = 0;
+        }
+    }
+
+    if (previousGripMask != 0 && sVrBowserGripMask == 0) {
         if (releaseYaw != NULL) {
             *releaseYaw = sVrBowserReleaseYaw;
         }
         if (releaseYawValid != NULL) {
             *releaseYawValid = sVrBowserReleaseYawValid;
         }
-        sVrBowserGripHand = VR_CONTROLLER_COUNT;
         if (gripReleased != NULL) {
             *gripReleased = true;
         }
@@ -1032,7 +1072,7 @@ bool vr_hand_interaction_get_bowser_controls(
 }
 
 bool vr_hand_interaction_bowser_spin_active(void) {
-    return sVrBowserGripHand < VR_CONTROLLER_COUNT &&
+    return sVrBowserGripMask != 0 &&
         vr_is_active() &&
         configVrMotionControllerInput &&
         configVrPhysicalGrabbing &&
@@ -1407,7 +1447,7 @@ static bool vr_hand_interaction_try_bowser_grab(
     // controller ownership is one-handed from the player's perspective.
     tail->oAction = 2;
     bowser->oIntangibleTimer = 0;
-    sVrBowserGripHand = hand;
+    sVrBowserGripMask = (u8)(1U << hand);
     vr_hand_interaction_clear_bowser_motion();
     if (bowser->oSyncID != 0) {
         network_send_object_reliability(bowser, true);
@@ -1480,7 +1520,7 @@ static bool vr_hand_interaction_climb_is_occupied(void) {
         sVrTrackedHootObject != NULL ||
         sVrTrackedAnchorObject != NULL ||
         sVrPhysicalClimbType != VR_PHYSICAL_CLIMB_NONE ||
-        sVrBowserGripHand < VR_CONTROLLER_COUNT;
+        sVrBowserGripMask != 0;
 }
 
 static struct Object* vr_hand_interaction_find_pole_target(
@@ -4076,7 +4116,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
     }
 
     if (!vr_hand_interaction_is_bowser_sequence(mario)) {
-        sVrBowserGripHand = VR_CONTROLLER_COUNT;
+        sVrBowserGripMask = 0;
         vr_hand_interaction_clear_bowser_motion();
     }
 
@@ -4206,6 +4246,16 @@ void vr_hand_interaction_update(struct MarioState* mario) {
             );
         }
 
+        if (vr_hand_interaction_is_bowser_hold(mario) &&
+            sVrBowserGripMask != 0 &&
+            !gripWasPressed &&
+            sVrGripPressed[hand] &&
+            positionValid) {
+            sVrBowserGripMask |= (u8)(1U << hand);
+            sVrBowserHandYawValid[hand] = false;
+            sVrBowserAccumulatedHandYaw[hand] = 0;
+        }
+
         if (positionValid &&
             sVrTrackedHeldObject == NULL &&
             mario->heldObj != NULL &&
@@ -4218,7 +4268,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
             );
         }
 
-        if (sVrBowserGripHand == hand) {
+        if ((sVrBowserGripMask & (u8)(1U << hand)) != 0) {
             vr_hand_interaction_update_bowser_hand_turn(
                 mario,
                 hand,
@@ -4355,7 +4405,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
             sVrPhysicalClimbHands[hand] ||
             sVrTrackedHootHand == hand ||
             sVrTrackedAnchorHand == hand ||
-            sVrBowserGripHand == hand;
+            (sVrBowserGripMask & (u8)(1U << hand)) != 0;
 
         if (punchStarted &&
             canStartInteraction &&
