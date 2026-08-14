@@ -9,6 +9,7 @@
 #include "engine/math_util.h"
 #include "engine/lighting_engine.h"
 #include "data/dynos_cmap.cpp.h"
+#include "data/dynos.c.h"
 #include "game_init.h"
 #include "gfx_dimensions.h"
 #include "main.h"
@@ -3675,6 +3676,32 @@ static void vr_append_controller_hands(
             handDisplayList = sVrControllerHandClosed[hand]
                 ? mario_right_hand_closed
                 : mario_right_hand_open;
+        }
+
+        // DynOS replaces Mario through an actor graph, while VR gloves are
+        // drawn independently after that graph. Prefer the active pack's
+        // corresponding hand display list so its hand geometry, textures,
+        // lights, and palette are preserved. Packs without standard hand
+        // names safely retain the built-in glove selected above.
+        if (!paintingExitHatGesture && !peaceGesture &&
+            gMarioStates[0].marioObj != NULL) {
+            const char* handSuffix;
+            if (hand == VR_CONTROLLER_LEFT) {
+                handSuffix = sVrControllerHandClosed[hand]
+                    ? "left_hand_closed"
+                    : "left_hand_open";
+            } else {
+                handSuffix = sVrControllerHandClosed[hand]
+                    ? "right_hand_closed"
+                    : "right_hand_open";
+            }
+            const Gfx* dynosHand = dynos_actor_get_display_list_by_suffix(
+                gMarioStates[0].marioObj->header.gfx.sharedChild,
+                handSuffix
+            );
+            if (dynosHand != NULL) {
+                handDisplayList = dynosHand;
+            }
         }
 
         if (paintingExitHatGesture && paintingExitHatAlpha < 255) {

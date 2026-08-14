@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.11 - 2026-08-14
+
+- Reduced general actor CPU cost by removing unnecessary square roots from the shared nearest-player search used by Bob-ombs, Goombas, Chain Chomp, bosses, flames, and many mod actors; targeting and behavior thresholds are unchanged.
+- Removed an additional per-frame square root from Bob-omb Buddy proximity steering.
+- Made floating VR hands use matching hand display lists from the active DynOS character actor when available, preserving the pack's hand geometry, textures, lighting, and colors with a safe built-in fallback.
+- Kept all v0.5.9 gameplay, flame/lava optimization, collision, and interaction behavior unchanged.
+
 ## v0.5.9 - 2026-08-14
 
 - Heavy rear-grab enemies such as King Bob-omb and Chuckya can now be physically grabbed with either hand.

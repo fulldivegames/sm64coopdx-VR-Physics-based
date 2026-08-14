@@ -41,6 +41,7 @@ bool dynos_add_actor_custom(s32 modIndex, s32 modFileIndex, const char *filePath
 const void* dynos_geolayout_get(const char *name);
 bool dynos_actor_get_mod_index_and_token(struct GraphNode *graphNode, u32 tokenIndex, s32 *modIndex, s32 *modFileIndex, const char **token);
 void dynos_actor_register_modified_graph_node(struct GraphNode *node);
+const Gfx* dynos_actor_get_display_list_by_suffix(struct GraphNode *graphNode, const char *suffix);
 
 // -- collisions -- //
 bool dynos_add_collision(const char *filePath, const char* collisionName);

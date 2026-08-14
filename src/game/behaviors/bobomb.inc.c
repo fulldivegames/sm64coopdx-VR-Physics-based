@@ -322,8 +322,13 @@ void bobomb_buddy_act_idle(void) {
     }
 
     struct Object* player = nearest_player_to_object(o);
-    if (player && dist_between_objects(o, player) < 1000.0f) {
+    if (player) {
+        const f32 dx = o->oPosX - player->oPosX;
+        const f32 dy = o->oPosY - player->oPosY;
+        const f32 dz = o->oPosZ - player->oPosZ;
+        if (dx * dx + dy * dy + dz * dz < 1000.0f * 1000.0f) {
         o->oMoveAngleYaw = approach_s16_symmetric(o->oMoveAngleYaw, obj_angle_to_object(o, player), 0x140);
+        }
     }
 
     if (o->oInteractStatus == INT_STATUS_INTERACTED) {
