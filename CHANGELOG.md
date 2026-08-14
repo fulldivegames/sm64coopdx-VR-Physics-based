@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.5.10 - 2026-08-14
+
+- Quest standalone now creates and scans `/sdcard/SM64VR/dynos/packs/` for externally installable DynOS packs.
+- Added standalone DynOS pack installation instructions.
+
 ## v0.5.9 - 2026-08-14
 
 - Heavy rear-grab enemies such as King Bob-omb and Chuckya can now be physically grabbed with either hand.

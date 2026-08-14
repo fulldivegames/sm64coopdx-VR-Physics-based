@@ -5,6 +5,10 @@ extern "C" {
 
 #define MOD_PATH_LEN 1024
 
+#if defined(__ANDROID__)
+extern "C" const char *quest_android_shared_dynos_pack_path(void);
+#endif
+
 void DynOS_Gfx_GenerateModPacks(char* modPath) {
     // If pack folder exists, generate bins
     SysPath _LevelPackFolder = fstring("%s/levels", modPath);
@@ -95,4 +99,10 @@ void DynOS_Gfx_Init() {
     // Scan the user path folder
     SysPath _DynosPacksUserFolder = fstring("%s%s", DYNOS_USER_FOLDER, DYNOS_PACKS_FOLDER);
     ScanPacksFolder(_DynosPacksUserFolder);
+
+#if defined(__ANDROID__)
+    // Quest standalone exposes DynOS packs outside Android/data so SideQuest
+    // and normal file managers can install them without scoped-storage issues.
+    ScanPacksFolder(quest_android_shared_dynos_pack_path());
+#endif
 }

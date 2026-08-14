@@ -34,7 +34,7 @@ The release is a single APK. Players do not need Git, Android Studio, Gradle, AD
 ### Install the APK
 
 1. Open this repository's [latest release](https://github.com/fulldivegames/sm64coopdx-VR-Standalone/releases/latest).
-2. Download `SM64-Co-Op-DX-VR-Quest-v0.5.9.apk` under **Assets**.
+2. Download `SM64-Co-Op-DX-VR-Quest-v0.5.10.apk` under **Assets**.
 3. Connect the Quest to your computer and allow the USB debugging prompt inside the headset.
 4. Open SideQuest and confirm that the headset indicator is connected.
 5. Click **Install APK file from folder** in SideQuest, choose the downloaded APK, and wait for the install-success message.
@@ -46,7 +46,7 @@ The release is a single APK. Players do not need Git, Android Studio, Gradle, AD
 Updates can be installed over the existing app through SideQuest. Keep the same Android application installed if you want its private ROM/configuration data to remain available. Back up important saves before testing a new release.
 
 > [!IMPORTANT]
-> Install v0.5.9 directly over an existing installation so the private ROM, save, and settings remain available. Do not uninstall the app first.
+> Install v0.5.10 directly over an existing installation so the private ROM, save, and settings remain available. Do not uninstall the app first.
 
 > [!IMPORTANT]
 > The APK contains no ROM and no Nintendo game assets. Do not upload, bundle, or redistribute a ROM with this project. The app validates the unmodified US ROM before importing it into private application storage.
@@ -73,6 +73,22 @@ adb push "C:\path\to\ExtractedModFolder" /sdcard/SM64VR/mods/
 ```
 
 The previous private `Android/data/com.fulldivegames.sm64coopdxvr/files/mods/` location remains a compatibility fallback. If the special file-access permission is declined, mods already stored there continue to load, but `/sdcard/SM64VR/mods/` is unavailable.
+
+### Install DynOS packs
+
+Launch the game once after installing v0.5.10. The game automatically creates:
+
+```text
+/sdcard/SM64VR/dynos/packs/
+```
+
+Extract each DynOS pack and copy its complete pack folder into `SM64VR/dynos/packs` using SideQuest's file manager. For example:
+
+```text
+/sdcard/SM64VR/dynos/packs/My Character Pack/
+```
+
+Restart the game after copying packs, then enable them from the game's DynOS menu. Copy the extracted folder rather than the downloaded archive, and avoid an extra duplicate nesting level such as `My Pack/My Pack/files`.
 
 Not every desktop mod is compatible with the standalone ARM64/OpenGL ES build. Mods that depend on desktop-only code, very large model or texture packs, and demanding ROM hacks may fail to load or run poorly. Install one mod at a time when troubleshooting. Only download mods you trust, and do not redistribute copyrighted game assets.
 

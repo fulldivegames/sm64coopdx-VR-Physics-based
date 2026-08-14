@@ -28,6 +28,8 @@ public final class QuestNativeActivity extends NativeActivity {
     private static final int OPEN_ROM_REQUEST = 6401;
     private static final String ROM_NAME = "baserom.us.z64";
     private static final String SHARED_MOD_DIRECTORY = "/sdcard/SM64VR/mods";
+    private static final String SHARED_DYNOS_PACK_DIRECTORY =
+            "/sdcard/SM64VR/dynos/packs";
     private boolean requestedSharedStorageAccess;
     private static final String US_ROM_SHA1 =
             "9bef1128717f958171a4afac3ed78ee2bb4e86ce";
@@ -38,7 +40,7 @@ public final class QuestNativeActivity extends NativeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         installBundledResources();
         super.onCreate(savedInstanceState);
-        prepareSharedModDirectory();
+        prepareSharedContentDirectories();
         checkForStandaloneUpdate();
         File rom = new File(getExternalFilesDir(null), ROM_NAME);
         if (!rom.isFile() && savedInstanceState == null) {
@@ -50,10 +52,8 @@ public final class QuestNativeActivity extends NativeActivity {
     protected void onResume() {
         super.onResume();
         if (Build.VERSION.SDK_INT < 30 || Environment.isExternalStorageManager()) {
-            File directory = new File(SHARED_MOD_DIRECTORY);
-            if (!directory.isDirectory() && !directory.mkdirs()) {
-                Log.w(TAG, "Could not create shared mod directory: " + directory);
-            }
+            createSharedDirectory(SHARED_MOD_DIRECTORY, "mod");
+            createSharedDirectory(SHARED_DYNOS_PACK_DIRECTORY, "DynOS pack");
             return;
         }
         if (!requestedSharedStorageAccess) {
@@ -62,12 +62,17 @@ public final class QuestNativeActivity extends NativeActivity {
         }
     }
 
-    private void prepareSharedModDirectory() {
+    private void prepareSharedContentDirectories() {
         if (Build.VERSION.SDK_INT < 30 || Environment.isExternalStorageManager()) {
-            File directory = new File(SHARED_MOD_DIRECTORY);
-            if (!directory.isDirectory() && !directory.mkdirs()) {
-                Log.w(TAG, "Could not create shared mod directory: " + directory);
-            }
+            createSharedDirectory(SHARED_MOD_DIRECTORY, "mod");
+            createSharedDirectory(SHARED_DYNOS_PACK_DIRECTORY, "DynOS pack");
+        }
+    }
+
+    private void createSharedDirectory(String path, String label) {
+        File directory = new File(path);
+        if (!directory.isDirectory() && !directory.mkdirs()) {
+            Log.w(TAG, "Could not create shared " + label + " directory: " + directory);
         }
     }
 
@@ -83,7 +88,7 @@ public final class QuestNativeActivity extends NativeActivity {
             } catch (Exception fallbackException) {
                 Log.e(TAG, "File access settings unavailable.", fallbackException);
                 Toast.makeText(this,
-                        "File access is required for /sdcard/SM64VR/mods.",
+                        "File access is required for /sdcard/SM64VR mods and DynOS packs.",
                         Toast.LENGTH_LONG).show();
             }
         }
