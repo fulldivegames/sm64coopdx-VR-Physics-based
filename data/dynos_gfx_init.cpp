@@ -84,6 +84,14 @@ static void ScanPacksFolder(SysPath _DynosPacksFolder) {
                 LOADING_SCREEN_MUTEX(snprintf(gCurrLoadingSegment.str, 256, "Generating DynOS Pack:\n\\#808080\\%s", _PackFolder.c_str()));
                 DynOS_Pack_Add(_PackFolder);
                 DynOS_Actor_GeneratePack(_PackFolder);
+                // Some downloadable packs retain the normal mod wrapper and
+                // place actor folders under PackName/actors/. Texture scanning
+                // is recursive enough to make those packs appear enabled, but
+                // the player actor was previously never generated.
+                SysPath _WrappedActorsFolder = fstring("%s/actors", _PackFolder.c_str());
+                if (fs_sys_dir_exists(_WrappedActorsFolder.c_str())) {
+                    DynOS_Actor_GeneratePack(_WrappedActorsFolder);
+                }
                 DynOS_Tex_GeneratePack(_PackFolder, _PackFolder, false);
             }
         }
