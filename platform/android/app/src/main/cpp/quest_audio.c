@@ -26,10 +26,19 @@ static void quest_audio_callback(ma_device *device, void *output,
     const uint32_t write = atomic_load_explicit(&sWriteFrame, memory_order_acquire);
     uint32_t available = write - read;
     const uint32_t copy_count = available < frame_count ? available : frame_count;
-    for (uint32_t frame = 0; frame < copy_count; ++frame) {
-        const uint32_t index = ((read + frame) % QUEST_AUDIO_FRAMES) * 2u;
-        destination[frame * 2u] = sSamples[index];
-        destination[frame * 2u + 1u] = sSamples[index + 1u];
+    if (copy_count > 0) {
+        const uint32_t read_index = read % QUEST_AUDIO_FRAMES;
+        const uint32_t first_count = copy_count <
+                QUEST_AUDIO_FRAMES - read_index
+            ? copy_count
+            : QUEST_AUDIO_FRAMES - read_index;
+        memcpy(destination, &sSamples[read_index * 2u],
+               first_count * 2u * sizeof(int16_t));
+        const uint32_t second_count = copy_count - first_count;
+        if (second_count > 0) {
+            memcpy(destination + first_count * 2u, sSamples,
+                   second_count * 2u * sizeof(int16_t));
+        }
     }
     if (copy_count < frame_count) {
         memset(destination + copy_count * 2u, 0,
@@ -77,10 +86,19 @@ static void quest_audio_play(const uint8_t *buffer, size_t length) {
     const uint32_t read = atomic_load_explicit(&sReadFrame, memory_order_acquire);
     const uint32_t free_frames = QUEST_AUDIO_FRAMES - (write - read);
     if (frames > free_frames) frames = free_frames;
-    for (uint32_t frame = 0; frame < frames; ++frame) {
-        const uint32_t index = ((write + frame) % QUEST_AUDIO_FRAMES) * 2u;
-        sSamples[index] = source[frame * 2u];
-        sSamples[index + 1u] = source[frame * 2u + 1u];
+    if (frames > 0) {
+        const uint32_t write_index = write % QUEST_AUDIO_FRAMES;
+        const uint32_t first_count = frames <
+                QUEST_AUDIO_FRAMES - write_index
+            ? frames
+            : QUEST_AUDIO_FRAMES - write_index;
+        memcpy(&sSamples[write_index * 2u], source,
+               first_count * 2u * sizeof(int16_t));
+        const uint32_t second_count = frames - first_count;
+        if (second_count > 0) {
+            memcpy(sSamples, source + first_count * 2u,
+                   second_count * 2u * sizeof(int16_t));
+        }
     }
     atomic_store_explicit(&sWriteFrame, write + frames, memory_order_release);
 }

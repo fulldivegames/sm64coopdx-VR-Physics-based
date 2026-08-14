@@ -537,6 +537,17 @@ u32 able_to_grab_object(struct MarioState *m, UNUSED struct Object *o) {
         if (!(o->oInteractionSubtype & INT_SUBTYPE_GRABS_MARIO)) {
             return TRUE;
         }
+        if (vr_is_active() &&
+            configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
+            configVrPhysicalGrabbing) {
+            const s16 marioYaw = atan2s(
+                m->pos[2] - o->oPosZ,
+                m->pos[0] - o->oPosX
+            );
+            if (abs_angle_diff(marioYaw, o->oMoveAngleYaw) >= 0x5555) {
+                return TRUE;
+            }
+        }
     } else if (action == ACT_PUNCHING || action == ACT_MOVE_PUNCHING) {
         if (m->actionArg < 2) {
             return TRUE;

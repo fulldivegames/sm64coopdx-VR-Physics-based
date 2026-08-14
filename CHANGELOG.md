@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.8 - 2026-08-14
+
+- Added two-hand physical pickup support for heavy rear-grab enemies, including King Bob-omb and Chuckya; native dive pickups remain supported.
+- Prevented cap-holding hands from triggering punches, punch sounds, motion dives, climbing, or grabbing.
+- Reduced intermittent stalls with faster shader lookup, buffered shader-cache learning, and chunked Quest audio transfers.
+- Retained the existing Chain Chomp squared-distance hot-path optimization.
+
 ## v0.5.7 - 2026-08-14
 
 - Added `/sdcard/SM64VR/mods/` as the primary Quest mod directory so SideQuest can transfer large mods without entering Android's restricted `Android/data` tree.

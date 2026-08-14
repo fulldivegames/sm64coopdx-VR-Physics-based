@@ -409,9 +409,10 @@ static struct ColorCombiner *gfx_lookup_or_create_color_combiner(struct CombineM
             sShaderCacheAppendFile,
             &comb->cm
         );
-        // Shader discovery is infrequent. Flushing this tiny definition now
-        // keeps it available for the next startup even after an abnormal exit.
-        fflush(sShaderCacheAppendFile);
+        // Keep shader discovery off the frame-critical path. A synchronous
+        // flush here compounds the unavoidable first-time shader compile
+        // hitch, especially on slower/scoped storage. Normal shutdown
+        // rewrites the complete learned cache.
     }
 
     return prev_combiner = comb;
