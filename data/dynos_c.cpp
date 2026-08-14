@@ -131,6 +131,24 @@ void dynos_actor_register_modified_graph_node(struct GraphNode *node) {
     DynOS_Actor_RegisterModifiedGraphNode(node);
 }
 
+const Gfx* dynos_actor_get_display_list_by_suffix(struct GraphNode *graphNode, const char *suffix) {
+    if (graphNode == NULL || suffix == NULL || suffix[0] == '\0') { return NULL; }
+    ActorGfx* actor = DynOS_Actor_GetActorGfx(graphNode);
+    if (actor == NULL || actor->mGfxData == NULL) { return NULL; }
+
+    const size_t suffixLength = strlen(suffix);
+    for (auto* node : actor->mGfxData->mDisplayLists) {
+        if (node == NULL || node->mData == NULL) { continue; }
+        const char* name = node->mName.begin();
+        const size_t nameLength = strlen(name);
+        if (nameLength >= suffixLength &&
+            strcmp(name + nameLength - suffixLength, suffix) == 0) {
+            return node->mData;
+        }
+    }
+    return NULL;
+}
+
 // -- collisions -- //
 
 bool dynos_add_collision(const char *filePath, const char* collisionName) {

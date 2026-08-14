@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.5.11 - 2026-08-14
+
+- Reduced general actor CPU cost by removing unnecessary square roots from the shared nearest-player search used by Bob-ombs, Goombas, Chain Chomp, bosses, flames, and many mod actors; targeting and behavior thresholds are unchanged.
+- Removed an additional per-frame square root from Bob-omb Buddy proximity steering.
+- Added a Quest startup shader warmup using combinations learned from successful gameplay, including level-dialog rendering. Newly encountered game or DynOS shader combinations remain cached for later launches.
+- Made floating VR hands use matching hand display lists from the active DynOS character actor when available, preserving the pack's hand geometry, textures, lighting, and colors with a safe built-in fallback.
+- Retained external mod and DynOS paths: `/sdcard/SM64VR/mods/` and `/sdcard/SM64VR/dynos/packs/`.
+
 ## v0.5.10 - 2026-08-14
 
 - Quest standalone now creates and scans `/sdcard/SM64VR/dynos/packs/` for externally installable DynOS packs.

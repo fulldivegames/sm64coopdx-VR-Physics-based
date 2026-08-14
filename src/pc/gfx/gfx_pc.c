@@ -2171,8 +2171,52 @@ void gfx_init(struct GfxWindowManagerAPI *wapi, struct GfxRenderingAPI *rapi, co
     gfx_cc_precomp();
 #else
     // Quest's GLES compiler rejects some optional desktop-only combinations
-    // in the bulk warm-up set. Compile only shaders actually used by the game.
-    printf("[GFX] Android GLES uses on-demand shader compilation.\n");
+    // in the full bulk set. These definitions were learned from successful
+    // Quest gameplay (including level dialogs), so warming them here moves
+    // first-use compilation out of gameplay without feeding GLES unsupported
+    // desktop variants.
+    static const uint32_t sQuestWarmShaders[][5] = {
+        { 0x00050001, 0x000e0006, 0x00050002, 0x000e0009, 0x00000041 },
+        { 0x00040001, 0x0d000000, 0x00040002, 0x0d000000, 0x00000040 },
+        { 0x04000000, 0x0d000000, 0x04000000, 0x0d000000, 0x00000040 },
+        { 0x00040001, 0x000d0006, 0x00040002, 0x000d0009, 0x00000045 },
+        { 0x00040001, 0x000d0006, 0x00040002, 0x000d0009, 0x00000041 },
+        { 0x04000000, 0x0d000000, 0x04000000, 0x0d000000, 0x00000000 },
+        { 0x00050004, 0x000e000d, 0x00050004, 0x000e000d, 0x00000001 },
+        { 0x00050001, 0x000e0006, 0x00050002, 0x000e0009, 0x00000001 },
+        { 0x00050001, 0x000e0006, 0x0003000a, 0x000c000b, 0x00000011 },
+        { 0x00040001, 0x06000000, 0x00040002, 0x09000000, 0x00000001 },
+        { 0x04000000, 0x0d000000, 0x04000000, 0x0d000000, 0x00000001 },
+        { 0x04000000, 0x0e000000, 0x04000000, 0x0e000000, 0x00000041 },
+        { 0x00040001, 0x000e0006, 0x00040002, 0x000e0009, 0x00000041 },
+        { 0x04060401, 0x0e000000, 0x04060402, 0x0e000000, 0x00000040 },
+        { 0x00040001, 0x0e000000, 0x00040002, 0x0e000000, 0x00000041 },
+        { 0x00030004, 0x0e000000, 0x00030004, 0x0e000000, 0x00000040 },
+        { 0x04020401, 0x000e0006, 0x04010402, 0x000e0009, 0x00000040 },
+        { 0x04020401, 0x000e0006, 0x04010402, 0x000e0009, 0x00000045 },
+        { 0x04060401, 0x000e0009, 0x04060402, 0x000e0006, 0x00000045 },
+        { 0x01000000, 0x06000000, 0x02000000, 0x09000000, 0x00000045 },
+        { 0x00040001, 0x0d000000, 0x0a000000, 0x0b000000, 0x00000053 },
+        { 0x00040001, 0x000d0006, 0x0a000000, 0x0b000000, 0x00000057 },
+        { 0x01000000, 0x0e000000, 0x02000000, 0x0e000000, 0x00000040 },
+        { 0x04000000, 0x0e000000, 0x04000000, 0x0e000000, 0x00000049 },
+        { 0x04060401, 0x0e000000, 0x04060402, 0x0e000000, 0x00000049 },
+        { 0x01000000, 0x000e0006, 0x02000000, 0x000e0009, 0x00000041 },
+        { 0x04020401, 0x000e0006, 0x04010402, 0x000e0009, 0x00000041 },
+        { 0x04060401, 0x000e0009, 0x04060402, 0x000e0006, 0x00000041 },
+        { 0x00030004, 0x0e000000, 0x00030004, 0x0e000000, 0x00000041 },
+    };
+    for (size_t i = 0; i < ARRAY_COUNT(sQuestWarmShaders); ++i) {
+        gfx_pc_precomp_shader_exact(
+            sQuestWarmShaders[i][0],
+            sQuestWarmShaders[i][1],
+            sQuestWarmShaders[i][2],
+            sQuestWarmShaders[i][3],
+            sQuestWarmShaders[i][4]
+        );
+    }
+    printf("[GFX] Android GLES warmed %d Quest-safe shader combinations.\n",
+           ARRAY_COUNT(sQuestWarmShaders));
 #endif
     sBuiltInColorCombinerCount = color_combiner_pool_size;
 

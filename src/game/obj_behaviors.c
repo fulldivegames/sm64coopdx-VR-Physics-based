@@ -597,10 +597,13 @@ struct MarioState* nearest_mario_state_to_object(struct Object *obj) {
         if (gMarioStates[i].marioObj == obj) { continue; }
         if (!gMarioStates[i].visibleToObjects) { continue; }
         if (!is_player_active(&gMarioStates[i])) { continue; }
-        float dist = dist_between_objects(obj, gMarioStates[i].marioObj);
-        if (nearest == NULL || dist < nearestDist) {
+        const f32 dx = obj->oPosX - gMarioStates[i].marioObj->oPosX;
+        const f32 dy = obj->oPosY - gMarioStates[i].marioObj->oPosY;
+        const f32 dz = obj->oPosZ - gMarioStates[i].marioObj->oPosZ;
+        const f32 distSq = dx * dx + dy * dy + dz * dz;
+        if (nearest == NULL || distSq < nearestDist) {
             nearest = &gMarioStates[i];
-            nearestDist = dist;
+            nearestDist = distSq;
         }
     }
 
@@ -616,10 +619,13 @@ struct MarioState* nearest_possible_mario_state_to_object(struct Object *obj) {
         if (!gMarioStates[i].marioObj) { continue; }
         if (gMarioStates[i].marioObj == obj) { continue; }
         if (!is_player_active(&gMarioStates[i])) { continue; }
-        float dist = dist_between_objects(obj, gMarioStates[i].marioObj);
-        if (nearest == NULL || dist < nearestDist) {
+        const f32 dx = obj->oPosX - gMarioStates[i].marioObj->oPosX;
+        const f32 dy = obj->oPosY - gMarioStates[i].marioObj->oPosY;
+        const f32 dz = obj->oPosZ - gMarioStates[i].marioObj->oPosZ;
+        const f32 distSq = dx * dx + dy * dy + dz * dz;
+        if (nearest == NULL || distSq < nearestDist) {
             nearest = &gMarioStates[i];
-            nearestDist = dist;
+            nearestDist = distSq;
         }
     }
 
@@ -646,10 +652,13 @@ struct MarioState *nearest_interacting_mario_state_to_object(struct Object *obj)
         if (gMarioStates[i].interactObj != obj) { continue; }
         if (!gMarioStates[i].visibleToObjects) { continue; }
         if (!is_player_active(&gMarioStates[i])) { continue; }
-        float dist = dist_between_objects(obj, gMarioStates[i].marioObj);
-        if (nearest == NULL || dist < nearestDist) {
+        const f32 dx = obj->oPosX - gMarioStates[i].marioObj->oPosX;
+        const f32 dy = obj->oPosY - gMarioStates[i].marioObj->oPosY;
+        const f32 dz = obj->oPosZ - gMarioStates[i].marioObj->oPosZ;
+        const f32 distSq = dx * dx + dy * dy + dz * dz;
+        if (nearest == NULL || distSq < nearestDist) {
             nearest = &gMarioStates[i];
-            nearestDist = dist;
+            nearestDist = distSq;
         }
     }
 
