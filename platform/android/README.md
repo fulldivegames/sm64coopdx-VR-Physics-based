@@ -1,4 +1,4 @@
-# SM64 Co-Op DX VR for Quest v0.5.8
+# SM64 Co-Op DX VR for Quest v0.5.9
 
 Player-facing installation, controls, gestures, features, and troubleshooting
 are documented in the repository's main `README.md`. The public release is a

@@ -1218,26 +1218,6 @@ static bool vr_hand_interaction_grab_overlaps_object(
     f32* distanceSquared
 );
 
-static bool vr_hand_interaction_other_hand_grips_heavy_object(
-    u32 hand,
-    struct Object* object
-) {
-    const u32 otherHand = hand == VR_CONTROLLER_LEFT
-        ? VR_CONTROLLER_RIGHT
-        : VR_CONTROLLER_LEFT;
-    struct VrControllerState state = { 0 };
-    Vec3f position;
-    if (!vr_get_controller_state(otherHand, &state) ||
-        state.squeeze < VR_GRIP_CLOSE_THRESHOLD ||
-        !vr_get_controller_world_fist_from_state(
-            otherHand, &state, position, NULL)) {
-        return false;
-    }
-    return vr_hand_interaction_hand_is_behind_heavy_grabbable(position, object) &&
-        vr_hand_interaction_grab_overlaps_object(
-            position, vr_hand_interaction_fist_radius(), object, NULL);
-}
-
 static bool vr_hand_interaction_grab_overlaps_object(
     const Vec3f handPosition,
     f32 handRadius,
@@ -3458,13 +3438,6 @@ static bool vr_hand_interaction_try_grab(
         return false;
     }
 
-    const bool heavyObject =
-        (object->oInteractionSubtype & INT_SUBTYPE_GRABS_MARIO) != 0;
-    if (heavyObject &&
-        !vr_hand_interaction_other_hand_grips_heavy_object(hand, object)) {
-        return false;
-    }
-
     mario->interactObj = object;
     mario->usedObj = object;
     mario_grab_used_object(mario);
@@ -3490,10 +3463,7 @@ static bool vr_hand_interaction_try_grab(
     } else {
         sVrTrackedHeldObject = object;
         sVrTrackedHeldHand = hand;
-        sVrTrackedHeldGripMask = heavyObject
-            ? (u8)((1U << VR_CONTROLLER_LEFT) |
-                   (1U << VR_CONTROLLER_RIGHT))
-            : (u8)(1U << hand);
+        sVrTrackedHeldGripMask = (u8)(1U << hand);
         vr_hand_interaction_update_held_position(
             object,
             handPosition,

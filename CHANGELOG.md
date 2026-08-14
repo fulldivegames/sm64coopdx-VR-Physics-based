@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.9 - 2026-08-14
+
+- Heavy rear-grab enemies such as King Bob-omb and Chuckya can now be physically grabbed with either hand.
+- Rear-position validation remains required, and dive pickup remains supported.
+- Added Flame & Lava Optimizations in Performance (on by default on Quest), reducing dense transparent flame rendering, visual trail particles, lava bubbles, and avoidable distance work without changing hazard collisions.
+
 ## v0.5.8 - 2026-08-14
 
 - Added two-hand physical pickup support for heavy rear-grab enemies, including King Bob-omb and Chuckya; native dive pickups remain supported.
