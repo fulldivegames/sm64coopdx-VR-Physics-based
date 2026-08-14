@@ -14,7 +14,7 @@
 </p>
 
 > [!IMPORTANT]
-> The current public release is **v0.5.11**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination.
+> The current public release is **v0.5.13**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination.
 
 SM64 Co-Op DX VR currently targets 64-bit Windows, OpenGL, and OpenXR. It keeps the original game's flat-screen mode and multiplayer foundation while adding native stereoscopic rendering, 6DoF tracking, VR-aware cameras, remappable motion-controller input, physical interactions, comfort options, and extensive calibration settings.
 
@@ -50,6 +50,23 @@ The validated ROM is remembered in the game's user-data folder, so it normally d
 
 > [!WARNING]
 > The release ZIP contains no ROM and no Nintendo game assets. Never upload a ROM with a bug report or redistribute one with this project.
+
+## Install mods on Windows
+
+The Windows release supports compatible SM64 Co-Op DX mods from the `mods` folder beside the game executable.
+
+1. Download a mod made for SM64 Co-Op DX. The community browser is [mods.sm64coopdx.com](https://mods.sm64coopdx.com/mods/).
+2. Extract the archive. Do not place the `.zip` itself in the game folder.
+3. Copy the extracted mod folder into `mods` inside your extracted SM64 Co-Op DX VR folder. Its files should be directly inside that one folder, without an extra duplicate nesting level.
+4. Fully close and reopen the game. From the main menu, open **Host > Mods**, select the installed mod, and start the game. Use **Refresh** if the mod was copied while the game was open.
+
+DynOS packs use a separate folder. Extract the complete pack folder into:
+
+```text
+dynos/packs/My Pack Name/
+```
+
+Restart the game, then enable the pack from the DynOS menu. Install one mod or pack at a time when troubleshooting; desktop mods can still conflict with VR rendering or depend on a different SM64 Co-Op DX version.
 
 ### Updating an existing installation
 

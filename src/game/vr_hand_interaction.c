@@ -1248,6 +1248,10 @@ static bool vr_hand_interaction_grab_overlaps_object(
         object->hitboxHeight,
         object->hurtboxHeight
     );
+    if (obj_has_behavior(object, bhvKingBobomb)) {
+        objectRadius = fmaxf(objectRadius, 180.0f);
+        objectHeight = fmaxf(objectHeight, 300.0f);
+    }
     if (objectRadius <= 0.0f) {
         objectRadius = 30.0f;
     }

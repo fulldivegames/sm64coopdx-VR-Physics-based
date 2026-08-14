@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.13 - 2026-08-14
+
+- Improved physical King Bob-omb grab reach without changing regular Bob-omb behavior.
+- Improved compatibility for valid renamed or repackaged DynOS actor binaries.
+- Moved Windows mod and DynOS installation instructions directly below first-time setup.
+
 ## v0.5.11 - 2026-08-14
 
 - Reduced general actor CPU cost by removing unnecessary square roots from the shared nearest-player search used by Bob-ombs, Goombas, Chain Chomp, bosses, flames, and many mod actors; targeting and behavior thresholds are unchanged.
