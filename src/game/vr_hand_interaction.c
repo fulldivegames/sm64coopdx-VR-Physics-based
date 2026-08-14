@@ -1212,10 +1212,11 @@ static bool vr_hand_interaction_object_can_be_grabbed(
 
 static bool vr_hand_interaction_hand_is_behind_heavy_grabbable(
     const Vec3f handPosition,
-    const struct Object* object
+    struct Object* object
 ) {
     if (object == NULL || handPosition == NULL ||
-        (object->oInteractionSubtype & INT_SUBTYPE_GRABS_MARIO) == 0) {
+        (object->oInteractionSubtype & INT_SUBTYPE_GRABS_MARIO) == 0 ||
+        obj_has_behavior(object, bhvKingBobomb)) {
         return true;
     }
 

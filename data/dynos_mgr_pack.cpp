@@ -9,8 +9,8 @@ static std::deque<PackData>& DynosPacks() {
     return sDynosPacks;
 }
 
-static void ScanPackBins(struct PackData* aPack) {
-    DIR *_PackDir = opendir(aPack->mPath.c_str());
+static void ScanPackBinsFolder(struct PackData* aPack, const SysPath& aFolder) {
+    DIR *_PackDir = opendir(aFolder.c_str());
     if (!_PackDir) { return; }
 
     struct dirent *_PackEnt = NULL;
@@ -19,7 +19,7 @@ static void ScanPackBins(struct PackData* aPack) {
         if (SysPath(_PackEnt->d_name) == ".") continue;
         if (SysPath(_PackEnt->d_name) == "..") continue;
 
-        SysPath _FileName = fstring("%s/%s", aPack->mPath.c_str(), _PackEnt->d_name);
+        SysPath _FileName = fstring("%s/%s", aFolder.c_str(), _PackEnt->d_name);
         s32 length = strlen(_PackEnt->d_name);
 
         // check for actors
@@ -35,6 +35,18 @@ static void ScanPackBins(struct PackData* aPack) {
             _TexName[length - 4] = '\0';
             DynOS_Tex_LoadFromBinary(aPack->mPath, _FileName, _TexName.begin(), true);
         }
+    }
+    closedir(_PackDir);
+}
+
+static void ScanPackBins(struct PackData* aPack) {
+    ScanPackBinsFolder(aPack, aPack->mPath);
+
+    // Accept mod-style DynOS archives that keep generated actor binaries in
+    // PackName/actors/. Keep textures rooted at the pack itself.
+    SysPath _WrappedActorsFolder = fstring("%s/actors", aPack->mPath.c_str());
+    if (fs_sys_dir_exists(_WrappedActorsFolder.c_str())) {
+        ScanPackBinsFolder(aPack, _WrappedActorsFolder);
     }
 }
 
