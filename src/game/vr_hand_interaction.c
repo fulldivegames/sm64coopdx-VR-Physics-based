@@ -110,6 +110,7 @@ static bool sVrGripPressed[VR_CONTROLLER_COUNT] = {
 };
 static struct Object* sVrTrackedHeldObject = NULL;
 static u32 sVrTrackedHeldHand = VR_CONTROLLER_COUNT;
+static u8 sVrTrackedHeldGripMask = 0;
 static Vec3f sVrTrackedHeldPosition = { 0.0f, 0.0f, 0.0f };
 static Vec3f sVrTrackedHeldVelocity = { 0.0f, 0.0f, 0.0f };
 static bool sVrTrackedHeldPositionValid = false;
@@ -257,6 +258,7 @@ static void vr_hand_interaction_apply_headset_collider(
 static void vr_hand_interaction_clear_tracked_hold(void) {
     sVrTrackedHeldObject = NULL;
     sVrTrackedHeldHand = VR_CONTROLLER_COUNT;
+    sVrTrackedHeldGripMask = 0;
     sVrTrackedHeldPositionValid = false;
     sVrTrackedReleaseInProgress = false;
     vec3f_set(sVrTrackedHeldPosition, 0.0f, 0.0f, 0.0f);
@@ -678,7 +680,7 @@ bool vr_hand_interaction_is_tracked_held_object(
 ) {
     return object != NULL &&
         object == sVrTrackedHeldObject &&
-        sVrTrackedHeldHand < VR_CONTROLLER_COUNT;
+        sVrTrackedHeldGripMask != 0;
 }
 
 bool vr_hand_interaction_blocks_native_held_object_release(
@@ -689,8 +691,7 @@ bool vr_hand_interaction_blocks_native_held_object_release(
         mario->playerIndex == 0 &&
         mario->heldObj != NULL &&
         mario->heldObj == sVrTrackedHeldObject &&
-        sVrTrackedHeldHand < VR_CONTROLLER_COUNT &&
-        sVrGripPressed[sVrTrackedHeldHand] &&
+        sVrTrackedHeldGripMask != 0 &&
         // Damage and knockback use Mario's native forced-drop path. A closed
         // physical grip must not cancel that rule or instantly reclaim Mips,
         // a baby penguin, or another carried actor after Mario is hit.
@@ -1175,6 +1176,7 @@ static bool vr_hand_interaction_adopt_native_hold(
     // multiplayer state. Adopt that same object instead of grabbing it again.
     sVrTrackedHeldObject = object;
     sVrTrackedHeldHand = hand;
+    sVrTrackedHeldGripMask = (u8)(1U << hand);
     vr_hand_interaction_update_held_position(
         object,
         handPosition,
@@ -1206,6 +1208,60 @@ static bool vr_hand_interaction_object_can_be_grabbed(
         // Keep the native dive/punch tail interaction until the dedicated
         // physical Bowser-throw step implements those rules deliberately.
         !obj_has_behavior(object, bhvBowser);
+}
+
+static bool vr_hand_interaction_hand_is_behind_heavy_grabbable(
+    const Vec3f handPosition,
+    const struct Object* object
+) {
+    if (object == NULL || handPosition == NULL ||
+        (object->oInteractionSubtype & INT_SUBTYPE_GRABS_MARIO) == 0) {
+        return true;
+    }
+
+    const s16 handYaw = atan2s(
+        handPosition[2] - object->oPosZ,
+        handPosition[0] - object->oPosX
+    );
+    return abs_angle_diff(handYaw, object->oMoveAngleYaw) >= 0x5555;
+}
+
+static bool vr_hand_interaction_grab_overlaps_object(
+    const Vec3f handPosition,
+    f32 handRadius,
+    struct Object* object,
+    f32* distanceSquared
+);
+
+static bool vr_hand_interaction_other_hand_grips_heavy_object(
+    u32 hand,
+    struct Object* object
+) {
+    const u32 otherHand = hand == VR_CONTROLLER_LEFT
+        ? VR_CONTROLLER_RIGHT
+        : VR_CONTROLLER_LEFT;
+    struct VrControllerState state = { 0 };
+    Vec3f position;
+    if (!vr_get_controller_state(otherHand, &state) ||
+        state.squeeze < VR_GRIP_CLOSE_THRESHOLD ||
+        !vr_get_controller_world_fist_from_state(
+            otherHand,
+            &state,
+            position,
+            NULL
+        )) {
+        return false;
+    }
+    return vr_hand_interaction_hand_is_behind_heavy_grabbable(
+            position,
+            object
+        ) &&
+        vr_hand_interaction_grab_overlaps_object(
+            position,
+            vr_hand_interaction_fist_radius(),
+            object,
+            NULL
+        );
 }
 
 static bool vr_hand_interaction_grab_overlaps_object(
@@ -1508,6 +1564,10 @@ static struct Object* vr_hand_interaction_find_grab_target(
             f32 distanceSquared;
             if (!vr_hand_interaction_object_can_be_grabbed(
                     mario,
+                    object
+                ) ||
+                !vr_hand_interaction_hand_is_behind_heavy_grabbable(
+                    handPosition,
                     object
                 ) ||
                 !vr_hand_interaction_grab_overlaps_object(
@@ -3427,6 +3487,16 @@ static bool vr_hand_interaction_try_grab(
         return false;
     }
 
+    const bool heavyObject =
+        (object->oInteractionSubtype & INT_SUBTYPE_GRABS_MARIO) != 0;
+    if (heavyObject &&
+        !vr_hand_interaction_other_hand_grips_heavy_object(
+            hand,
+            object
+        )) {
+        return false;
+    }
+
     mario->interactObj = object;
     mario->usedObj = object;
     mario_grab_used_object(mario);
@@ -3452,6 +3522,10 @@ static bool vr_hand_interaction_try_grab(
     } else {
         sVrTrackedHeldObject = object;
         sVrTrackedHeldHand = hand;
+        sVrTrackedHeldGripMask = heavyObject
+            ? (u8)((1U << VR_CONTROLLER_LEFT) |
+                   (1U << VR_CONTROLLER_RIGHT))
+            : (u8)(1U << hand);
         vr_hand_interaction_update_held_position(
             object,
             handPosition,
@@ -4255,6 +4329,11 @@ void vr_hand_interaction_update(struct MarioState* mario) {
                 position,
                 climbPosition
             );
+        const bool handIsHoldingCap =
+            vr_is_controller_holding_cap(hand);
+        if (handIsHoldingCap) {
+            sVrMotionDivePairFrames[hand] = 0;
+        }
 
         if (positionValid && canStartInteraction) {
             vr_hand_interaction_try_collect_cap(
@@ -4298,14 +4377,21 @@ void vr_hand_interaction_update(struct MarioState* mario) {
             );
         }
 
-        if (sVrTrackedHeldHand == hand) {
+        if ((sVrTrackedHeldGripMask & (u8)(1U << hand)) != 0) {
             if (!positionValid ||
                 !sVrGripPressed[hand]) {
-                vr_hand_interaction_release_grab(
-                    mario,
-                    positionValid
-                );
-            } else {
+                sVrTrackedHeldGripMask &= (u8)~(1U << hand);
+                if (sVrTrackedHeldGripMask == 0) {
+                    vr_hand_interaction_release_grab(
+                        mario,
+                        positionValid
+                    );
+                } else if (sVrTrackedHeldHand == hand) {
+                    sVrTrackedHeldHand = hand == VR_CONTROLLER_LEFT
+                        ? VR_CONTROLLER_RIGHT
+                        : VR_CONTROLLER_LEFT;
+                }
+            } else if (sVrTrackedHeldHand == hand) {
                 vr_hand_interaction_update_held_position(
                     sVrTrackedHeldObject,
                     position,
@@ -4338,6 +4424,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
                 );
             }
         } else if (canStartInteraction &&
+                   !handIsHoldingCap &&
                    sVrGripPressed[hand] &&
                    positionValid &&
                    climbPositionValid) {
@@ -4422,7 +4509,8 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         const bool punchStarted =
             vr_consume_physical_punch(hand);
         const bool handIsHoldingObject =
-            sVrTrackedHeldHand == hand ||
+            handIsHoldingCap ||
+            (sVrTrackedHeldGripMask & (u8)(1U << hand)) != 0 ||
             sVrPhysicalClimbHands[hand] ||
             sVrTrackedHootHand == hand ||
             sVrTrackedAnchorHand == hand ||

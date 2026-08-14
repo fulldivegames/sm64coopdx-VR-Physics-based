@@ -34,6 +34,7 @@
 #include "../vr/vr.h"
 
 #define TEX_CACHE_STEP 512
+#define SHADER_LOOKUP_CACHE_SIZE 256
 
 struct ShaderProgram {
     uint64_t hash;
@@ -59,6 +60,9 @@ struct GLTexture {
 static struct ShaderProgram shader_program_pool[CC_MAX_SHADERS];
 static uint16_t shader_program_pool_size = 0;
 static uint16_t shader_program_pool_index = 0;
+static struct ShaderProgram *shader_lookup_cache[
+    SHADER_LOOKUP_CACHE_SIZE
+];
 static GLuint opengl_vbo;
 static GLuint opengl_vao;
 
@@ -746,14 +750,28 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
 
     prg->uniform_locations[8] = glGetUniformLocation(shader_program, "uFilter");
 
+    shader_lookup_cache[
+        (uint16_t)(prg->hash ^ (prg->hash >> 32)) &
+            (SHADER_LOOKUP_CACHE_SIZE - 1)
+    ] = prg;
+
     gfx_opengl_load_shader(prg);
 
     return prg;
 }
 
 static struct ShaderProgram *gfx_opengl_lookup_shader(struct ColorCombiner* cc) {
+    const uint16_t cache_index =
+        (uint16_t)(cc->hash ^ (cc->hash >> 32)) &
+            (SHADER_LOOKUP_CACHE_SIZE - 1);
+    struct ShaderProgram *cached = shader_lookup_cache[cache_index];
+    if (cached != NULL && cached->hash == cc->hash &&
+        cached->opengl_program_id != 0) {
+        return cached;
+    }
     for (size_t i = 0; i < shader_program_pool_size; i++) {
         if (shader_program_pool[i].hash == cc->hash) {
+            shader_lookup_cache[cache_index] = &shader_program_pool[i];
             return &shader_program_pool[i];
         }
     }
@@ -973,6 +991,9 @@ static void gfx_opengl_shutdown(void) {
     num_textures = 0;
     shader_program_pool_size = 0;
     shader_program_pool_index = 0;
+    for (size_t i = 0; i < SHADER_LOOKUP_CACHE_SIZE; i++) {
+        shader_lookup_cache[i] = NULL;
+    }
     opengl_prg = NULL;
 }
 

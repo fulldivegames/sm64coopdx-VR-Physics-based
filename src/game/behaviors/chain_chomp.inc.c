@@ -171,12 +171,19 @@ static void chain_chomp_sub_act_turn(void) {
     obj_move_pitch_approach(0, 0x100);
 
     struct Object *player = nearest_player_to_object(o);
-    s32 distanceToPlayer = player ? dist_between_objects(o, player) : 10000;
+    f32 distanceToPlayerSq = 10000.0f * 10000.0f;
+    if (player != NULL) {
+        const f32 dx = player->oPosX - o->oPosX;
+        const f32 dy = player->oPosY - o->oPosY;
+        const f32 dz = player->oPosZ - o->oPosZ;
+        distanceToPlayerSq = dx * dx + dy * dy + dz * dz;
+    }
     s32 angleToPlayer = player ? obj_angle_to_object(o, player) : 0;
 
     if (o->oMoveFlags & OBJ_MOVE_MASK_ON_GROUND) {
         cur_obj_rotate_yaw_toward(angleToPlayer, 0x400);
-        if (abs_angle_diff(angleToPlayer, o->oMoveAngleYaw) < 0x800 && distanceToPlayer < 3000) {
+        if (abs_angle_diff(angleToPlayer, o->oMoveAngleYaw) < 0x800 &&
+            distanceToPlayerSq < 3000.0f * 3000.0f) {
             if (o->oTimer > 30) {
                 if (cur_obj_check_anim_frame(0)) {
                     cur_obj_reverse_animation();
@@ -546,11 +553,17 @@ void bhv_wooden_post_update(void) {
         o->oPosY = o->oHomeY + o->oWoodenPostOffsetY;
     } else if (!(o->oBehParams & WOODEN_POST_BP_NO_COINS_MASK)) {
         struct Object *player = nearest_player_to_object(o);
-        s32 distanceToPlayer = player ? dist_between_objects(o, player) : 10000;
+        f32 distanceToPlayerSq = 10000.0f * 10000.0f;
+        if (player != NULL) {
+            const f32 dx = player->oPosX - o->oPosX;
+            const f32 dy = player->oPosY - o->oPosY;
+            const f32 dz = player->oPosZ - o->oPosZ;
+            distanceToPlayerSq = dx * dx + dy * dy + dz * dz;
+        }
         s32 angleToPlayer = player ? obj_angle_to_object(o, player) : 0;
 
         // Reset the timer once mario is far enough
-        if (distanceToPlayer > 400.0f) {
+        if (distanceToPlayerSq > 400.0f * 400.0f) {
             o->oTimer = o->oWoodenPostTotalMarioAngle = 0;
         } else {
             // When mario runs around the post 3 times within 200 frames, spawn

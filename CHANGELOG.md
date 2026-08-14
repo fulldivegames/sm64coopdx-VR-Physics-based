@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.8 - 2026-08-14
+
+- Added two-hand physical pickup support for heavy rear-grab enemies, including King Bob-omb and Chuckya; native dive pickups remain supported.
+- Prevented cap-holding hands from triggering punches, punch sounds, motion dives, climbing, or grabbing.
+- Reduced render stalls with a direct shader lookup cache and removed repeated square roots from Chain Chomp proximity checks.
+
 ## v0.5.6 - 2026-08-14
 
 - Added **Cheats > Shaking Hat Gives Wing Cap**. With **Grab Cap at Any Time** enabled, a deliberately vigorous physical shake converts the held cap before it is placed back on Mario's head.

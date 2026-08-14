@@ -677,6 +677,11 @@ static u8 vr_painting_exit_hat_alpha(void) {
     return sVrPaintingExitHatHand < VR_CONTROLLER_COUNT ? 255 : 0;
 }
 
+bool vr_is_controller_holding_cap(u32 handIndex) {
+    return handIndex < VR_CONTROLLER_COUNT &&
+        sVrPaintingExitHatHand == handIndex;
+}
+
 static Vp*  sViewport        = NULL;
 static Gfx* sViewportPos     = NULL;
 static Gfx* sViewportClipPos = NULL;
