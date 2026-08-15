@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.5.14 - 2026-08-14
+
+- Fixed Quest system keyboard activation for settings text fields, including custom palette preset naming.
+- Restored the bundled Mario, Luigi, Toad, Wario, and Waluigi palette presets without overwriting existing user palette files.
+
 ## v0.5.13 - 2026-08-14
 
 - Added the native Quest system keyboard to standalone settings text fields, including palette preset naming.

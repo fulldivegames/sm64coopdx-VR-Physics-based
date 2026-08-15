@@ -13,6 +13,7 @@ import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
 import android.view.Gravity;
+import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.content.Context;
 import android.widget.EditText;
@@ -71,7 +72,7 @@ public final class QuestNativeActivity extends NativeActivity {
                     }
                 });
                 FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
-                        2, 2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+                        32, 32, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
                 addContentView(vrKeyboardInput, params);
             }
             suppressVrKeyboardText = true;
@@ -79,13 +80,19 @@ public final class QuestNativeActivity extends NativeActivity {
             vrKeyboardInput.setSelection(vrKeyboardInput.length());
             suppressVrKeyboardText = false;
             vrKeyboardInput.setVisibility(EditText.VISIBLE);
-            vrKeyboardInput.requestFocus();
-            InputMethodManager inputMethod = (InputMethodManager)
-                    getSystemService(Context.INPUT_METHOD_SERVICE);
-            if (inputMethod != null) {
-                inputMethod.showSoftInput(vrKeyboardInput,
-                        InputMethodManager.SHOW_IMPLICIT);
-            }
+            vrKeyboardInput.requestFocusFromTouch();
+            getWindow().setSoftInputMode(
+                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING |
+                    WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+            vrKeyboardInput.postDelayed(() -> {
+                InputMethodManager inputMethod = (InputMethodManager)
+                        getSystemService(Context.INPUT_METHOD_SERVICE);
+                if (inputMethod != null && vrKeyboardInput.hasFocus()) {
+                    inputMethod.restartInput(vrKeyboardInput);
+                    inputMethod.showSoftInput(vrKeyboardInput,
+                            InputMethodManager.SHOW_FORCED);
+                }
+            }, 150);
         });
     }
 
@@ -235,8 +242,26 @@ public final class QuestNativeActivity extends NativeActivity {
         try {
             copyAssetDirectory("lang", new File(root, "lang"));
             Log.i(TAG, "Bundled language resources installed.");
+            copyMissingAssetDirectory("palettes", new File(root, "palettes"));
+            Log.i(TAG, "Bundled character palettes installed.");
         } catch (IOException exception) {
             Log.e(TAG, "Could not install bundled language resources.", exception);
+        }
+    }
+
+    private void copyMissingAssetDirectory(String assetPath, File destination)
+            throws IOException {
+        String[] children = getAssets().list(assetPath);
+        if (children == null || children.length == 0) {
+            if (!destination.exists()) copyAssetFile(assetPath, destination);
+            return;
+        }
+        if (!destination.isDirectory() && !destination.mkdirs()) {
+            throw new IOException("Could not create " + destination);
+        }
+        for (String child : children) {
+            copyMissingAssetDirectory(assetPath + "/" + child,
+                    new File(destination, child));
         }
     }
 

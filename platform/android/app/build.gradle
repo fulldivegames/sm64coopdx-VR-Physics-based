@@ -8,6 +8,9 @@ tasks.register("syncSm64ResourceAssets", Sync) {
     from("../../../lang") {
         into("lang")
     }
+    from("../../../palettes") {
+        into("palettes")
+    }
     into(generatedResourceAssets)
 }
 
@@ -20,8 +23,8 @@ android {
         applicationId "com.fulldivegames.sm64coopdxvr"
         minSdk 26
         targetSdk 32
-        versionCode 15
-        versionName "0.5.13"
+        versionCode 16
+        versionName "0.5.14"
 
         ndk {
             abiFilters "arm64-v8a"
