@@ -114,6 +114,10 @@ public final class QuestNativeActivity extends NativeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         installBundledResources();
         super.onCreate(savedInstanceState);
+        // Horizon OS uses an overlay surface for its system keyboard. This
+        // focus mode lets that overlay appear above an immersive NativeActivity.
+        getWindow().addFlags(
+                WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
         prepareSharedContentDirectories();
         checkForStandaloneUpdate();
         File rom = new File(getExternalFilesDir(null), ROM_NAME);
