@@ -125,7 +125,7 @@ Not every desktop mod is compatible with the standalone ARM64/OpenGL ES build. M
 
 Open **Settings > VR > Controller Settings** to exchange the movement/camera sticks, remap the listed actions, or disable individual bindings.
 
-## How to play in VR
+## How to play in VR (PHYSICAL CONTROLS TUTORIAL)
 
 ### First person and movement
 
