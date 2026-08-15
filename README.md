@@ -96,7 +96,9 @@ Not every desktop mod is compatible with the standalone ARM64/OpenGL ES build. M
 
 Mod Compatibility notes:
 I will update any mod compatibility issues that I find or am told here:
+
 Render96 - Issues, poor performance and crashing
+
 Character selector - potential issues causing crashing
 
 
