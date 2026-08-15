@@ -24,6 +24,7 @@
 #include "first_person_cam.h"
 #include "engine/math_util.h"
 #include "pc/network/network.h"
+#include "pc/configfile.h"
 #include "pc/lua/smlua.h"
 #include "pc/djui/djui_hud_utils.h"
 
@@ -273,6 +274,17 @@ void bhv_mario_update(void) {
     u32 particleFlags = execute_mario_action(gCurrentObject);
     smlua_call_event_hooks(HOOK_MARIO_UPDATE, gMarioState);
     particleFlags |= gMarioState->particleFlags;
+    if (configVrUltraPerformanceMode) {
+        // Retain gameplay-readable fire and water contact feedback while
+        // suppressing the dense decorative spawners used for dust, sparkles,
+        // trails, leaves, snow, breath, dirt and mist.
+        const u32 essentialParticleFlags =
+            PARTICLE_FIRE |
+            PARTICLE_WATER_SPLASH |
+            PARTICLE_SHALLOW_WATER_WAVE |
+            PARTICLE_SHALLOW_WATER_SPLASH;
+        particleFlags &= essentialParticleFlags;
+    }
     gCurrentObject->oMarioParticleFlags = particleFlags;
 
     if (stateIndex == 0) { first_person_update(); }

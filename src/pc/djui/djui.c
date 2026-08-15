@@ -22,6 +22,7 @@
 static Gfx* sSavedDisplayListHead = NULL;
 static Gfx* sHookHudRenderGfx = NULL;
 static size_t sHookHudRenderGfxSize = 0;
+static size_t sHookHudRenderGfxCapacity = 0;
 
 struct DjuiRoot* gDjuiRoot = NULL;
 struct DjuiText* gDjuiPauseOptions = NULL;
@@ -43,6 +44,10 @@ void djui_shutdown(void) {
     djui_panel_shutdown();
 
     sSavedDisplayListHead = NULL;
+    free(sHookHudRenderGfx);
+    sHookHudRenderGfx = NULL;
+    sHookHudRenderGfxSize = 0;
+    sHookHudRenderGfxCapacity = 0;
     if (gDjuiPauseOptions) djui_base_destroy(&gDjuiPauseOptions->base);
     if (gDjuiModReload) djui_base_destroy(&gDjuiModReload->base);
     if (sDjuiLuaError) djui_base_destroy(&sDjuiLuaError->base);
@@ -222,13 +227,36 @@ void djui_render(void) {
         Gfx *hookHudRenderStart = gDisplayListHead;
         smlua_call_event_hooks(HOOK_ON_HUD_RENDER, djui_reset_hud_params);
         size_t gfxSize = sizeof(Gfx) * (gDisplayListHead - hookHudRenderStart);
-        if (gfxSize > 0) {
-            if (gfxSize > sHookHudRenderGfxSize) {
-                sHookHudRenderGfx = realloc(sHookHudRenderGfx, gfxSize);
+        // VR submits the same immutable game-tick display list to both eyes
+        // and never consumes this desktop-only 60 fps hook cache. Avoid a
+        // large heap copy every tick for Lua-heavy HUDs and character menus.
+        if (!vr_is_active() && gfxSize > 0) {
+            if (gfxSize > sHookHudRenderGfxCapacity) {
+                size_t newCapacity = sHookHudRenderGfxCapacity > 0
+                    ? sHookHudRenderGfxCapacity
+                    : 4096;
+                while (newCapacity < gfxSize) {
+                    newCapacity *= 2;
+                }
+                Gfx* newCache = realloc(
+                    sHookHudRenderGfx,
+                    newCapacity
+                );
+                if (newCache != NULL) {
+                    sHookHudRenderGfx = newCache;
+                    sHookHudRenderGfxCapacity = newCapacity;
+                }
             }
-            memcpy(sHookHudRenderGfx, hookHudRenderStart, gfxSize);
+            if (sHookHudRenderGfx != NULL &&
+                gfxSize <= sHookHudRenderGfxCapacity) {
+                memcpy(sHookHudRenderGfx, hookHudRenderStart, gfxSize);
+                sHookHudRenderGfxSize = gfxSize;
+            } else {
+                sHookHudRenderGfxSize = 0;
+            }
+        } else {
+            sHookHudRenderGfxSize = 0;
         }
-        sHookHudRenderGfxSize = gfxSize;
     } else if (sHookHudRenderGfx != NULL && sHookHudRenderGfxSize > 0) {
         memcpy(gDisplayListHead, sHookHudRenderGfx, sHookHudRenderGfxSize);
         gDisplayListHead += sHookHudRenderGfxSize / sizeof(Gfx);

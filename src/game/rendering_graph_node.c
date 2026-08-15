@@ -1,6 +1,7 @@
 #include <math.h>
 #include <float.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #include <PR/ultratypes.h>
 
@@ -20,6 +21,7 @@
 #include "sm64.h"
 #include "game/level_update.h"
 #include "pc/lua/smlua_hooks.h"
+#include "pc/lua/smlua_utils.h"
 #include "pc/configfile.h"
 #include "pc/vr/vr.h"
 #include "pc/utils/misc.h"
@@ -38,6 +40,7 @@
 #include "actors/mario/geo_header.h"
 #include "behavior_data.h"
 #include "object_helpers.h"
+#include "interaction.h"
 #include "sound_init.h"
 
 /**
@@ -239,11 +242,12 @@ static struct GraphNodePerspective *sPerspectiveNode = NULL;
 static Mtx* sPerspectiveMtx   = NULL;
 static f32 sPerspectiveAspect = 0;
 
-#define VR_UI_MATRIX_COUNT_MAX 64
-static Mtx* sVrUiMatrices[VR_UI_MATRIX_COUNT_MAX] = { 0 };
+static Mtx** sVrUiMatrices = NULL;
 static u32 sVrUiMatrixCount = 0;
-static Mtx* sVrHudMatrices[VR_UI_MATRIX_COUNT_MAX] = { 0 };
+static u32 sVrUiMatrixCapacity = 0;
+static Mtx** sVrHudMatrices = NULL;
 static u32 sVrHudMatrixCount = 0;
+static u32 sVrHudMatrixCapacity = 0;
 static Mtx* sVrControllerHandMatrices[VR_CONTROLLER_COUNT] = { 0 };
 static bool sVrControllerHandClosed[VR_CONTROLLER_COUNT] = { false };
 
@@ -1763,23 +1767,10 @@ static bool vr_get_true_first_person_body_basis(
     }
     vec3f_mul(cameraForward, 1.0f / interpolatedForwardLength);
 
-    // The animation supplies pitch and roll, but it must not steer the
-    // player's horizontal view. Anchor somersault-style actions by their
-    // right axis so an inverted forward vector remains a natural front/back
-    // flip. A side flip rolls around forward, so anchor that axis instead.
-    Vec3f animatedRight;
-    vec3f_cross(animatedRight, cameraUp, cameraForward);
-    const f32 animatedRightLength = sqrtf(
-        animatedRight[0] * animatedRight[0] +
-        animatedRight[1] * animatedRight[1] +
-        animatedRight[2] * animatedRight[2]
-    );
-    if (!isfinite(animatedRightLength) ||
-        animatedRightLength <= 0.001f) {
-        return false;
-    }
-    vec3f_mul(animatedRight, 1.0f / animatedRightLength);
-
+    // Lock the animation to the player's stable heading. The animated arm
+    // line is not a reliable flip axis (arms swing independently and could
+    // turn a front flip into a sideways roll). Head-to-torso supplies the
+    // tilt amount; the selected facing source supplies the horizontal plane.
     Vec3f stableForward = { 0.0f, 0.0f, 1.0f };
     vr_adjust_first_person_camera_direction(stableForward);
     Vec3f stableRight = {
@@ -1787,57 +1778,44 @@ static bool vr_get_true_first_person_body_basis(
         0.0f,
         -stableForward[0]
     };
-
-    f32* animatedHeading = mario->action == ACT_SIDE_FLIP
-        ? cameraForward
-        : animatedRight;
-    f32* stableHeading = mario->action == ACT_SIDE_FLIP
-        ? stableForward
-        : stableRight;
-    f32 headingLength = sqrtf(
-        animatedHeading[0] * animatedHeading[0] +
-        animatedHeading[2] * animatedHeading[2]
-    );
-    if (!isfinite(headingLength) || headingLength <= 0.001f) {
-        // An unusual blended animation can momentarily point the preferred
-        // anchor vertically. Its orthogonal axis remains valid and preserves
-        // the same horizontal heading without dropping the flip tilt.
-        animatedHeading = mario->action == ACT_SIDE_FLIP
-            ? animatedRight
-            : cameraForward;
-        stableHeading = mario->action == ACT_SIDE_FLIP
-            ? stableRight
-            : stableForward;
-        headingLength = sqrtf(
-            animatedHeading[0] * animatedHeading[0] +
-            animatedHeading[2] * animatedHeading[2]
+    const f32 verticalAmount = cameraUp[1];
+    if (mario->action == ACT_SIDE_FLIP) {
+        const f32 rollAmount =
+            cameraUp[0] * stableRight[0] +
+            cameraUp[2] * stableRight[2];
+        const f32 planeLength = sqrtf(
+            verticalAmount * verticalAmount +
+            rollAmount * rollAmount
         );
-        if (!isfinite(headingLength) || headingLength <= 0.001f) {
+        if (!isfinite(planeLength) || planeLength <= 0.001f) {
             return false;
         }
+        const f32 invPlaneLength = 1.0f / planeLength;
+        cameraUp[0] = stableRight[0] * rollAmount * invPlaneLength;
+        cameraUp[1] = verticalAmount * invPlaneLength;
+        cameraUp[2] = stableRight[2] * rollAmount * invPlaneLength;
+        vec3f_copy(cameraForward, stableForward);
+    } else {
+        const f32 pitchAmount =
+            cameraUp[0] * stableForward[0] +
+            cameraUp[2] * stableForward[2];
+        const f32 planeLength = sqrtf(
+            verticalAmount * verticalAmount +
+            pitchAmount * pitchAmount
+        );
+        if (!isfinite(planeLength) || planeLength <= 0.001f) {
+            return false;
+        }
+        const f32 invPlaneLength = 1.0f / planeLength;
+        const f32 vertical = verticalAmount * invPlaneLength;
+        const f32 pitch = pitchAmount * invPlaneLength;
+        cameraUp[0] = stableForward[0] * pitch;
+        cameraUp[1] = vertical;
+        cameraUp[2] = stableForward[2] * pitch;
+        cameraForward[0] = stableForward[0] * vertical;
+        cameraForward[1] = -pitch;
+        cameraForward[2] = stableForward[2] * vertical;
     }
-
-    const s16 animatedYaw = atan2s(
-        animatedHeading[2],
-        animatedHeading[0]
-    );
-    const s16 stableYaw = atan2s(
-        stableHeading[2],
-        stableHeading[0]
-    );
-    const s16 yawCorrection = (s16)(stableYaw - animatedYaw);
-    const f32 correctionSin = sins(yawCorrection);
-    const f32 correctionCos = coss(yawCorrection);
-    const f32 forwardX = cameraForward[0];
-    const f32 forwardZ = cameraForward[2];
-    const f32 upX = cameraUp[0];
-    const f32 upZ = cameraUp[2];
-    cameraForward[0] =
-        forwardX * correctionCos + forwardZ * correctionSin;
-    cameraForward[2] =
-        forwardZ * correctionCos - forwardX * correctionSin;
-    cameraUp[0] = upX * correctionCos + upZ * correctionSin;
-    cameraUp[2] = upZ * correctionCos - upX * correctionSin;
     return true;
 }
 
@@ -2607,9 +2585,50 @@ bool vr_get_controller_world_fist(
 }
 
 static bool vr_is_menu_scene(void) {
-    return gCurrentArea != NULL &&
-        (const Collision *)gCurrentArea->terrainData ==
-            main_menu_seg7_collision;
+    static s32 sLuaMenuModIndex = -1;
+    static u32 sLuaMenuNextSearchTimestamp = 0;
+    static bool sLuaFullscreenMenuActive = false;
+    static bool sMenuSceneCacheValid = false;
+    static u32 sMenuSceneCacheTimestamp = 0;
+    static bool sMenuSceneCache = false;
+    bool menuActive = false;
+
+    // Lua and area state only advance on the 30 Hz game tick. Rendering may
+    // ask this several times for both eyes at 72/90 Hz, so reuse the answer
+    // for the rest of the logical tick.
+    if (sMenuSceneCacheValid &&
+        sMenuSceneCacheTimestamp == gGlobalTimer) {
+        return sMenuSceneCache;
+    }
+
+    if (sLuaMenuModIndex >= 0 &&
+        smlua_get_boolean_mod_variable(
+            (u16)sLuaMenuModIndex,
+            "menuAndTransition",
+            &menuActive
+        )) {
+        sLuaFullscreenMenuActive = menuActive;
+    } else {
+        sLuaMenuModIndex = -1;
+        sLuaFullscreenMenuActive = false;
+        if (gGlobalTimer >= sLuaMenuNextSearchTimestamp) {
+            sLuaMenuModIndex = smlua_find_boolean_mod_variable(
+                "menuAndTransition",
+                &menuActive
+            );
+            sLuaFullscreenMenuActive =
+                sLuaMenuModIndex >= 0 && menuActive;
+            sLuaMenuNextSearchTimestamp = gGlobalTimer + 30;
+        }
+    }
+
+    sMenuSceneCache = sLuaFullscreenMenuActive ||
+        (gCurrentArea != NULL &&
+         (const Collision *)gCurrentArea->terrainData ==
+             main_menu_seg7_collision);
+    sMenuSceneCacheTimestamp = gGlobalTimer;
+    sMenuSceneCacheValid = true;
+    return sMenuSceneCache;
 }
 
 static bool sVrEyeTangentsValid[2] = { false };
@@ -2934,18 +2953,50 @@ void patch_mtx_before(void) {
     }
 }
 
-void register_mtx_vr_ui(Mtx *matrix) {
-    if (matrix == NULL ||
-        sVrUiMatrixCount >= VR_UI_MATRIX_COUNT_MAX) {
-        return;
+static bool vr_grow_matrix_list(
+    Mtx*** matrices,
+    u32* capacity,
+    u32 requiredCount
+) {
+    if (requiredCount <= *capacity) {
+        return true;
     }
 
+    u32 newCapacity = *capacity == 0 ? 256 : *capacity;
+    while (newCapacity < requiredCount) {
+        if (newCapacity > UINT32_MAX / 2) {
+            return false;
+        }
+        newCapacity *= 2;
+    }
+
+    Mtx** grown = realloc(*matrices, sizeof(*grown) * newCapacity);
+    if (grown == NULL) {
+        return false;
+    }
+
+    *matrices = grown;
+    *capacity = newCapacity;
+    return true;
+}
+
+void register_mtx_vr_ui(Mtx *matrix) {
+    if (matrix == NULL || !vr_grow_matrix_list(
+            &sVrUiMatrices,
+            &sVrUiMatrixCapacity,
+            sVrUiMatrixCount + 1
+        )) {
+        return;
+    }
     sVrUiMatrices[sVrUiMatrixCount++] = matrix;
 }
 
 void register_mtx_vr_hud(Mtx *matrix) {
-    if (matrix == NULL ||
-        sVrHudMatrixCount >= VR_UI_MATRIX_COUNT_MAX) {
+    if (matrix == NULL || !vr_grow_matrix_list(
+            &sVrHudMatrices,
+            &sVrHudMatrixCapacity,
+            sVrHudMatrixCount + 1
+        )) {
         return;
     }
 
@@ -3210,12 +3261,14 @@ void patch_mtx_vr_shared(void) {
                 vr_build_game_camera_matrix(cameraMatrix, cameraPos,
                     cameraFocus, sCameraNode->roll);
             }
-            const f32 dx = latePosition[0] -
-                heldInterp->owner->header.gfx.pos[0];
-            const f32 dy = latePosition[1] -
-                heldInterp->owner->header.gfx.pos[1];
-            const f32 dz = latePosition[2] -
-                heldInterp->owner->header.gfx.pos[2];
+            Vec3f heldRenderBase;
+            delta_interpolate_vec3f(heldRenderBase,
+                heldInterp->owner->header.gfx.prevPos,
+                heldInterp->owner->header.gfx.pos,
+                gRenderingDelta);
+            const f32 dx = latePosition[0] - heldRenderBase[0];
+            const f32 dy = latePosition[1] - heldRenderBase[1];
+            const f32 dz = latePosition[2] - heldRenderBase[2];
             for (struct MtxInterp *interp = heldInterp;
                  interp != NULL; interp = interp->nextVrHeld) {
                 if (interp->usingCamSpace && sCameraNode != NULL) {
@@ -3432,16 +3485,11 @@ static bool geo_interp_data_is_pooled(
 
 struct GraphNodeInterpData *geo_get_interp_data(void *node, struct GraphNodeObject *obj) {
 
-    // Map for nodes
     if (!sGraphNodeInterpDataMap) {
         sGraphNodeInterpDataMap = hmap_create(true);
         if (!sGraphNodeInterpDataMap) {
             return NULL;
         }
-        // Scene traversal can discover many node/object pairs over several
-        // gameplay frames. Reserve their small interpolation records once per
-        // level so newly visible actors do not cause bursts of heap allocation
-        // in the middle of an OpenXR frame.
         sGraphNodeInterpDataPool = calloc(
             GRAPH_NODE_INTERP_POOL_CAPACITY,
             sizeof(*sGraphNodeInterpDataPool)
@@ -3449,18 +3497,26 @@ struct GraphNodeInterpData *geo_get_interp_data(void *node, struct GraphNodeObje
         sGraphNodeInterpDataPoolCount = 0;
     }
 
-    // Map for objects
-    void *nodeInterpData = hmap_get(sGraphNodeInterpDataMap, (int64_t) node);
+    void *nodeInterpData = hmap_get(
+        sGraphNodeInterpDataMap,
+        (int64_t)node
+    );
     if (!nodeInterpData) {
         nodeInterpData = hmap_create(true);
         if (!nodeInterpData) {
             return NULL;
         }
-        hmap_put(sGraphNodeInterpDataMap, (int64_t) node, nodeInterpData);
+        hmap_put(
+            sGraphNodeInterpDataMap,
+            (int64_t)node,
+            nodeInterpData
+        );
     }
 
-    // Node/object interp data
-    struct GraphNodeInterpData *interp = hmap_get(nodeInterpData, (int64_t) obj);
+    struct GraphNodeInterpData *interp = hmap_get(
+        nodeInterpData,
+        (int64_t)obj
+    );
     if (!interp) {
         if (sGraphNodeInterpDataPool != NULL &&
             sGraphNodeInterpDataPoolCount <
@@ -3469,14 +3525,12 @@ struct GraphNodeInterpData *geo_get_interp_data(void *node, struct GraphNodeObje
                 sGraphNodeInterpDataPoolCount++
             ];
         } else {
-            // Extremely large modded scenes retain the previous safe behavior
-            // after the reserved pool is exhausted.
-            interp = calloc(1, sizeof(struct GraphNodeInterpData));
+            interp = calloc(1, sizeof(*interp));
         }
         if (!interp) {
             return NULL;
         }
-        hmap_put(nodeInterpData, (int64_t) obj, interp);
+        hmap_put(nodeInterpData, (int64_t)obj, interp);
     }
 
     return interp;
@@ -3496,8 +3550,12 @@ static bool geo_should_interpolate(struct GraphNodeInterpData *interp) {
 }
 
 void geo_clear_interp_data() {
-    for (void *nodeInterpData = hmap_begin(sGraphNodeInterpDataMap); nodeInterpData; nodeInterpData = hmap_next(sGraphNodeInterpDataMap)) {
-        for (struct GraphNodeInterpData *interp = hmap_begin(nodeInterpData); interp; interp = hmap_next(nodeInterpData)) {
+    for (void *nodeInterpData = hmap_begin(sGraphNodeInterpDataMap);
+         nodeInterpData;
+         nodeInterpData = hmap_next(sGraphNodeInterpDataMap)) {
+        for (struct GraphNodeInterpData *interp = hmap_begin(nodeInterpData);
+             interp;
+             interp = hmap_next(nodeInterpData)) {
             if (!geo_interp_data_is_pooled(interp)) {
                 free(interp);
             }
@@ -3835,6 +3893,19 @@ static bool vr_hide_local_first_person_mario_part(void) {
          action == ACT_STOP_CRAWLING);
     const bool hidePhysicalClimbBody =
         vr_hand_interaction_is_physical_climb_active(&gMarioStates[0]);
+    const bool hideTrueFirstPersonFlipBody =
+        configVrExperimentalTrueFirstPerson &&
+        (action == ACT_BACKFLIP ||
+         action == ACT_SIDE_FLIP ||
+         action == ACT_TRIPLE_JUMP);
+
+    // True First Person keeps the animated skeleton available for its camera
+    // anchor, but the model itself would pass directly through the player's
+    // view during these inverted animations. Floating tracked gloves are
+    // rendered separately and intentionally remain visible.
+    if (hideTrueFirstPersonFlipBody) {
+        return true;
+    }
 
     switch (animPart) {
         case MARIO_ANIM_PART_HEAD:
@@ -5237,7 +5308,22 @@ static void geo_process_shadow(struct GraphNodeShadow *node) {
     // Sanity check our stack index, If we above or equal to our stack size. Return to prevent OOB\.
     if ((gMatStackIndex + 1) >= MATRIX_STACK_SIZE) { LOG_ERROR("Preventing attempt to exceed the maximum size %i for our matrix stack with size of %i.", MATRIX_STACK_SIZE - 1, gMatStackIndex); return; }
 
-    if (gCurGraphNodeCamera != NULL && gCurGraphNodeObject != NULL) {
+    // A shadow node can own the object's visible geometry. Ultra mode may
+    // skip the expensive shadow work, but it must still traverse children.
+    const bool distantChainLinkShadow =
+        vr_is_active() &&
+        gCurGraphNodeProcessingObject != NULL &&
+        gCurGraphNodeProcessingObject->oDistanceToMario > 1000.0f &&
+        obj_has_behavior(
+            gCurGraphNodeProcessingObject,
+            bhvChainChompChainPart
+        );
+    const bool skipShadow =
+        (configVrUltraPerformanceMode &&
+         gCurGraphNodeProcessingObject != gMarioStates[0].marioObj) ||
+        distantChainLinkShadow;
+
+    if (!skipShadow && gCurGraphNodeCamera != NULL && gCurGraphNodeObject != NULL) {
         if (gCurGraphNodeHeldObject != NULL) {
             get_pos_from_transform_mtx(gCurGraphNodeObject->shadowPos, gMatStack[gMatStackIndex],
                                        *gCurGraphNodeCamera->matrixPtr);
@@ -5498,7 +5584,12 @@ static void geo_process_object(struct Object *node) {
         !processLocalMarioVrSkeleton;
 
     // Sanity check our stack index, If we above or equal to our stack size. Return to prevent OOB.
-    if ((gMatStackIndex + 1) >= MATRIX_STACK_SIZE) { LOG_ERROR("Preventing attempt to exceed the maximum size %i for our matrix stack with size of %i.", MATRIX_STACK_SIZE - 1, gMatStackIndex); return; }
+    if ((gMatStackIndex + 1) >= MATRIX_STACK_SIZE) {
+        LOG_ERROR("Preventing attempt to exceed the maximum size %i for our matrix stack with size of %i.", MATRIX_STACK_SIZE - 1, gMatStackIndex);
+        gCurGraphNodeProcessingObject = lastProcessingObject;
+        gCurGraphNodeMarioState = lastMarioState;
+        return;
+    }
 
     if (!node->header.gfx.inited) {
         node->header.gfx.inited = true;
@@ -5696,7 +5787,15 @@ static void geo_process_object(struct Object *node) {
             )) {
             Mtx *mtx = alloc_display_list(sizeof(*mtx));
             Mtx *mtxPrev = alloc_display_list(sizeof(*mtxPrev));
-            if (mtx == NULL || mtxPrev == NULL) { return; }
+            if (mtx == NULL || mtxPrev == NULL) {
+                gMatStackIndex--;
+                gCurAnimType = ANIM_TYPE_NONE;
+                node->header.gfx.throwMatrix = NULL;
+                node->header.gfx.throwMatrixPrev = NULL;
+                gCurGraphNodeProcessingObject = lastProcessingObject;
+                gCurGraphNodeMarioState = lastMarioState;
+                return;
+            }
 
             mtxf_to_mtx(mtx, gMatStack[gMatStackIndex]);
             gMatStackFixed[gMatStackIndex] = mtx;

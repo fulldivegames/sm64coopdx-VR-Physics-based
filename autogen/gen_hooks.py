@@ -7,11 +7,13 @@ HOOK_RETURN_NEVER = "HOOK_RETURN_NEVER"
 HOOK_RETURN_ON_SUCCESSFUL_CALL = "HOOK_RETURN_ON_SUCCESSFUL_CALL"
 HOOK_RETURN_ON_OUTPUT_SET = "HOOK_RETURN_ON_OUTPUT_SET"
 
+NON_REENTRANT_HOOKS = { "HOOK_ON_PLAY_SOUND" }
+
 
 SMLUA_CALL_EVENT_HOOKS_BEGIN = """
 bool smlua_call_event_hooks_{hook_type}({parameters}) {{
-    lua_State *L = gLuaState;
-    if (L == NULL) {{ return false; }}{define_hook_result}
+{guard_declaration}    lua_State *L = gLuaState;
+    if (L == NULL{guard_condition}) {{ return false; }}{guard_enter}{define_hook_result}
 
     struct LuaHookedEvent *hook = &sHookedEvents[{hook_type}];
     for (int i = 0; i < hook->count; i++) {{{check_mod_index}
@@ -36,7 +38,7 @@ SMLUA_CALL_EVENT_HOOKS_CALLBACK = """
 """
 
 SMLUA_CALL_EVENT_HOOKS_RETURN_ON_OUTPUT_SET = """
-            lua_settop(L, prevTop);
+            lua_settop(L, prevTop);{guard_exit}
             return true;"""
 
 SMLUA_CALL_EVENT_HOOKS_RETURN_ON_SUCCESSFUL_CALL = """
@@ -45,7 +47,7 @@ SMLUA_CALL_EVENT_HOOKS_RETURN_ON_SUCCESSFUL_CALL = """
 SMLUA_CALL_EVENT_HOOKS_END = """
         lua_settop(L, prevTop);{return_on_successful_call}
     }}
-    return {hook_result};
+{guard_exit}    return {hook_result};
 }}
 """
 
@@ -280,10 +282,13 @@ def main():
 
     for hook_event in hook_events:
         hook_return = hook_event["return"]
+        non_reentrant = hook_event["type"] in NON_REENTRANT_HOOKS
         define_hook_result = SMLUA_CALL_EVENT_HOOKS_DEFINE_HOOK_RESULT if hook_return == HOOK_RETURN_NEVER else ""
         set_hook_result = SMLUA_CALL_EVENT_HOOKS_SET_HOOK_RESULT if hook_return == HOOK_RETURN_NEVER else ""
         return_on_successful_call = SMLUA_CALL_EVENT_HOOKS_RETURN_ON_SUCCESSFUL_CALL if hook_return == HOOK_RETURN_ON_SUCCESSFUL_CALL else ""
-        return_on_output_set = SMLUA_CALL_EVENT_HOOKS_RETURN_ON_OUTPUT_SET if hook_return == HOOK_RETURN_ON_OUTPUT_SET else ""
+        return_on_output_set = SMLUA_CALL_EVENT_HOOKS_RETURN_ON_OUTPUT_SET.format(
+            guard_exit="\n            sInHook = false;" if non_reentrant else ""
+        ) if hook_return == HOOK_RETURN_ON_OUTPUT_SET else ""
         hook_result = "hookResult" if hook_return == HOOK_RETURN_NEVER else "false"
 
         mod_index_found = False
@@ -296,7 +301,10 @@ def main():
             hook_type=hook_event["type"],
             parameters=hook_event["parameters"],
             check_mod_index=SMLUA_CALL_EVENT_HOOKS_MOD_INDEX_CHECK if mod_index_found else "",
-            define_hook_result=define_hook_result
+            define_hook_result=define_hook_result,
+            guard_declaration="    static bool sInHook = false;\n" if non_reentrant else "",
+            guard_condition=" || sInHook" if non_reentrant else "",
+            guard_enter="\n    sInHook = true;" if non_reentrant else ""
         )
 
         for input in hook_event["inputs"]:
@@ -328,7 +336,8 @@ def main():
 
         generated += SMLUA_CALL_EVENT_HOOKS_END.format(
             return_on_successful_call=return_on_successful_call,
-            hook_result=hook_result
+            hook_result=hook_result,
+            guard_exit="    sInHook = false;\n" if non_reentrant else ""
         )
 
     with open("src/pc/lua/smlua_hook_events_autogen.inl", "w", encoding="utf-8", newline="\n") as f:

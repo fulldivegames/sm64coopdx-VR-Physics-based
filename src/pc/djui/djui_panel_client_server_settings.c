@@ -7,12 +7,26 @@
 #include "pc/utils/misc.h"
 #include "pc/configfile.h"
 #include "djui_inputbox.h"
+#include "pc/chat_commands.h"
+#include "pc/lua/smlua_hooks.h"
+#include "pc/lua/utils/smlua_misc_utils.h"
+#include "pc/pc_main.h"
 
 static unsigned int sPlayerInteractions = 0;
 static unsigned int sKnockbackIndex = 0;
 static unsigned int sPvpType = 0;
 static unsigned int sStayInLevelAfterStar = 0;
 static unsigned int sBouncyLevelBounds = 0;
+
+static void djui_panel_client_character_select(UNUSED struct DjuiBase* caller) {
+    if (!gGameInited) {
+        djui_chat_message_create("Start a game before opening Character Select.");
+        return;
+    }
+    game_unpause();
+    djui_panel_shutdown();
+    queue_chat_command("/char-select menu");
+}
 
 void djui_panel_client_server_settings_create(struct DjuiBase* caller) {
     struct DjuiThreePanel* panel = djui_panel_menu_create(DLANG(HOST_SETTINGS, SETTINGS), false);
@@ -71,6 +85,9 @@ void djui_panel_client_server_settings_create(struct DjuiBase* caller) {
             djui_base_set_enabled(&inputbox1->base, false);
         }
 
+        if (smlua_chat_command_exists("char-select")) {
+            djui_button_create(body, "Character Select", DJUI_BUTTON_STYLE_NORMAL, djui_panel_client_character_select);
+        }
         djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK, djui_panel_menu_back);
     }
     djui_panel_add(caller, panel, NULL);

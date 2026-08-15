@@ -613,7 +613,9 @@ void envfx_set_max_bubble_particles(s32 mode) {
         case ENVFX_LAVA_BUBBLES:
             // Keep the full allocation so this option can be toggled safely
             // while reducing transparent particles and floor queries.
-            sBubbleParticleMaxCount = configVrFlameOptimizations ? 10 : 15;
+            sBubbleParticleMaxCount = configVrUltraPerformanceMode
+                ? 5
+                : (configVrFlameOptimizations ? 10 : 15);
             break;
         case ENVFX_WHIRLPOOL_BUBBLES:
             sBubbleParticleMaxCount = gEnvFxBubbleConfig[ENVFX_STATE_PARTICLECOUNT];

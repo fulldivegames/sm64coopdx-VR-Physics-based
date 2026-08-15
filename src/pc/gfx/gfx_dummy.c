@@ -17,6 +17,10 @@
 #include "pc/pc_main.h"
 #include "pc/utils/misc.h"
 #include "pc/debuglog.h"
+#ifdef __ANDROID__
+#include "pc/djui/djui_inputbox.h"
+#include "platform/android/app/src/main/cpp/quest_text_input.h"
+#endif
 
 // TODO: figure out if this shit even works
 #ifdef VERSION_EU
@@ -75,6 +79,9 @@ static void gfx_dummy_wm_get_dimensions(uint32_t *width, uint32_t *height) {
 }
 
 static void gfx_dummy_wm_handle_events(void) {
+#ifdef __ANDROID__
+    quest_text_input_poll();
+#endif
 }
 
 static bool gfx_dummy_wm_start_frame(void) {
@@ -106,19 +113,33 @@ static double gfx_dummy_wm_get_time(void) {
 }
 
 static char* gfx_dummy_wm_get_clipboard_text(void) {
+#ifdef __ANDROID__
+    return quest_text_input_get_clipboard();
+#else
     return "";
+#endif
 }
 
 static void gfx_dummy_wm_shutdown(void) {
 }
 
 static void gfx_dummy_wm_start_text_input(void) {
+#ifdef __ANDROID__
+    quest_text_input_show(djui_inputbox_get_focused_text(),
+                          (int)djui_inputbox_get_focused_capacity() - 1);
+#endif
 }
 
 static void gfx_dummy_wm_stop_text_input(void) {
+#ifdef __ANDROID__
+    quest_text_input_hide();
+#endif
 }
 
 static void gfx_dummy_wm_set_clipboard_text(UNUSED const char* text) {
+#ifdef __ANDROID__
+    quest_text_input_set_clipboard(text);
+#endif
 }
 
 static void gfx_dummy_wm_set_cursor_visible(UNUSED bool visible) {

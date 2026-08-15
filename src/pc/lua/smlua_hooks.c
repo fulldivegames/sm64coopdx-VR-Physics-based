@@ -1175,19 +1175,23 @@ int smlua_update_chat_command_description(lua_State* L) {
 
 bool smlua_call_chat_command_hook(char* command) {
     lua_State* L = gLuaState;
-    if (L == NULL) { return false; }
+    if (L == NULL || command == NULL || command[0] != '/') { return false; }
+    const int prevTop = lua_gettop(L);
+    const size_t inputLength = strlen(command + 1);
     for (int i = 0; i < sHookedChatCommandsCount; i++) {
         struct LuaHookedChatCommand* hook = &sHookedChatCommands[i];
+        if (hook->command == NULL || hook->reference == LUA_NOREF) {
+            continue;
+        }
         size_t commandLength = strlen(hook->command);
-        for (size_t j = 0; j < commandLength; j++) {
-            if (hook->command[j] != command[j + 1]) {
-                goto NEXT_HOOK;
-            }
+        if (commandLength > inputLength ||
+            strncmp(hook->command, command + 1, commandLength) != 0) {
+            continue;
         }
 
         char* params = &command[commandLength + 1];
         if (*params != '\0' && *params != ' ') {
-            goto NEXT_HOOK;
+            continue;
         }
         if (*params == ' ') {
             params++;
@@ -1202,6 +1206,7 @@ bool smlua_call_chat_command_hook(char* command) {
         // call the callback
         if (0 != smlua_call_hook(L, 1, 1, 0, hook->mod, hook->modFile)) {
             LOG_LUA("Failed to call the chat command callback: %s", command);
+            lua_settop(L, prevTop);
             continue;
         }
 
@@ -1210,15 +1215,27 @@ bool smlua_call_chat_command_hook(char* command) {
         if (lua_type(L, -1) == LUA_TBOOLEAN) {
             returnValue = smlua_to_boolean(L, -1);
         }
-        lua_pop(L, 1);
+        const bool conversionSuccess = gSmLuaConvertSuccess;
+        lua_settop(L, prevTop);
 
-        if (!gSmLuaConvertSuccess) { return false; }
+        if (!conversionSuccess) { return false; }
 
         return returnValue;
 
-NEXT_HOOK:;
     }
 
+    lua_settop(L, prevTop);
+    return false;
+}
+
+bool smlua_chat_command_exists(const char* command) {
+    if (command == NULL || *command == '\0') { return false; }
+    for (int i = 0; i < sHookedChatCommandsCount; i++) {
+        struct LuaHookedChatCommand* hook = &sHookedChatCommands[i];
+        if (hook->command != NULL && strcmp(hook->command, command) == 0) {
+            return true;
+        }
+    }
     return false;
 }
 

@@ -1274,8 +1274,10 @@ bool smlua_call_event_hooks_HOOK_ON_OBJECT_LOAD(struct Object *obj) {
 }
 
 bool smlua_call_event_hooks_HOOK_ON_PLAY_SOUND(s32 soundBits, Vec3f pos, s32 *soundBitsOverride) {
+    static bool sInHook = false;
     lua_State *L = gLuaState;
-    if (L == NULL) { return false; }
+    if (L == NULL || sInHook) { return false; }
+    sInHook = true;
 
     struct LuaHookedEvent *hook = &sHookedEvents[HOOK_ON_PLAY_SOUND];
     for (int i = 0; i < hook->count; i++) {
@@ -1301,11 +1303,13 @@ bool smlua_call_event_hooks_HOOK_ON_PLAY_SOUND(s32 soundBits, Vec3f pos, s32 *so
         if (lua_type(L, -1) == LUA_TNUMBER) {
             *soundBitsOverride = smlua_to_integer(L, -1);
             lua_settop(L, prevTop);
+            sInHook = false;
             return true;
         }
 
         lua_settop(L, prevTop);
     }
+    sInHook = false;
     return false;
 }
 

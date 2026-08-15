@@ -892,6 +892,7 @@ s32 DynOS_Pack_GetCount();
 void DynOS_Pack_SetEnabled(PackData* aPack, bool aEnabled);
 PackData* DynOS_Pack_GetFromIndex(s32 aIndex);
 PackData* DynOS_Pack_GetFromPath(const SysPath& aPath);
+PackData* DynOS_Pack_GetFromDisplayName(const char* aDisplayName);
 PackData* DynOS_Pack_Add(const SysPath& aPath);
 std::pair<std::string, GfxData *>* DynOS_Pack_GetActor(PackData* aPackData, const char* aActorName);
 void DynOS_Pack_AddActor(PackData* aPackData, const char* aActorName, GfxData* aGfxData);

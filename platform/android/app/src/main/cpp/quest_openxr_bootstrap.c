@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <openxr/openxr.h>
@@ -15,6 +16,11 @@
 #include "quest_rom.h"
 #include "quest_game_runtime.h"
 #include "quest_openxr_input.h"
+#include "quest_text_input.h"
+/* Keep this bootstrap translation unit independent of the game's ultra64
+ * include order. The display function's u32 parameter is unsigned int on
+ * every supported target. */
+void djui_fps_display_update(unsigned int fps);
 
 extern void quest_vr_bridge_update_views(
     const float positions[2][3], const float rotations[2][4],
@@ -34,7 +40,7 @@ typedef struct QuestSwapchain {
     int32_t height;
     uint32_t image_count;
     XrSwapchainImageOpenGLESKHR *images;
-    uint64_t verified_framebuffer_images;
+    GLuint *framebuffers;
 } QuestSwapchain;
 
 typedef struct QuestApp {
@@ -68,12 +74,18 @@ typedef struct QuestApp {
     unsigned int render_scale_stable_frames;
     bool foveation_supported;
     bool performance_settings_supported;
-    XrFoveationProfileFB foveation_profile;
+    bool display_refresh_rate_supported;
+    char system_name[XR_MAX_SYSTEM_NAME_SIZE];
+    XrFoveationProfileFB foveation_profiles[2];
+    bool active_ultra_foveation;
+    unsigned int active_refresh_rate_index;
     PFN_xrCreateFoveationProfileFB create_foveation_profile;
     PFN_xrDestroyFoveationProfileFB destroy_foveation_profile;
     PFN_xrUpdateSwapchainFB update_swapchain;
     PFN_xrPerfSettingsSetPerformanceLevelEXT set_performance_level;
-    GLuint framebuffer;
+    PFN_xrEnumerateDisplayRefreshRatesFB enumerate_refresh_rates;
+    PFN_xrGetDisplayRefreshRateFB get_refresh_rate;
+    PFN_xrRequestDisplayRefreshRateFB request_refresh_rate;
     GLuint depth_buffer;
     int32_t depth_width;
     int32_t depth_height;
@@ -195,11 +207,13 @@ static void handle_app_command(struct android_app *android_app, int32_t command)
         case APP_CMD_PAUSE:
             quest_game_flush_persistent_state();
             app->activity_resumed = false;
+            quest_input_suspend();
             LOGI("Android activity paused.");
             break;
         case APP_CMD_STOP:
             quest_game_flush_persistent_state();
             app->activity_resumed = false;
+            quest_input_suspend();
             // Quest can briefly stop the NativeActivity while handing focus
             // between the system shell, the ROM picker, and the immersive
             // OpenXR session.  Treating every STOP as a permanent exit kills
@@ -214,6 +228,7 @@ static void handle_app_command(struct android_app *android_app, int32_t command)
             break;
         case APP_CMD_TERM_WINDOW:
             app->window_ready = false;
+            quest_input_suspend();
             LOGI("Android native window was released.");
             break;
         default:
@@ -354,7 +369,7 @@ static bool create_openxr_instance(QuestApp *app) {
         return false;
     }
 
-    const char *extensions[6] = {
+    const char *extensions[7] = {
         XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME,
         XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME,
     };
@@ -377,6 +392,12 @@ static bool create_openxr_instance(QuestApp *app) {
             XR_FB_FOVEATION_CONFIGURATION_EXTENSION_NAME;
         extensions[extension_count++] =
             XR_FB_SWAPCHAIN_UPDATE_STATE_EXTENSION_NAME;
+    }
+    app->display_refresh_rate_supported =
+        openxr_extension_available(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
+    if (app->display_refresh_rate_supported) {
+        extensions[extension_count++] =
+            XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME;
     }
 
     XrInstanceCreateInfoAndroidKHR android_info = {
@@ -412,7 +433,19 @@ static bool create_openxr_instance(QuestApp *app) {
         return false;
     }
 
-    LOGI("Quest OpenXR runtime detected; system id=%llu.",
+    XrSystemProperties system_properties = {
+        .type = XR_TYPE_SYSTEM_PROPERTIES,
+    };
+    if (xr_check(
+            "xrGetSystemProperties",
+            xrGetSystemProperties(
+                app->instance, app->system_id, &system_properties))) {
+        snprintf(app->system_name, sizeof(app->system_name), "%s",
+                 system_properties.systemName);
+    }
+
+    LOGI("Quest OpenXR runtime detected: %s; system id=%llu.",
+         app->system_name[0] != '\0' ? app->system_name : "unknown headset",
          (unsigned long long)app->system_id);
     return true;
 }
@@ -462,6 +495,108 @@ static bool select_blend_mode(QuestApp *app) {
     }
     free(modes);
     return true;
+}
+
+static void configure_display_refresh_rate(QuestApp *app) {
+    if (!app->display_refresh_rate_supported) {
+        LOGI("OpenXR display refresh-rate control is unavailable.");
+        return;
+    }
+
+    xrGetInstanceProcAddr(
+        app->instance,
+        "xrEnumerateDisplayRefreshRatesFB",
+        (PFN_xrVoidFunction *)&app->enumerate_refresh_rates
+    );
+    xrGetInstanceProcAddr(
+        app->instance,
+        "xrGetDisplayRefreshRateFB",
+        (PFN_xrVoidFunction *)&app->get_refresh_rate
+    );
+    xrGetInstanceProcAddr(
+        app->instance,
+        "xrRequestDisplayRefreshRateFB",
+        (PFN_xrVoidFunction *)&app->request_refresh_rate
+    );
+    if (app->enumerate_refresh_rates == NULL ||
+        app->get_refresh_rate == NULL ||
+        app->request_refresh_rate == NULL) {
+        app->display_refresh_rate_supported = false;
+        LOGI("OpenXR display refresh-rate entry points are unavailable.");
+        return;
+    }
+
+    uint32_t rate_count = 0;
+    if (XR_FAILED(app->enumerate_refresh_rates(
+            app->session, 0, &rate_count, NULL)) || rate_count == 0) {
+        LOGI("Quest runtime did not enumerate display refresh rates.");
+        return;
+    }
+    float *rates = calloc(rate_count, sizeof(*rates));
+    if (rates == NULL) return;
+    if (XR_FAILED(app->enumerate_refresh_rates(
+            app->session, rate_count, &rate_count, rates))) {
+        free(rates);
+        return;
+    }
+
+    static const float refresh_targets[] = { 72.0f, 90.0f, 120.0f };
+    const unsigned int requested_index =
+        quest_game_refresh_rate_index() <= 2
+            ? quest_game_refresh_rate_index()
+            : 2;
+    const float target = refresh_targets[requested_index];
+    float selected = 0.0f;
+    for (uint32_t index = 0; index < rate_count; ++index) {
+        if (rates[index] <= target + 0.5f && rates[index] > selected) {
+            selected = rates[index];
+        }
+    }
+    if (selected <= 0.0f) {
+        selected = rates[0];
+        for (uint32_t index = 1; index < rate_count; ++index) {
+            if (rates[index] < selected) selected = rates[index];
+        }
+    }
+    free(rates);
+
+    const XrResult request_result =
+        app->request_refresh_rate(app->session, selected);
+    float current = 0.0f;
+    const XrResult get_result =
+        app->get_refresh_rate(app->session, &current);
+    if (XR_SUCCEEDED(request_result)) {
+        LOGI("Quest display refresh requested: %.1f Hz.", selected);
+    } else {
+        LOGI("Quest display refresh request %.1f Hz failed (%d).",
+             selected, (int)request_result);
+    }
+    if (XR_SUCCEEDED(get_result)) {
+        LOGI("Quest display refresh currently %.1f Hz.", current);
+    }
+    app->active_refresh_rate_index = requested_index;
+}
+
+static XrFoveationProfileFB create_foveation_level_profile(
+    QuestApp *app,
+    XrFoveationLevelFB foveation_level
+) {
+    XrFoveationLevelProfileCreateInfoFB level = {
+        .type = XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB,
+        .level = foveation_level,
+        .verticalOffset = 0.0f,
+        .dynamic = XR_FOVEATION_DYNAMIC_LEVEL_ENABLED_FB,
+    };
+    XrFoveationProfileCreateInfoFB profile_info = {
+        .type = XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB,
+        .next = &level,
+    };
+    XrFoveationProfileFB profile = XR_NULL_HANDLE;
+    if (XR_FAILED(app->create_foveation_profile(
+            app->session, &profile_info, &profile))) {
+        return XR_NULL_HANDLE;
+    }
+    return profile;
 }
 
 static bool create_openxr_session(QuestApp *app) {
@@ -531,6 +666,8 @@ static bool create_openxr_session(QuestApp *app) {
         LOGI("OpenXR performance-level control is unavailable; using runtime defaults.");
     }
 
+    configure_display_refresh_rate(app);
+
     if (app->foveation_supported) {
         xrGetInstanceProcAddr(app->instance, "xrCreateFoveationProfileFB",
             (PFN_xrVoidFunction *)&app->create_foveation_profile);
@@ -543,23 +680,18 @@ static bool create_openxr_session(QuestApp *app) {
             && app->update_swapchain != NULL;
     }
     if (app->foveation_supported) {
-        XrFoveationLevelProfileCreateInfoFB level = {
-            .type = XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB,
-            .level = XR_FOVEATION_LEVEL_MEDIUM_FB,
-            .verticalOffset = 0.0f,
-            .dynamic = XR_FOVEATION_DYNAMIC_LEVEL_ENABLED_FB,
-        };
-        XrFoveationProfileCreateInfoFB profile_info = {
-            .type = XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB,
-            .next = &level,
-        };
-        if (XR_FAILED(app->create_foveation_profile(
-                app->session, &profile_info, &app->foveation_profile))) {
+        app->foveation_profiles[0] = create_foveation_level_profile(
+            app, XR_FOVEATION_LEVEL_MEDIUM_FB);
+        app->foveation_profiles[1] = create_foveation_level_profile(
+            app, XR_FOVEATION_LEVEL_HIGH_FB);
+        if (app->foveation_profiles[0] == XR_NULL_HANDLE) {
             app->foveation_supported = false;
-            app->foveation_profile = XR_NULL_HANDLE;
             LOGI("Quest fixed foveated rendering is unavailable.");
         } else {
-            LOGI("Quest medium dynamic fixed foveated rendering enabled.");
+            LOGI("Quest dynamic fixed foveated rendering profiles are ready%s.",
+                 app->foveation_profiles[1] != XR_NULL_HANDLE
+                     ? " (medium/high)"
+                     : " (medium only)");
         }
     }
 
@@ -626,24 +758,27 @@ static int64_t select_swapchain_format(QuestApp *app) {
 static void destroy_swapchain_render_targets(QuestApp *app) {
     // This is only called between submitted frames, when no image is acquired.
     glFinish();
-    if (app->framebuffer != 0) {
-        glDeleteFramebuffers(1, &app->framebuffer);
-        app->framebuffer = 0;
-    }
-    if (app->depth_buffer != 0) {
-        glDeleteRenderbuffers(1, &app->depth_buffer);
-        app->depth_buffer = 0;
-    }
     for (uint32_t eye = 0; eye < QUEST_VIEW_COUNT; ++eye) {
         QuestSwapchain *swapchain = &app->swapchains[eye];
+        if (swapchain->framebuffers != NULL) {
+            glDeleteFramebuffers(
+                (GLsizei)swapchain->image_count,
+                swapchain->framebuffers
+            );
+            free(swapchain->framebuffers);
+            swapchain->framebuffers = NULL;
+        }
         free(swapchain->images);
         swapchain->images = NULL;
         swapchain->image_count = 0;
-        swapchain->verified_framebuffer_images = 0;
         if (swapchain->handle != XR_NULL_HANDLE) {
             xrDestroySwapchain(swapchain->handle);
             swapchain->handle = XR_NULL_HANDLE;
         }
+    }
+    if (app->depth_buffer != 0) {
+        glDeleteRenderbuffers(1, &app->depth_buffer);
+        app->depth_buffer = 0;
     }
 }
 
@@ -689,6 +824,14 @@ static bool create_swapchains(QuestApp *app) {
         return false;
     }
 
+    const bool ultra_foveation = quest_game_ultra_performance_enabled();
+    XrFoveationProfileFB active_foveation =
+        ultra_foveation &&
+        app->foveation_profiles[1] != XR_NULL_HANDLE
+            ? app->foveation_profiles[1]
+            : app->foveation_profiles[0];
+    app->active_ultra_foveation = ultra_foveation;
+
     for (uint32_t eye = 0; eye < QUEST_VIEW_COUNT; ++eye) {
         QuestSwapchain *swapchain = &app->swapchains[eye];
         swapchain->width = (int32_t)(
@@ -723,7 +866,7 @@ static bool create_swapchains(QuestApp *app) {
         if (app->foveation_supported) {
             XrSwapchainStateFoveationFB state = {
                 .type = XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB,
-                .profile = app->foveation_profile,
+                .profile = active_foveation,
             };
             if (XR_FAILED(app->update_swapchain(
                     swapchain->handle,
@@ -743,7 +886,6 @@ static bool create_swapchains(QuestApp *app) {
 
         swapchain->images = (XrSwapchainImageOpenGLESKHR *)calloc(
             swapchain->image_count, sizeof(*swapchain->images));
-        swapchain->verified_framebuffer_images = 0;
         if (swapchain->images == NULL) {
             LOGE("Could not allocate swapchain image list.");
             return false;
@@ -768,7 +910,6 @@ static bool create_swapchains(QuestApp *app) {
              swapchain->image_count);
     }
 
-    glGenFramebuffers(1, &app->framebuffer);
     glGenRenderbuffers(1, &app->depth_buffer);
     app->depth_width = app->swapchains[0].width;
     app->depth_height = app->swapchains[0].height;
@@ -782,6 +923,45 @@ static bool create_swapchains(QuestApp *app) {
     glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24,
                           app->depth_width, app->depth_height);
     glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+    // Framebuffer attachment state is invariant for each OpenXR image. Build
+    // it once here instead of reattaching color/depth and validating the FBO
+    // for both eyes on every 72/90 Hz headset frame.
+    for (uint32_t eye = 0; eye < QUEST_VIEW_COUNT; ++eye) {
+        QuestSwapchain *swapchain = &app->swapchains[eye];
+        swapchain->framebuffers = calloc(
+            swapchain->image_count, sizeof(*swapchain->framebuffers));
+        if (swapchain->framebuffers == NULL) return false;
+        glGenFramebuffers(
+            (GLsizei)swapchain->image_count,
+            swapchain->framebuffers
+        );
+        for (uint32_t image = 0; image < swapchain->image_count; ++image) {
+            glBindFramebuffer(
+                GL_FRAMEBUFFER, swapchain->framebuffers[image]);
+            glFramebufferTexture2D(
+                GL_FRAMEBUFFER,
+                GL_COLOR_ATTACHMENT0,
+                GL_TEXTURE_2D,
+                swapchain->images[image].image,
+                0
+            );
+            glFramebufferRenderbuffer(
+                GL_FRAMEBUFFER,
+                GL_DEPTH_ATTACHMENT,
+                GL_RENDERBUFFER,
+                app->depth_buffer
+            );
+            if (glCheckFramebufferStatus(GL_FRAMEBUFFER) !=
+                    GL_FRAMEBUFFER_COMPLETE) {
+                LOGE("%s eye framebuffer %u is incomplete.",
+                     eye == 0 ? "Left" : "Right", image);
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                return false;
+            }
+        }
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     LOGI("OpenGL ES depth buffer: %dx%d, 24-bit.",
          app->depth_width, app->depth_height);
     app->active_render_scale = render_scale;
@@ -813,6 +993,45 @@ static bool update_render_scale_if_needed(QuestApp *app) {
     return create_swapchains(app);
 }
 
+static void update_foveation_if_needed(QuestApp *app) {
+    if (!app->foveation_supported) return;
+    const bool ultra = quest_game_ultra_performance_enabled();
+    if (ultra == app->active_ultra_foveation) return;
+
+    const XrFoveationProfileFB profile =
+        ultra && app->foveation_profiles[1] != XR_NULL_HANDLE
+            ? app->foveation_profiles[1]
+            : app->foveation_profiles[0];
+    if (profile == XR_NULL_HANDLE) return;
+
+    for (uint32_t eye = 0; eye < QUEST_VIEW_COUNT; ++eye) {
+        if (app->swapchains[eye].handle == XR_NULL_HANDLE) continue;
+        XrSwapchainStateFoveationFB state = {
+            .type = XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB,
+            .profile = profile,
+        };
+        if (XR_FAILED(app->update_swapchain(
+                app->swapchains[eye].handle,
+                (const XrSwapchainStateBaseHeaderFB *)&state))) {
+            LOGI("Could not update %s eye foveation profile.",
+                 eye == 0 ? "left" : "right");
+            return;
+        }
+    }
+    app->active_ultra_foveation = ultra;
+    LOGI("Quest foveation changed to %s dynamic profile.",
+         ultra && app->foveation_profiles[1] != XR_NULL_HANDLE
+             ? "high"
+             : "medium");
+}
+
+static void update_display_refresh_rate_if_needed(QuestApp *app) {
+    if (!app->display_refresh_rate_supported) return;
+    const unsigned int requested = quest_game_refresh_rate_index();
+    if (requested == app->active_refresh_rate_index) return;
+    configure_display_refresh_rate(app);
+}
+
 static bool render_eye(QuestApp *app, uint32_t eye) {
     QuestSwapchain *swapchain = &app->swapchains[eye];
     uint32_t image_index = 0;
@@ -836,32 +1055,10 @@ static bool render_eye(QuestApp *app, uint32_t eye) {
         return false;
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, app->framebuffer);
-    glFramebufferTexture2D(
-        GL_FRAMEBUFFER,
-        GL_COLOR_ATTACHMENT0,
-        GL_TEXTURE_2D,
-        swapchain->images[image_index].image,
-        0);
-    glFramebufferRenderbuffer(
-        GL_FRAMEBUFFER,
-        GL_DEPTH_ATTACHMENT,
-        GL_RENDERBUFFER,
-        app->depth_buffer);
-    // Framebuffer completeness is invariant for a given OpenXR swapchain
-    // image. Checking it every eye, every display frame can force a GLES
-    // driver synchronization, so validate each image once after creation.
-    const uint64_t image_bit = image_index < 64U
-        ? UINT64_C(1) << image_index
-        : UINT64_C(0);
-    if (image_bit == 0 ||
-        !(swapchain->verified_framebuffer_images & image_bit)) {
-        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-            LOGE("%s eye framebuffer is incomplete.", eye == 0 ? "Left" : "Right");
-            return false;
-        }
-        swapchain->verified_framebuffer_images |= image_bit;
-    }
+    if (image_index >= swapchain->image_count ||
+        swapchain->framebuffers == NULL) return false;
+    glBindFramebuffer(
+        GL_FRAMEBUFFER, swapchain->framebuffers[image_index]);
 
     glViewport(0, 0, swapchain->width, swapchain->height);
     if (quest_game_is_ready() && quest_game_render_eye(
@@ -891,6 +1088,11 @@ static bool render_eye(QuestApp *app, uint32_t eye) {
         glDrawArrays(GL_TRIANGLES, 0, 6);
         glDisable(GL_BLEND);
     }
+    // Adreno is tile based. Depth is cleared before the next eye and never
+    // sampled or submitted to OpenXR, so prevent a needless depth-tile store.
+    const GLenum discard_attachments[] = { GL_DEPTH_ATTACHMENT };
+    glInvalidateFramebuffer(
+        GL_FRAMEBUFFER, 1, discard_attachments);
     glFlush();
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
@@ -903,6 +1105,10 @@ static bool render_eye(QuestApp *app, uint32_t eye) {
 }
 
 static bool render_frame(QuestApp *app) {
+    static XrTime fps_window_start = 0;
+    static uint32_t fps_window_frames = 0;
+    update_foveation_if_needed(app);
+    update_display_refresh_rate_if_needed(app);
     if (!update_render_scale_if_needed(app)) {
         LOGE("Could not recreate eye swapchains for the requested render scale.");
         return false;
@@ -932,6 +1138,24 @@ static bool render_frame(QuestApp *app) {
     uint32_t layer_count = 0;
 
     if (frame_state.shouldRender) {
+        if (fps_window_start == 0 ||
+            frame_state.predictedDisplayTime <= fps_window_start) {
+            fps_window_start = frame_state.predictedDisplayTime;
+            fps_window_frames = 0;
+        }
+        fps_window_frames++;
+        const XrDuration fps_elapsed =
+            frame_state.predictedDisplayTime - fps_window_start;
+        if (fps_elapsed >= 1000000000LL) {
+            const uint32_t fps = (uint32_t)(
+                ((int64_t)fps_window_frames * 1000000000LL +
+                 (int64_t)fps_elapsed / 2) /
+                (int64_t)fps_elapsed
+            );
+            djui_fps_display_update(fps);
+            fps_window_start = frame_state.predictedDisplayTime;
+            fps_window_frames = 0;
+        }
         quest_game_tick();
         XrViewLocateInfo locate_info = {
             .type = XR_TYPE_VIEW_LOCATE_INFO,
@@ -957,8 +1181,13 @@ static bool render_frame(QuestApp *app) {
             XR_VIEW_STATE_POSITION_VALID_BIT | XR_VIEW_STATE_ORIENTATION_VALID_BIT;
         if (view_count == QUEST_VIEW_COUNT
             && (view_state.viewStateFlags & required_flags) == required_flags) {
-            quest_input_update(app->session, app->local_space,
-                               frame_state.predictedDisplayTime);
+            if (app->session_state == XR_SESSION_STATE_FOCUSED &&
+                app->activity_resumed && app->window_ready) {
+                quest_input_update(app->session, app->local_space,
+                                   frame_state.predictedDisplayTime);
+            } else {
+                quest_input_suspend();
+            }
             float positions[2][3];
             float rotations[2][4];
             float fovs[2][4];
@@ -1017,6 +1246,13 @@ static bool poll_openxr_events(QuestApp *app) {
             const XrEventDataSessionStateChanged *changed =
                 (const XrEventDataSessionStateChanged *)&event;
             app->session_state = changed->state;
+            if (changed->state != XR_SESSION_STATE_FOCUSED) {
+                // System overlays, the Quest keyboard, sleep, and headset
+                // removal all revoke input focus. Never call xrSyncActions
+                // until FOCUSED returns: some Meta runtimes fault inside the
+                // driver if action syncing races that transition.
+                quest_input_suspend();
+            }
             LOGI("OpenXR session state changed to %d.", (int)changed->state);
 
             if (changed->state == XR_SESSION_STATE_READY
@@ -1059,10 +1295,13 @@ static void destroy_quest_app(QuestApp *app) {
     if (app->mario_texture != 0) glDeleteTextures(1, &app->mario_texture);
     if (app->mario_program != 0) glDeleteProgram(app->mario_program);
     destroy_swapchain_render_targets(app);
-    if (app->foveation_profile != XR_NULL_HANDLE
-        && app->destroy_foveation_profile != NULL) {
-        app->destroy_foveation_profile(app->foveation_profile);
-        app->foveation_profile = XR_NULL_HANDLE;
+    if (app->destroy_foveation_profile != NULL) {
+        for (size_t i = 0; i < 2; ++i) {
+            if (app->foveation_profiles[i] != XR_NULL_HANDLE) {
+                app->destroy_foveation_profile(app->foveation_profiles[i]);
+                app->foveation_profiles[i] = XR_NULL_HANDLE;
+            }
+        }
     }
     if (app->local_space != XR_NULL_HANDLE) {
         xrDestroySpace(app->local_space);
@@ -1103,6 +1342,7 @@ void android_main(struct android_app *android_app) {
     android_app->userData = &app;
     android_app->onAppCmd = handle_app_command;
     sActiveQuestApp = &app;
+    quest_text_input_initialize(android_app->activity);
 
     extern void quest_android_set_user_path(const char *path);
     quest_android_set_user_path(android_app->activity->externalDataPath);
@@ -1142,7 +1382,9 @@ void android_main(struct android_app *android_app) {
     while (!android_app->destroyRequested && !app.exit_requested) {
         int events = 0;
         struct android_poll_source *source = NULL;
-        const int timeout = initialized && app.session_running ? 0 : 50;
+        const bool render_was_active = initialized && app.session_running &&
+            app.activity_resumed && app.window_ready;
+        const int timeout = render_was_active ? 0 : 50;
         while (ALooper_pollOnce(timeout, NULL, &events, (void **)&source) >= 0) {
             if (source != NULL) {
                 source->process(android_app, source);
@@ -1161,12 +1403,17 @@ void android_main(struct android_app *android_app) {
         if (!poll_openxr_events(&app)) {
             break;
         }
-        if (app.session_running && !render_frame(&app)) {
+        const bool can_render = app.session_running && app.activity_resumed &&
+            app.window_ready;
+        if (can_render && !render_frame(&app)) {
             break;
+        } else if (!can_render) {
+            quest_input_suspend();
         }
     }
 
     destroy_quest_app(&app);
+    quest_text_input_shutdown();
     if (sActiveQuestApp == &app) sActiveQuestApp = NULL;
     LOGI("Android/Quest OpenXR smoke test stopped.");
 

@@ -10,6 +10,18 @@ extern "C" const char *quest_android_shared_dynos_pack_path(void);
 #endif
 
 void DynOS_Gfx_GenerateModPacks(char* modPath) {
+    const char *displayName = modPath;
+    for (const char *token = modPath; *token != '\0'; token++) {
+        if ((*token == *PATH_SEPARATOR ||
+             *token == *PATH_SEPARATOR_ALT) &&
+            *(token + 1) != '\0') {
+            displayName = token + 1;
+        }
+    }
+    if (DynOS_Pack_GetFromDisplayName(displayName) != nullptr) {
+        return;
+    }
+
     // If pack folder exists, generate bins
     SysPath _LevelPackFolder = fstring("%s/levels", modPath);
     if (fs_sys_dir_exists(_LevelPackFolder.c_str())) {
@@ -47,12 +59,16 @@ void DynOS_Gfx_GeneratePacks(const char* directory) {
     if (!modsDir) { return; }
 
     struct dirent *dir = NULL;
-    DIR* d = opendir(directory);
     u32 pathCount = 0;
-    while ((dir = readdir(d)) != NULL) pathCount++;
-    closedir(d);
+    while ((dir = readdir(modsDir)) != NULL) {
+        if (SysPath(dir->d_name) == "." ||
+            SysPath(dir->d_name) == "..") continue;
+        pathCount++;
+    }
+    rewinddir(modsDir);
 
-    for (u32 i = 0; (dir = readdir(modsDir)) != NULL; ++i) {
+    u32 processedCount = 0;
+    while ((dir = readdir(modsDir)) != NULL) {
         // Skip . and ..
         if (SysPath(dir->d_name) == ".") continue;
         if (SysPath(dir->d_name) == "..") continue;
@@ -62,13 +78,21 @@ void DynOS_Gfx_GeneratePacks(const char* directory) {
 
         // generate packs
         DynOS_Gfx_GenerateModPacks(sModPath);
-        LOADING_SCREEN_MUTEX(gCurrLoadingSegment.percentage = (f32) i / (f32) pathCount);
+        processedCount++;
+        LOADING_SCREEN_MUTEX(
+            gCurrLoadingSegment.percentage = pathCount > 0
+                ? (f32) processedCount / (f32) pathCount
+                : 1.0f
+        );
     }
 
     closedir(modsDir);
 }
 
-static void ScanPacksFolder(SysPath _DynosPacksFolder) {
+static void ScanPacksFolder(
+    SysPath _DynosPacksFolder,
+    const char *_IgnoredChild = nullptr
+) {
     DIR *_DynosPacksDir = opendir(_DynosPacksFolder.c_str());
     if (_DynosPacksDir) {
         struct dirent *_DynosPacksEnt = NULL;
@@ -77,10 +101,22 @@ static void ScanPacksFolder(SysPath _DynosPacksFolder) {
             // Skip . and ..
             if (SysPath(_DynosPacksEnt->d_name) == ".") continue;
             if (SysPath(_DynosPacksEnt->d_name) == "..") continue;
+            if (_IgnoredChild != nullptr &&
+                SysPath(_DynosPacksEnt->d_name) == _IgnoredChild) continue;
 
             // If pack folder exists, add it to the pack list
             SysPath _PackFolder = fstring("%s/%s", _DynosPacksFolder.c_str(), _DynosPacksEnt->d_name);
             if (fs_sys_dir_exists(_PackFolder.c_str())) {
+                // A pack may be present in both the documented packs folder
+                // and the legacy parent folder. DynOS_Pack_Add de-duplicates
+                // the menu entry by display name, but generating the second
+                // path would still append duplicate actors and textures to the
+                // first pack and can exhaust standalone memory on Render96.
+                if (DynOS_Pack_GetFromDisplayName(
+                        _DynosPacksEnt->d_name
+                    ) != nullptr) {
+                    continue;
+                }
                 LOADING_SCREEN_MUTEX(snprintf(gCurrLoadingSegment.str, 256, "Generating DynOS Pack:\n\\#808080\\%s", _PackFolder.c_str()));
                 DynOS_Pack_Add(_PackFolder);
                 DynOS_Actor_GeneratePack(_PackFolder);
@@ -112,5 +148,11 @@ void DynOS_Gfx_Init() {
     // Quest standalone exposes DynOS packs outside Android/data so SideQuest
     // and normal file managers can install them without scoped-storage issues.
     ScanPacksFolder(quest_android_shared_dynos_pack_path());
+
+    // Earlier standalone instructions and common manual installs sometimes
+    // placed each pack directly in SM64VR/dynos instead of dynos/packs. Scan
+    // that parent as a compatibility location, but never register the packs
+    // container itself as a pack.
+    ScanPacksFolder("/sdcard/SM64VR/dynos", "packs");
 #endif
 }

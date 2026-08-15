@@ -6,11 +6,25 @@
 #include "pc/network/network.h"
 #include "pc/utils/misc.h"
 #include "pc/configfile.h"
+#include "pc/chat_commands.h"
+#include "pc/lua/smlua_hooks.h"
+#include "pc/lua/utils/smlua_misc_utils.h"
+#include "pc/pc_main.h"
 #include "djui_inputbox.h"
 
 static unsigned int sKnockbackIndex = 0;
 struct DjuiInputbox* sPlayerAmount = NULL;
 static bool sFalse = false;
+
+static void djui_panel_host_character_select(UNUSED struct DjuiBase* caller) {
+    if (!gGameInited) {
+        djui_chat_message_create("Start a game before opening Character Select.");
+        return;
+    }
+    game_unpause();
+    djui_panel_shutdown();
+    queue_chat_command("/char-select menu");
+}
 
 static void djui_panel_host_settings_knockback_change(UNUSED struct DjuiBase* caller) {
     switch (sKnockbackIndex) {
@@ -74,6 +88,10 @@ void djui_panel_host_settings_create(struct DjuiBase* caller) {
 
         struct DjuiCheckbox* chkDevMode = djui_checkbox_create(body, DLANG(HOST_SETTINGS, MOD_DEV_MODE), (configNetworkSystem == NS_SOCKET) ? &configModDevMode : &sFalse, NULL);
         djui_base_set_enabled(&chkDevMode->base, configNetworkSystem == NS_SOCKET);
+
+        if (smlua_chat_command_exists("char-select")) {
+            djui_button_create(body, "Character Select", DJUI_BUTTON_STYLE_NORMAL, djui_panel_host_character_select);
+        }
 
         struct DjuiRect* rect1 = djui_rect_container_create(body, 32);
         {

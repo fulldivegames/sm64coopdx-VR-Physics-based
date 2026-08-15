@@ -49,6 +49,7 @@
 #include "pc/debuglog.h"
 #include "pc/utils/misc.h"
 #include "pc/mods/mods.h"
+#include "pc/chat_commands.h"
 #include "pc/vr/vr.h"
 
 #include "debug_context.h"
@@ -553,6 +554,10 @@ void *audio_thread(UNUSED void *arg) {
 }
 
 void produce_one_frame(void) {
+    // Execute native-menu Lua commands at a game-tick boundary, never while
+    // DJUI is building a render list or invoking HUD hooks.
+    exec_queued_chat_command();
+
     CTX_EXTENT(CTX_NETWORK, network_update);
 
     CTX_EXTENT(CTX_INTERP, patch_interpolations_before);

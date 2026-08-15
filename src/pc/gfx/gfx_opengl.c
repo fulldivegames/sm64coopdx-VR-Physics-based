@@ -1,5 +1,9 @@
 #include <stdint.h>
 #include <stdbool.h>
+#include <inttypes.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #ifndef _LANGUAGE_C
 # define _LANGUAGE_C
@@ -23,6 +27,9 @@
 #include <GLES3/gl3.h>
 #include <GLES3/gl3ext.h>
 #include <android/log.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <time.h>
 #elif defined(USE_GLES)
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_opengles2.h>
@@ -40,6 +47,310 @@
 
 #define TEX_CACHE_STEP 512
 #define SHADER_LOOKUP_CACHE_SIZE 256
+
+#if defined(__ANDROID__)
+#define SHADER_BINARY_CACHE_MAGIC 0x534D5652u
+// Increment whenever generated GLSL or the on-disk format changes.
+#define SHADER_BINARY_CACHE_VERSION 5u
+#define SHADER_BINARY_CACHE_MAX_BYTES (1024u * 1024u)
+
+struct ShaderBinaryCacheHeader {
+    uint32_t magic;
+    uint32_t version;
+    uint64_t shader_hash;
+    uint64_t driver_hash;
+    uint32_t binary_format;
+    uint32_t binary_length;
+};
+
+static int sShaderBinaryCacheSupported = -1;
+static uint32_t sShaderBinaryCacheHits;
+static uint32_t sShaderBinaryCacheMisses;
+static uint32_t sShaderBinaryCacheWrites;
+static bool sShaderBinaryCacheWriteWarningShown;
+static uint32_t sShaderSourceCompileCount;
+static uint64_t sShaderSourceCompileNs;
+static uint32_t sTextureUploadCount;
+static uint64_t sTextureUploadBytes;
+static uint64_t sTextureUploadNs;
+static uint64_t sDrawCallCount;
+static uint64_t sTriangleCount;
+static uint64_t sVertexUploadBytes;
+
+const char *gfx_opengl_shader_cache_directory_path(void) {
+    static char selected_directory[SYS_MAX_PATH];
+    static bool selected;
+    if (selected) return selected_directory;
+    selected = true;
+
+    const char *shared = quest_android_shared_shader_cache_path();
+    if (shared != NULL && shared[0] != '\0') {
+        mkdir(shared, 0770);
+        char probe_path[SYS_MAX_PATH];
+        snprintf(probe_path, sizeof(probe_path), "%s/.native-write-test", shared);
+        FILE *probe = fopen(probe_path, "wb");
+        if (probe != NULL) {
+            fclose(probe);
+            remove(probe_path);
+            snprintf(selected_directory, sizeof(selected_directory), "%s", shared);
+            __android_log_print(ANDROID_LOG_INFO, "SM64CoopDXVR",
+                "Persistent GLES shader binaries use %s.", selected_directory);
+            return selected_directory;
+        }
+        __android_log_print(ANDROID_LOG_WARN, "SM64CoopDXVR",
+            "Native writes to %s failed (%d); using app storage for shader binaries.",
+            shared, errno);
+    }
+
+    snprintf(selected_directory, sizeof(selected_directory),
+             "%s/shader-cache", sys_user_path());
+    mkdir(selected_directory, 0700);
+    __android_log_print(ANDROID_LOG_INFO, "SM64CoopDXVR",
+        "Persistent GLES shader binaries use fallback %s.", selected_directory);
+    return selected_directory;
+}
+
+static uint64_t gfx_opengl_monotonic_ns(void) {
+    struct timespec value;
+    clock_gettime(CLOCK_MONOTONIC, &value);
+    return (uint64_t)value.tv_sec * UINT64_C(1000000000) +
+           (uint64_t)value.tv_nsec;
+}
+
+static uint64_t gfx_opengl_hash_string(uint64_t hash, const char *value) {
+    if (value == NULL) return hash;
+    while (*value != '\0') {
+        hash ^= (uint8_t)*value++;
+        hash *= UINT64_C(1099511628211);
+    }
+    return hash;
+}
+
+static uint64_t gfx_opengl_driver_hash(void) {
+    static uint64_t driver_hash;
+    if (driver_hash != 0) return driver_hash;
+
+    driver_hash = UINT64_C(1469598103934665603);
+    driver_hash = gfx_opengl_hash_string(
+        driver_hash, (const char *)glGetString(GL_VENDOR));
+    driver_hash = gfx_opengl_hash_string(
+        driver_hash, (const char *)glGetString(GL_RENDERER));
+    driver_hash = gfx_opengl_hash_string(
+        driver_hash, (const char *)glGetString(GL_VERSION));
+    driver_hash ^= SHADER_BINARY_CACHE_VERSION;
+    driver_hash *= UINT64_C(1099511628211);
+    return driver_hash;
+}
+
+static bool gfx_opengl_program_binary_supported(void) {
+    if (sShaderBinaryCacheSupported < 0) {
+        GLint format_count = 0;
+        glGetIntegerv(GL_NUM_PROGRAM_BINARY_FORMATS, &format_count);
+        sShaderBinaryCacheSupported = format_count > 0;
+        __android_log_print(
+            ANDROID_LOG_INFO, "SM64CoopDXVR",
+            "GLES program-binary shader cache %s (%d format(s)).",
+            sShaderBinaryCacheSupported ? "enabled" : "unavailable",
+            format_count
+        );
+    }
+    return sShaderBinaryCacheSupported != 0;
+}
+
+static bool gfx_opengl_shader_binary_path(
+    char *path, size_t path_size, uint64_t shader_hash, bool temporary
+) {
+    const char *directory = gfx_opengl_shader_cache_directory_path();
+    if (directory == NULL || directory[0] == '\0') return false;
+    return snprintf(
+        path,
+        path_size,
+        "%s/%016" PRIx64 ".glbin%s",
+        directory,
+        shader_hash,
+        temporary ? ".tmp" : ""
+    ) > 0;
+}
+
+static bool gfx_opengl_try_program_binary(
+    GLuint program, uint64_t shader_hash
+) {
+    if (!gfx_opengl_program_binary_supported()) return false;
+
+    char path[4096];
+    if (!gfx_opengl_shader_binary_path(
+            path, sizeof(path), shader_hash, false)) {
+        sShaderBinaryCacheMisses++;
+        return false;
+    }
+
+    FILE *file = fopen(path, "rb");
+    if (file == NULL) {
+        sShaderBinaryCacheMisses++;
+        return false;
+    }
+
+    struct ShaderBinaryCacheHeader header = { 0 };
+    const bool valid_header =
+        fread(&header, sizeof(header), 1, file) == 1 &&
+        header.magic == SHADER_BINARY_CACHE_MAGIC &&
+        header.version == SHADER_BINARY_CACHE_VERSION &&
+        header.shader_hash == shader_hash &&
+        header.driver_hash == gfx_opengl_driver_hash() &&
+        header.binary_length > 0 &&
+        header.binary_length <= SHADER_BINARY_CACHE_MAX_BYTES;
+    if (!valid_header) {
+        fclose(file);
+        remove(path);
+        sShaderBinaryCacheMisses++;
+        return false;
+    }
+
+    void *binary = malloc(header.binary_length);
+    if (binary == NULL ||
+        fread(binary, header.binary_length, 1, file) != 1) {
+        free(binary);
+        fclose(file);
+        remove(path);
+        sShaderBinaryCacheMisses++;
+        return false;
+    }
+    fclose(file);
+
+    glProgramBinary(
+        program,
+        (GLenum)header.binary_format,
+        binary,
+        (GLsizei)header.binary_length
+    );
+    free(binary);
+
+    GLint linked = GL_FALSE;
+    glGetProgramiv(program, GL_LINK_STATUS, &linked);
+    if (linked != GL_TRUE) {
+        remove(path);
+        sShaderBinaryCacheMisses++;
+        return false;
+    }
+
+    sShaderBinaryCacheHits++;
+    return true;
+}
+
+static void gfx_opengl_save_program_binary(
+    GLuint program, uint64_t shader_hash
+) {
+    if (!gfx_opengl_program_binary_supported()) return;
+
+    GLint binary_length = 0;
+    glGetProgramiv(program, GL_PROGRAM_BINARY_LENGTH, &binary_length);
+    if (binary_length <= 0 ||
+        binary_length > (GLint)SHADER_BINARY_CACHE_MAX_BYTES) return;
+
+    void *binary = malloc((size_t)binary_length);
+    if (binary == NULL) return;
+
+    GLsizei written = 0;
+    GLenum format = 0;
+    glGetProgramBinary(
+        program, binary_length, &written, &format, binary);
+    if (written <= 0 || written > binary_length) {
+        free(binary);
+        return;
+    }
+
+    char path[4096];
+    char temporary_path[4096];
+    if (!gfx_opengl_shader_binary_path(
+            path, sizeof(path), shader_hash, false) ||
+        !gfx_opengl_shader_binary_path(
+            temporary_path, sizeof(temporary_path), shader_hash, true)) {
+        free(binary);
+        return;
+    }
+
+    const struct ShaderBinaryCacheHeader header = {
+        .magic = SHADER_BINARY_CACHE_MAGIC,
+        .version = SHADER_BINARY_CACHE_VERSION,
+        .shader_hash = shader_hash,
+        .driver_hash = gfx_opengl_driver_hash(),
+        .binary_format = (uint32_t)format,
+        .binary_length = (uint32_t)written,
+    };
+
+    FILE *file = fopen(temporary_path, "wb");
+    const bool wrote = file != NULL &&
+        fwrite(&header, sizeof(header), 1, file) == 1 &&
+        fwrite(binary, (size_t)written, 1, file) == 1 &&
+        fflush(file) == 0;
+    if (file != NULL) fclose(file);
+    free(binary);
+
+    if (!wrote || (remove(path), rename(temporary_path, path)) != 0) {
+        remove(temporary_path);
+        if (!sShaderBinaryCacheWriteWarningShown) {
+            __android_log_print(ANDROID_LOG_ERROR, "SM64CoopDXVR",
+                "Could not persist GLES shader binaries in %s (error %d).",
+                gfx_opengl_shader_cache_directory_path(), errno);
+            sShaderBinaryCacheWriteWarningShown = true;
+        }
+        return;
+    }
+    sShaderBinaryCacheWrites++;
+}
+
+void gfx_opengl_shader_cache_reset_stats(void) {
+    sShaderBinaryCacheHits = 0;
+    sShaderBinaryCacheMisses = 0;
+    sShaderBinaryCacheWrites = 0;
+}
+
+void gfx_opengl_shader_cache_get_stats(
+    uint32_t *hits, uint32_t *misses, uint32_t *writes
+) {
+    if (hits != NULL) *hits = sShaderBinaryCacheHits;
+    if (misses != NULL) *misses = sShaderBinaryCacheMisses;
+    if (writes != NULL) *writes = sShaderBinaryCacheWrites;
+}
+
+void gfx_opengl_shader_cache_finish_warmup(void) {
+    // Linking can be deferred internally by the mobile driver. The dedicated
+    // post-ROM boot is the one safe time to pay that cost before gameplay.
+    glFinish();
+}
+
+void gfx_opengl_performance_stats_get(
+    uint32_t *source_compiles,
+    uint64_t *source_compile_ns,
+    uint32_t *texture_uploads,
+    uint64_t *texture_upload_bytes,
+    uint64_t *texture_upload_ns,
+    uint64_t *draw_calls,
+    uint64_t *triangles,
+    uint64_t *vertex_upload_bytes
+) {
+    if (source_compiles != NULL) {
+        *source_compiles = sShaderSourceCompileCount;
+    }
+    if (source_compile_ns != NULL) {
+        *source_compile_ns = sShaderSourceCompileNs;
+    }
+    if (texture_uploads != NULL) {
+        *texture_uploads = sTextureUploadCount;
+    }
+    if (texture_upload_bytes != NULL) {
+        *texture_upload_bytes = sTextureUploadBytes;
+    }
+    if (texture_upload_ns != NULL) {
+        *texture_upload_ns = sTextureUploadNs;
+    }
+    if (draw_calls != NULL) *draw_calls = sDrawCallCount;
+    if (triangles != NULL) *triangles = sTriangleCount;
+    if (vertex_upload_bytes != NULL) {
+        *vertex_upload_bytes = sVertexUploadBytes;
+    }
+}
+#endif
 
 struct ShaderProgram {
     uint64_t hash;
@@ -60,6 +371,8 @@ struct GLTexture {
     GLuint gltex;
     GLfloat size[2];
     bool filter;
+    bool sampler_initialized;
+    bool sampler_linear;
 };
 
 static struct ShaderProgram shader_program_pool[CC_MAX_SHADERS];
@@ -138,11 +451,35 @@ static inline void gfx_opengl_set_shader_uniforms(struct ShaderProgram *prg) {
         }
     }
 
-    glUniform1i(prg->uniform_locations[8], configFiltering);
+    // Three-point N64 filtering performs three texture samples for most
+    // filtered pixels. Ultra mode retains bilinear sampler filtering while
+    // avoiding that extra fragment cost; it never removes geometry or actors.
+    const int activeFiltering =
+        configVrUltraPerformanceMode && configFiltering == 2
+            ? 1
+            : configFiltering;
+    glUniform1i(prg->uniform_locations[8], activeFiltering);
 }
 
 static inline void gfx_opengl_set_texture_uniforms(struct ShaderProgram *prg, const int tile) {
     if (prg->used_textures[tile] && opengl_tex[tile]) {
+        // Three-point filtering samples exact texel centers itself. Keeping
+        // GL_LINEAR enabled made every one of its three taps a four-texel
+        // bilinear lookup, multiplying bandwidth in terrain-heavy views.
+        // GL_NEAREST produces the same center samples for the three-point
+        // reconstruction. Mode 1 remains ordinary hardware bilinear.
+        const bool samplerLinear =
+            opengl_tex[tile]->filter && configFiltering == 1;
+        if (!opengl_tex[tile]->sampler_initialized ||
+            opengl_tex[tile]->sampler_linear != samplerLinear) {
+            glActiveTexture(GL_TEXTURE0 + tile);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                            samplerLinear ? GL_LINEAR : GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+                            samplerLinear ? GL_LINEAR : GL_NEAREST);
+            opengl_tex[tile]->sampler_initialized = true;
+            opengl_tex[tile]->sampler_linear = samplerLinear;
+        }
         glUniform2f(prg->uniform_locations[tile*2 + 0], opengl_tex[tile]->size[0], opengl_tex[tile]->size[1]);
         glUniform1i(prg->uniform_locations[tile*2 + 1], opengl_tex[tile]->filter);
     }
@@ -603,75 +940,102 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     const GLint lengths[2] = { vs_len, fs_len };
     GLint success;
 
-    GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertex_shader, 1, &sources[0], &lengths[0]);
-    glCompileShader(vertex_shader);
-    glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        char error_log[1024];
-        GLsizei log_length = 0;
-        fprintf(stderr, "Vertex shader compilation failed\n");
-        glGetShaderInfoLog(
-            vertex_shader,
-            (GLsizei)sizeof(error_log),
-            &log_length,
-            error_log
-        );
-        fprintf(stderr, "%s\n", error_log);
-#ifdef __ANDROID__
-        sys_fatal("Vertex shader compilation failed: %s\nSource:\n%s", error_log, vs_buf);
-#else
-        sys_fatal("vertex shader compilation failed (see terminal)");
-#endif
-    }
-
-    GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragment_shader, 1, &sources[1], &lengths[1]);
-    glCompileShader(fragment_shader);
-    glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        char error_log[1024];
-        GLsizei log_length = 0;
-        fprintf(stderr, "Fragment shader compilation failed\n");
-        glGetShaderInfoLog(
-            fragment_shader,
-            (GLsizei)sizeof(error_log),
-            &log_length,
-            error_log
-        );
-        fprintf(stderr, "%s\n", error_log);
-#ifdef __ANDROID__
-        sys_fatal("Fragment shader compilation failed: %s\nSource:\n%s", error_log, fs_buf);
-#else
-        sys_fatal("fragment shader compilation failed (see terminal)");
-#endif
-    }
-
     GLuint shader_program = glCreateProgram();
-    glAttachShader(shader_program, vertex_shader);
-    glAttachShader(shader_program, fragment_shader);
-    glLinkProgram(shader_program);
-    glGetProgramiv(shader_program, GL_LINK_STATUS, &success);
-    if (!success) {
-        char error_log[1024];
-        GLsizei log_length = 0;
-        fprintf(stderr, "Shader program linking failed\n");
-        glGetProgramInfoLog(
-            shader_program,
-            (GLsizei)sizeof(error_log),
-            &log_length,
-            error_log
-        );
-        fprintf(stderr, "%s\n", error_log);
-        sys_fatal("shader program linking failed (see terminal)");
-    }
+#if defined(__ANDROID__)
+    const bool loaded_program_binary =
+        gfx_opengl_try_program_binary(shader_program, cc->hash);
+#else
+    const bool loaded_program_binary = false;
+#endif
 
-    // Once linked, the program owns the compiled code. Keeping every source
-    // shader object alive wastes driver memory during long modded sessions.
-    glDetachShader(shader_program, vertex_shader);
-    glDetachShader(shader_program, fragment_shader);
-    glDeleteShader(vertex_shader);
-    glDeleteShader(fragment_shader);
+    if (!loaded_program_binary) {
+#if defined(__ANDROID__)
+        const uint64_t source_compile_start = gfx_opengl_monotonic_ns();
+#endif
+        GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
+        glShaderSource(vertex_shader, 1, &sources[0], &lengths[0]);
+        glCompileShader(vertex_shader);
+        glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &success);
+        if (!success) {
+            char error_log[1024];
+            GLsizei log_length = 0;
+            fprintf(stderr, "Vertex shader compilation failed\n");
+            glGetShaderInfoLog(
+                vertex_shader,
+                (GLsizei)sizeof(error_log),
+                &log_length,
+                error_log
+            );
+            fprintf(stderr, "%s\n", error_log);
+#ifdef __ANDROID__
+            sys_fatal("Vertex shader compilation failed: %s\nSource:\n%s", error_log, vs_buf);
+#else
+            sys_fatal("vertex shader compilation failed (see terminal)");
+#endif
+        }
+
+        GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+        glShaderSource(fragment_shader, 1, &sources[1], &lengths[1]);
+        glCompileShader(fragment_shader);
+        glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &success);
+        if (!success) {
+            char error_log[1024];
+            GLsizei log_length = 0;
+            fprintf(stderr, "Fragment shader compilation failed\n");
+            glGetShaderInfoLog(
+                fragment_shader,
+                (GLsizei)sizeof(error_log),
+                &log_length,
+                error_log
+            );
+            fprintf(stderr, "%s\n", error_log);
+#ifdef __ANDROID__
+            sys_fatal("Fragment shader compilation failed: %s\nSource:\n%s", error_log, fs_buf);
+#else
+            sys_fatal("fragment shader compilation failed (see terminal)");
+#endif
+        }
+
+#if defined(__ANDROID__)
+        if (gfx_opengl_program_binary_supported()) {
+            glProgramParameteri(
+                shader_program,
+                GL_PROGRAM_BINARY_RETRIEVABLE_HINT,
+                GL_TRUE
+            );
+        }
+#endif
+        glAttachShader(shader_program, vertex_shader);
+        glAttachShader(shader_program, fragment_shader);
+        glLinkProgram(shader_program);
+        glGetProgramiv(shader_program, GL_LINK_STATUS, &success);
+        if (!success) {
+            char error_log[1024];
+            GLsizei log_length = 0;
+            fprintf(stderr, "Shader program linking failed\n");
+            glGetProgramInfoLog(
+                shader_program,
+                (GLsizei)sizeof(error_log),
+                &log_length,
+                error_log
+            );
+            fprintf(stderr, "%s\n", error_log);
+            sys_fatal("shader program linking failed (see terminal)");
+        }
+
+        // Once linked, the program owns the compiled code. Keeping every
+        // source shader object alive wastes memory in long modded sessions.
+        glDetachShader(shader_program, vertex_shader);
+        glDetachShader(shader_program, fragment_shader);
+        glDeleteShader(vertex_shader);
+        glDeleteShader(fragment_shader);
+#if defined(__ANDROID__)
+        gfx_opengl_save_program_binary(shader_program, cc->hash);
+        sShaderSourceCompileCount++;
+        sShaderSourceCompileNs +=
+            gfx_opengl_monotonic_ns() - source_compile_start;
+#endif
+    }
 
     size_t cnt = 0;
 
@@ -819,7 +1183,16 @@ static void gfx_opengl_select_texture(int tile, GLuint texture_id) {
 }
 
 static void gfx_opengl_upload_texture(const uint8_t *rgba32_buf, int width, int height) {
+#if defined(__ANDROID__)
+    const uint64_t upload_start = gfx_opengl_monotonic_ns();
+#endif
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba32_buf);
+#if defined(__ANDROID__)
+    sTextureUploadCount++;
+    sTextureUploadBytes += (uint64_t)(uint32_t)width *
+                           (uint64_t)(uint32_t)height * 4U;
+    sTextureUploadNs += gfx_opengl_monotonic_ns() - upload_start;
+#endif
     opengl_tex[opengl_curtex]->size[0] = width;
     opengl_tex[opengl_curtex]->size[1] = height;
 }
@@ -832,7 +1205,8 @@ static uint32_t gfx_cm_to_opengl(uint32_t val) {
 }
 
 static void gfx_opengl_set_sampler_parameters(int tile, bool linear_filter, uint32_t cms, uint32_t cmt) {
-    const GLenum filter = linear_filter ? GL_LINEAR : GL_NEAREST;
+    const bool samplerLinear = linear_filter && configFiltering == 1;
+    const GLenum filter = samplerLinear ? GL_LINEAR : GL_NEAREST;
     glActiveTexture(GL_TEXTURE0 + tile);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
@@ -841,6 +1215,8 @@ static void gfx_opengl_set_sampler_parameters(int tile, bool linear_filter, uint
     opengl_curtex = tile;
     if (opengl_tex[tile]) {
         opengl_tex[tile]->filter = linear_filter;
+        opengl_tex[tile]->sampler_initialized = true;
+        opengl_tex[tile]->sampler_linear = samplerLinear;
         gfx_opengl_set_texture_uniforms(opengl_prg, tile);
     }
 }
@@ -958,7 +1334,13 @@ static void gfx_opengl_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_
         }
     }
 #endif
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * buf_vbo_len, buf_vbo, GL_STREAM_DRAW);
+#ifdef __ANDROID__
+    sDrawCallCount++;
+    sTriangleCount += buf_vbo_num_tris;
+    sVertexUploadBytes += sizeof(float) * buf_vbo_len;
+#endif
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * buf_vbo_len,
+                 buf_vbo, GL_STREAM_DRAW);
 #ifdef __ANDROID__
     if (!completed_draw_diagnostics) {
         const GLenum upload_error = glGetError();

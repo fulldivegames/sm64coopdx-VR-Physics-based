@@ -31,6 +31,7 @@
 #include "pc/debug_context.h"
 #include "pc/pc_main.h"
 #include "pc/platform.h"
+#include "pc/vr/vr.h"
 
 #include "pc/fs/fs.h"
 
@@ -39,9 +40,13 @@
 #include "pc/gfx/gfx_rendering_api.h"
 #include "pc/gfx/gfx_screen_config.h"
 #include "pc/gfx/gfx_window_manager_api.h"
+#if defined(__ANDROID__)
+#include "pc/gfx/gfx_opengl.h"
+#endif
 
 #define G_TX_LOADTILE_6_UNKNOWN 6
 #define GFX_SHADER_CACHE_FILENAME "gfx_shader_cache.txt"
+#define GFX_SHADER_WARMUP_PENDING_FILENAME "first-boot-after-rom.pending"
 
 u8 gGfxPcResetTex1 = 0;
 
@@ -56,6 +61,43 @@ static uint16_t sColorCombinerNext[CC_MAX_SHADERS] = { 0 };
 static uint16_t sBuiltInColorCombinerCount = 0;
 static bool sShaderStartupWarmupComplete = false;
 static FILE *sShaderCacheAppendFile = NULL;
+
+static const char *gfx_shader_cache_definition_path(void) {
+#if defined(__ANDROID__)
+    static char path[SYS_MAX_PATH];
+    snprintf(
+        path,
+        sizeof(path),
+        "%s/%s",
+        gfx_opengl_shader_cache_directory_path(),
+        GFX_SHADER_CACHE_FILENAME
+    );
+    return path;
+#else
+    return fs_get_write_path(GFX_SHADER_CACHE_FILENAME);
+#endif
+}
+
+#if defined(__ANDROID__)
+static const char *gfx_shader_warmup_pending_path(void) {
+    static char path[SYS_MAX_PATH];
+    snprintf(
+        path,
+        sizeof(path),
+        "%s/%s",
+        quest_android_shared_shader_cache_path(),
+        GFX_SHADER_WARMUP_PENDING_FILENAME
+    );
+    return path;
+}
+
+static bool gfx_shader_post_rom_warmup_pending(void) {
+    FILE *pending = fopen(gfx_shader_warmup_pending_path(), "rb");
+    if (pending == NULL) return false;
+    fclose(pending);
+    return true;
+}
+#endif
 
 static void gfx_pc_precomp_shader_exact(
     uint32_t rgb1,
@@ -180,10 +222,16 @@ static bool sOnlyTextureChangeOnAddrChange = false;
 static void gfx_update_loaded_texture(uint8_t tile_number, uint32_t size_bytes, const uint8_t* addr) {
     if (tile_number >= MAX_TILES) { return; }
     tile_number = rdp.texture_tile[tile_number].index;
-    if (!sOnlyTextureChangeOnAddrChange) {
-        rdp.textures_changed[tile_number] = true;
-    } else if (!rdp.textures_changed[tile_number]) {
-        rdp.textures_changed[tile_number] = rdp.loaded_texture[tile_number].addr != addr;
+    if (!rdp.textures_changed[tile_number]) {
+        // Reissuing an N64 load command for the texture that is already
+        // selected does not require another host texture lookup or a VBO
+        // flush. Large level display lists repeat these commands heavily;
+        // treating every repeat as a change fragments otherwise compatible
+        // triangles into hundreds of tiny GLES/GL draws.
+        rdp.textures_changed[tile_number] =
+            rdp.loaded_texture[tile_number].addr != addr ||
+            (!sOnlyTextureChangeOnAddrChange &&
+             rdp.loaded_texture[tile_number].size_bytes != size_bytes);
     }
     rdp.loaded_texture[tile_number].size_bytes = size_bytes;
     rdp.loaded_texture[tile_number].addr = addr;
@@ -1132,7 +1180,8 @@ static void OPTIMIZE_O3 gfx_sp_vertex(size_t n_vertices, size_t dest_index, cons
         d->z = z;
         d->w = w;
 
-        if (rsp.geometry_mode & G_FOG) {
+        if (!(configVrDisableFog && vr_is_active()) &&
+            (rsp.geometry_mode & G_FOG)) {
             if (fabsf(w) < 0.001f) {
                 // To avoid division by zero
                 w = 0.001f;
@@ -1250,7 +1299,8 @@ static void OPTIMIZE_O3 gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t 
     cm->texture_edge   = (rdp.other_mode_l & CVG_X_ALPHA)               == CVG_X_ALPHA;
     cm->use_dither     = (rdp.other_mode_l & G_AC_DITHER)               == G_AC_DITHER;
     cm->use_2cycle     = (rdp.other_mode_h & (3U << G_MDSFT_CYCLETYPE)) == G_CYC_2CYCLE;
-    cm->use_fog        = (rdp.other_mode_l >> 30)                       == G_BL_CLR_FOG;
+    cm->use_fog        = !(configVrDisableFog && vr_is_active()) &&
+                         (rdp.other_mode_l >> 30) == G_BL_CLR_FOG;
     cm->light_map      = (rsp.geometry_mode & G_LIGHT_MAP_EXT)          == G_LIGHT_MAP_EXT;
     cm->world_geometry = gShaderFlagsEnabled && (v1->world_geometry && v2->world_geometry && v3->world_geometry);
 
@@ -1576,6 +1626,12 @@ static void gfx_dp_set_texture_image(UNUSED uint32_t format, uint32_t size, UNUS
 }
 
 static void gfx_dp_set_tile(uint8_t fmt, uint32_t siz, uint32_t line, uint32_t tmem, uint8_t tile, uint32_t palette, uint32_t cmt, uint32_t maskt, uint32_t shiftt, uint32_t cms, uint32_t masks, uint32_t shifts) {
+    const bool textureInterpretationChanged =
+        tile < MAX_TEXTURES &&
+        (rdp.texture_tile[tile].fmt != fmt ||
+         rdp.texture_tile[tile].siz != siz ||
+         rdp.texture_tile[tile].line_size_bytes != line * 8 ||
+         rdp.texture_tile[tile].palette != palette);
     rdp.texture_tile[tile].fmt = fmt;
     rdp.texture_tile[tile].siz = siz;
     rdp.texture_tile[tile].cms = cms;
@@ -1589,9 +1645,8 @@ static void gfx_dp_set_tile(uint8_t fmt, uint32_t siz, uint32_t line, uint32_t t
     rdp.texture_tile[tile].palette = palette;
     // For some reason toad player's face breaks without this line, everything else is fine though
     rdp.texture_tile[tile].index = (tile == G_TX_LOADTILE ? tmem/256 : (tile == G_TX_LOADTILE_6_UNKNOWN ? 1 : 0));
-    if (!sOnlyTextureChangeOnAddrChange) {
-        rdp.textures_changed[0] = true;
-        rdp.textures_changed[1] = true;
+    if (!sOnlyTextureChangeOnAddrChange && textureInterpretationChanged) {
+        rdp.textures_changed[tile] = true;
     }
 }
 
@@ -1600,10 +1655,9 @@ static void gfx_dp_set_tile_size(uint8_t tile, uint16_t uls, uint16_t ult, uint1
     rdp.texture_tile[tile].ult = ult;
     rdp.texture_tile[tile].lrs = lrs;
     rdp.texture_tile[tile].lrt = lrt;
-    if (!sOnlyTextureChangeOnAddrChange) {
-        rdp.textures_changed[0] = true;
-        rdp.textures_changed[1] = true;
-    }
+    // Tile bounds are consumed while each vertex is written into the host
+    // VBO. They do not alter the uploaded texture, so invalidating both host
+    // texture slots here only forces redundant draw-call breaks.
 }
 
 static void gfx_dp_load_tlut(uint8_t tile, uint32_t high_index) {
@@ -2166,6 +2220,17 @@ void gfx_init(struct GfxWindowManagerAPI *wapi, struct GfxRenderingAPI *rapi, co
     gfx_wapi->init(window_title);
     gfx_rapi->init();
 
+#if defined(__ANDROID__)
+    fs_sys_mkdir(gfx_opengl_shader_cache_directory_path());
+    gfx_opengl_shader_cache_reset_stats();
+    const bool postRomWarmup = gfx_shader_post_rom_warmup_pending();
+    if (postRomWarmup) {
+        printf(
+            "[GFX] First boot after ROM import: preparing shaders before gameplay...\n"
+        );
+    }
+#endif
+
     printf("[GFX] Building quick startup shader cache...\n");
 #ifndef __ANDROID__
     gfx_cc_precomp();
@@ -2223,9 +2288,19 @@ void gfx_init(struct GfxWindowManagerAPI *wapi, struct GfxRenderingAPI *rapi, co
     uint32_t loadedCount = 0;
 
     FILE *shaderCache = fopen(
-        fs_get_write_path(GFX_SHADER_CACHE_FILENAME),
+        gfx_shader_cache_definition_path(),
         "r"
     );
+#if defined(__ANDROID__)
+    if (shaderCache == NULL) {
+        // Preserve definitions learned by older standalone builds, which kept
+        // this file in private app storage rather than /sdcard/SM64VR.
+        shaderCache = fopen(
+            fs_get_write_path(GFX_SHADER_CACHE_FILENAME),
+            "r"
+        );
+    }
+#endif
     if (shaderCache != NULL) {
         char line[160];
         uint32_t rgb1;
@@ -2267,10 +2342,40 @@ void gfx_init(struct GfxWindowManagerAPI *wapi, struct GfxRenderingAPI *rapi, co
     );
 
     sShaderCacheAppendFile = fopen(
-        fs_get_write_path(GFX_SHADER_CACHE_FILENAME),
+        gfx_shader_cache_definition_path(),
         "a"
     );
     sShaderStartupWarmupComplete = true;
+
+#if defined(__ANDROID__)
+    uint32_t binaryHits = 0;
+    uint32_t binaryMisses = 0;
+    uint32_t binaryWrites = 0;
+    gfx_opengl_shader_cache_get_stats(
+        &binaryHits, &binaryMisses, &binaryWrites);
+    printf(
+        "[GFX] Persistent GLES shader binaries: %u hit(s), %u miss(es), "
+        "%u new file(s).\n",
+        binaryHits,
+        binaryMisses,
+        binaryWrites
+    );
+    if (postRomWarmup) {
+        gfx_opengl_shader_cache_finish_warmup();
+        const bool persisted = binaryMisses == 0 || binaryWrites >= binaryMisses;
+        if (persisted) {
+            remove(gfx_shader_warmup_pending_path());
+            printf(
+                "[GFX] Post-ROM shader warmup completed successfully.\n"
+            );
+        } else {
+            printf(
+                "[GFX] Shader warmup ran, but its cache was not fully "
+                "persisted; it will retry next launch.\n"
+            );
+        }
+    }
+#endif
 
     gGfxInited = true;
 }
@@ -2345,7 +2450,7 @@ void gfx_shutdown(void) {
 
     if (color_combiner_pool_size > 0) {
         FILE *shaderCache = fopen(
-            fs_get_write_path(GFX_SHADER_CACHE_FILENAME),
+            gfx_shader_cache_definition_path(),
             "w"
         );
         if (shaderCache != NULL) {
@@ -2686,6 +2791,9 @@ static void gfx_pc_precomp_shader_exact(uint32_t rgb1, uint32_t alpha1, uint32_t
 
     struct CombineMode* cm = &rdp.combine_mode;
     cm->flags = flags;
+    if (configVrDisableFog) {
+        cm->use_fog = false;
+    }
 
     gfx_lookup_or_create_color_combiner(cm);
 }

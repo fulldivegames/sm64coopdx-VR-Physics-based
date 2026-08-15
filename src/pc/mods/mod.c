@@ -226,14 +226,20 @@ void mod_clear(struct Mod* mod) {
 static struct ModFile* mod_allocate_file(struct Mod* mod, char* relativePath) {
     // actual allocation
     if (mod->fileCount == mod->fileCapacity) {
-        mod->fileCapacity = (mod->fileCapacity == 0) ? 16 : (mod->fileCapacity * 2);
-        mod->files = realloc(mod->files, sizeof(struct ModFile) * mod->fileCapacity);
-        if (mod->files == NULL) {
+        const u16 newCapacity =
+            (mod->fileCapacity == 0) ? 16 : (mod->fileCapacity * 2);
+        struct ModFile* newFiles = realloc(
+            mod->files,
+            sizeof(struct ModFile) * newCapacity
+        );
+        if (newFiles == NULL) {
             LOG_ERROR("Failed to allocate file: '%s'", relativePath);
             return NULL;
         }
+        mod->files = newFiles;
+        mod->fileCapacity = newCapacity;
     }
-    u16 fileIndex = mod->fileCount++;
+    u16 fileIndex = mod->fileCount;
 
     // clear memory
     struct ModFile* file = &mod->files[fileIndex];
@@ -259,20 +265,17 @@ static struct ModFile* mod_allocate_file(struct Mod* mod, char* relativePath) {
         return NULL;
     }
 
-    // open file
-    FILE* f = fopen(fullPath, "rb");
-    if (f == NULL) {
-        LOG_ERROR("Failed to open '%s'", fullPath);
+    // stat avoids an open/seek/close triplet for every asset during startup,
+    // which is significant for large mod collections on scoped storage.
+    struct stat st = { 0 };
+    if (stat(fullPath, &st) != 0) {
+        LOG_ERROR("Failed to stat '%s'", fullPath);
         return NULL;
     }
 
-    // get size
-    fseek(f, 0, SEEK_END);
-    file->size = ftell(f);
+    file->size = st.st_size;
     mod->size += file->size;
-
-    // close file
-    fclose(f);
+    mod->fileCount++;
 
     return file;
 }
@@ -581,21 +584,25 @@ bool mod_load(struct Mods* mods, char* basePath, char* modName) {
     }
 
     // allocate mod
-    u16 modIndex = mods->entryCount++;
-    mods->entries = realloc(mods->entries, sizeof(struct Mod*) * mods->entryCount);
-    if (mods->entries == NULL) {
+    const u16 modIndex = mods->entryCount;
+    const u16 newEntryCount = modIndex + 1;
+    struct Mod** newEntries = realloc(
+        mods->entries,
+        sizeof(struct Mod*) * newEntryCount
+    );
+    if (newEntries == NULL) {
         LOG_ERROR("Failed to allocate entries!");
-        mods_clear(mods);
         return false;
     }
+    mods->entries = newEntries;
     mods->entries[modIndex] = calloc(1, sizeof(struct Mod));
 
     struct Mod* mod = mods->entries[modIndex];
     if (mod == NULL) {
         LOG_ERROR("Failed to allocate mod!");
-        mods_clear(mods);
         return false;
     }
+    mods->entryCount = newEntryCount;
 
     // set paths
     char* cpyPath = isDirectory ? fullPath : basePath;

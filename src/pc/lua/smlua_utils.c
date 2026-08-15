@@ -660,6 +660,49 @@ s64 smlua_get_any_integer_mod_variable(const char* variable) {
     return value;
 }
 
+bool smlua_get_boolean_mod_variable(u16 modIndex, const char* variable, bool* value) {
+    lua_State* L = gLuaState;
+    if (L == NULL || variable == NULL || value == NULL ||
+        gActiveMods.entries == NULL || modIndex >= gActiveMods.entryCount) {
+        return false;
+    }
+
+    struct Mod* mod = gActiveMods.entries[modIndex];
+    if (mod == NULL) {
+        return false;
+    }
+
+    const int prevTop = lua_gettop(L);
+    lua_getfield(L, LUA_REGISTRYINDEX, mod->relativePath);
+    if (lua_istable(L, -1)) {
+        lua_getfield(L, -1, variable);
+        if (lua_isboolean(L, -1)) {
+            *value = lua_toboolean(L, -1) != 0;
+            lua_settop(L, prevTop);
+            return true;
+        }
+    }
+    lua_settop(L, prevTop);
+    return false;
+}
+
+s32 smlua_find_boolean_mod_variable(const char* variable, bool* value) {
+    if (variable == NULL || value == NULL || gActiveMods.entries == NULL) {
+        return -1;
+    }
+
+    for (s32 i = 0; i < gActiveMods.entryCount; i++) {
+        if (smlua_get_boolean_mod_variable((u16)i, variable, value)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+bool smlua_get_any_boolean_mod_variable(const char* variable, bool* value) {
+    return smlua_find_boolean_mod_variable(variable, value) >= 0;
+}
+
 LuaFunction smlua_get_function_mod_variable(u16 modIndex, const char *variable) {
     lua_State *L = gLuaState;
 

@@ -3,6 +3,7 @@
 #include <android/log.h>
 #include <GLES3/gl3.h>
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 #include "data/dynos.h"
@@ -11,6 +12,7 @@
 #include "game/rendering_graph_node.h"
 #include "game/save_file.h"
 #include "pc/configfile.h"
+#include "pc/chat_commands.h"
 #include "pc/audio/audio_api.h"
 #include "pc/djui/djui.h"
 #include "pc/djui/djui_panel_pause.h"
@@ -80,6 +82,21 @@ static bool sConfigLoaded;
 static bool sCompletedGameTick;
 static int64_t sLastTickNs;
 static s16 sAudioBuffer[QUEST_SAMPLES_HIGH * 2 * 2];
+static int64_t sPerfWindowStartNs;
+static uint64_t sPerfTickTotalNs;
+static uint64_t sPerfTickMaxNs;
+static uint32_t sPerfTickCount;
+static uint64_t sPerfEyeTotalNs[2];
+static uint64_t sPerfEyeMaxNs[2];
+static uint32_t sPerfEyeCount[2];
+static uint32_t sPerfLastShaderCompiles;
+static uint64_t sPerfLastShaderCompileNs;
+static uint32_t sPerfLastTextureUploads;
+static uint64_t sPerfLastTextureBytes;
+static uint64_t sPerfLastTextureUploadNs;
+static uint64_t sPerfLastDrawCalls;
+static uint64_t sPerfLastTriangles;
+static uint64_t sPerfLastVertexUploadBytes;
 
 static void quest_patch_before_game_tick(void) {
     patch_mtx_before();
@@ -130,6 +147,108 @@ static int64_t monotonic_ns(void) {
     return (int64_t)now.tv_sec * 1000000000LL + now.tv_nsec;
 }
 
+static void quest_game_log_performance_if_ready(int64_t now) {
+    uint32_t shaderCompiles = 0;
+    uint64_t shaderCompileNs = 0;
+    uint32_t textureUploads = 0;
+    uint64_t textureBytes = 0;
+    uint64_t textureUploadNs = 0;
+    uint64_t drawCalls = 0;
+    uint64_t triangles = 0;
+    uint64_t vertexUploadBytes = 0;
+    gfx_opengl_performance_stats_get(
+        &shaderCompiles,
+        &shaderCompileNs,
+        &textureUploads,
+        &textureBytes,
+        &textureUploadNs,
+        &drawCalls,
+        &triangles,
+        &vertexUploadBytes
+    );
+
+    if (sPerfWindowStartNs == 0) {
+        sPerfWindowStartNs = now;
+        sPerfLastShaderCompiles = shaderCompiles;
+        sPerfLastShaderCompileNs = shaderCompileNs;
+        sPerfLastTextureUploads = textureUploads;
+        sPerfLastTextureBytes = textureBytes;
+        sPerfLastTextureUploadNs = textureUploadNs;
+        sPerfLastDrawCalls = drawCalls;
+        sPerfLastTriangles = triangles;
+        sPerfLastVertexUploadBytes = vertexUploadBytes;
+        return;
+    }
+    if (now - sPerfWindowStartNs < 1000000000LL) return;
+
+    const uint32_t newShaders =
+        shaderCompiles - sPerfLastShaderCompiles;
+    const uint64_t newShaderNs =
+        shaderCompileNs - sPerfLastShaderCompileNs;
+    const uint32_t newTextures =
+        textureUploads - sPerfLastTextureUploads;
+    const uint64_t newTextureBytes =
+        textureBytes - sPerfLastTextureBytes;
+    const uint64_t newTextureNs =
+        textureUploadNs - sPerfLastTextureUploadNs;
+    const uint64_t newDrawCalls = drawCalls - sPerfLastDrawCalls;
+    const uint64_t newTriangles = triangles - sPerfLastTriangles;
+    const uint64_t newVertexBytes =
+        vertexUploadBytes - sPerfLastVertexUploadBytes;
+    const double tickAverageMs = sPerfTickCount > 0
+        ? (double)sPerfTickTotalNs / (double)sPerfTickCount / 1000000.0
+        : 0.0;
+    const double leftAverageMs = sPerfEyeCount[0] > 0
+        ? (double)sPerfEyeTotalNs[0] / (double)sPerfEyeCount[0] / 1000000.0
+        : 0.0;
+    const double rightAverageMs = sPerfEyeCount[1] > 0
+        ? (double)sPerfEyeTotalNs[1] / (double)sPerfEyeCount[1] / 1000000.0
+        : 0.0;
+
+    LOGI(
+        "PERF level=%d area=%d | tick %.2f/%.2f ms | eyes "
+        "L %.2f/%.2f R %.2f/%.2f ms | first-use shaders %u/%.2f ms "
+        "textures %u/%.2f MiB/%.2f ms | frames %u | draws %.1f tris %.1f vbo %.3f MiB/eye",
+        gCurrLevelNum,
+        gCurrAreaIndex,
+        tickAverageMs,
+        (double)sPerfTickMaxNs / 1000000.0,
+        leftAverageMs,
+        (double)sPerfEyeMaxNs[0] / 1000000.0,
+        rightAverageMs,
+        (double)sPerfEyeMaxNs[1] / 1000000.0,
+        newShaders,
+        (double)newShaderNs / 1000000.0,
+        newTextures,
+        (double)newTextureBytes / (1024.0 * 1024.0),
+        (double)newTextureNs / 1000000.0,
+        sPerfEyeCount[1],
+        sPerfEyeCount[1] > 0
+            ? (double)newDrawCalls / (double)sPerfEyeCount[1] / 2.0 : 0.0,
+        sPerfEyeCount[1] > 0
+            ? (double)newTriangles / (double)sPerfEyeCount[1] / 2.0 : 0.0,
+        sPerfEyeCount[1] > 0
+            ? (double)newVertexBytes / (1024.0 * 1024.0) /
+              (double)sPerfEyeCount[1] / 2.0 : 0.0
+    );
+
+    sPerfWindowStartNs = now;
+    sPerfTickTotalNs = 0;
+    sPerfTickMaxNs = 0;
+    sPerfTickCount = 0;
+    memset(sPerfEyeTotalNs, 0, sizeof(sPerfEyeTotalNs));
+    memset(sPerfEyeMaxNs, 0, sizeof(sPerfEyeMaxNs));
+    memset(sPerfEyeCount, 0, sizeof(sPerfEyeCount));
+    sPerfLastShaderCompiles = shaderCompiles;
+    sPerfLastShaderCompileNs = shaderCompileNs;
+    sPerfLastTextureUploads = textureUploads;
+    sPerfLastTextureBytes = textureBytes;
+    sPerfLastTextureUploadNs = textureUploadNs;
+    sPerfLastDrawCalls = drawCalls;
+    sPerfLastTriangles = triangles;
+    sPerfLastVertexUploadBytes = vertexUploadBytes;
+}
+
 void quest_game_load_early_config(void) {
     if (sConfigLoaded) return;
     fs_init(sys_user_path());
@@ -167,8 +286,21 @@ unsigned int quest_game_render_scale_percent(void) {
     }
     // Keep text and controls crisp regardless of gameplay resolution. The
     // OpenXR bootstrap changes swapchains after the menu transition settles.
-    if (gDjuiInMainMenu || gDjuiPanelPauseCreated) return 100U;
+    if ((gDjuiInMainMenu || gDjuiPanelPauseCreated)
+        && !configVrUltraPerformanceMode) return 100U;
     return configVrRenderScale;
+}
+
+bool quest_game_ultra_performance_enabled(void) {
+    quest_game_load_early_config();
+    return configVrUltraPerformanceMode;
+}
+
+unsigned int quest_game_refresh_rate_index(void) {
+    quest_game_load_early_config();
+    return configVrQuestRefreshRate <= 2
+        ? configVrQuestRefreshRate
+        : 2;
 }
 
 bool quest_game_initialize(void) {
@@ -204,6 +336,10 @@ bool quest_game_initialize(void) {
         LOGI("Android audio device is unavailable; continuing without sound.");
     }
     network_player_init();
+    // Match the desktop startup contract before the first game-loop tick.
+    // Lua hooks intentionally refuse to execute while this is false; leaving
+    // it unset made registered mod commands appear unavailable on standalone.
+    gGameInited = true;
     thread5_game_loop(NULL);
     LOGI("Loaded EEPROM progress: A=%d B=%d C=%d D=%d stars.",
          save_file_get_total_star_count(0, COURSE_MIN - 1, COURSE_MAX - 1),
@@ -244,12 +380,14 @@ void quest_game_tick(void) {
     if (now - sLastTickNs < 33333333LL) return;
     sLastTickNs += 33333333LL;
     if (now - sLastTickNs > 100000000LL) sLastTickNs = now;
+    const int64_t tickStart = monotonic_ns();
     // Reset the logical game canvas before the engine builds its display
     // list. Leaving the previous portrait eye dimensions here clips/culls the
     // 3D title scene even though the later DJUI projection remains visible.
     gfx_start_frame();
     gRenderingInterpolated = 0;
     quest_patch_before_game_tick();
+    exec_queued_chat_command();
     network_update();
     game_loop_one_iteration();
     // Interpolation tables only contain valid current/previous pointers after
@@ -258,6 +396,10 @@ void quest_game_tick(void) {
     sCompletedGameTick = true;
     smlua_update();
     quest_game_buffer_audio();
+    const uint64_t tickNs = (uint64_t)(monotonic_ns() - tickStart);
+    sPerfTickTotalNs += tickNs;
+    if (tickNs > sPerfTickMaxNs) sPerfTickMaxNs = tickNs;
+    sPerfTickCount++;
 }
 
 bool quest_game_render_eye(uint32_t eye, uint32_t width, uint32_t height) {
@@ -265,6 +407,7 @@ bool quest_game_render_eye(uint32_t eye, uint32_t width, uint32_t height) {
         ? (Gfx *)gGfxSPTask->task.t.data_ptr
         : NULL;
     if (!sReady || commands == NULL || width == 0 || height == 0) return false;
+    const int64_t renderStart = monotonic_ns();
 
     gfx_start_frame();
     gfx_current_dimensions.width = width;
@@ -288,5 +431,17 @@ bool quest_game_render_eye(uint32_t eye, uint32_t width, uint32_t height) {
     }
 #endif
     gfx_end_frame_render();
+    if (eye < 2) {
+        const uint64_t renderNs =
+            (uint64_t)(monotonic_ns() - renderStart);
+        sPerfEyeTotalNs[eye] += renderNs;
+        if (renderNs > sPerfEyeMaxNs[eye]) {
+            sPerfEyeMaxNs[eye] = renderNs;
+        }
+        sPerfEyeCount[eye]++;
+        if (eye == 1) {
+            quest_game_log_performance_if_ready(monotonic_ns());
+        }
+    }
     return true;
 }

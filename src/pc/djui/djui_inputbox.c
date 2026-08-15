@@ -436,6 +436,39 @@ void djui_inputbox_on_text_editing(struct DjuiBase *base, char* text, int cursor
     djui_inputbox_on_change(inputbox);
 }
 
+static struct DjuiInputbox* djui_inputbox_get_focused(void) {
+    if (gInteractableFocus == NULL || gInteractableFocus->interactable == NULL ||
+        gInteractableFocus->interactable->on_text_input != djui_inputbox_on_text_input) {
+        return NULL;
+    }
+    return (struct DjuiInputbox*)gInteractableFocus;
+}
+
+bool djui_inputbox_has_focused(void) {
+    return djui_inputbox_get_focused() != NULL;
+}
+
+const char* djui_inputbox_get_focused_text(void) {
+    struct DjuiInputbox* inputbox = djui_inputbox_get_focused();
+    return inputbox != NULL ? inputbox->buffer : "";
+}
+
+u16 djui_inputbox_get_focused_capacity(void) {
+    struct DjuiInputbox* inputbox = djui_inputbox_get_focused();
+    return inputbox != NULL ? inputbox->bufferSize : 1;
+}
+
+void djui_inputbox_replace_focused_text(const char* text) {
+    struct DjuiInputbox* inputbox = djui_inputbox_get_focused();
+    if (inputbox == NULL || text == NULL) return;
+    snprintf(inputbox->buffer, inputbox->bufferSize, "%s", text);
+    djui_unicode_cleanup_end(inputbox->buffer);
+    inputbox->selection[0] = djui_unicode_len(inputbox->buffer);
+    inputbox->selection[1] = inputbox->selection[0];
+    sCursorBlink = 0;
+    djui_inputbox_on_change(inputbox);
+}
+
 static void djui_inputbox_render_char(struct DjuiInputbox* inputbox, char* c, f32* drawX, f32* additionalShift) {
     struct DjuiBaseRect*   comp = &inputbox->base.comp;
     const struct DjuiFont* font = gDjuiFonts[configDjuiThemeFont == 0 ? FONT_NORMAL : FONT_ALIASED];

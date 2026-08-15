@@ -7,7 +7,9 @@
 #include "pc/gfx/gfx_pc.h"
 #include "pc/gfx/gfx_window_manager_api.h"
 #include "pc/pc_main.h"
+#include "pc/configfile.h"
 #include "pc/utils/misc.h"
+#include "pc/vr/vr.h"
 
 #include "djui_gfx.h"
 #include "gfx_dimensions.h"
@@ -45,6 +47,7 @@ struct HudUtilsState {
         InterpFieldF32 h;
         InterpFieldF32 v;
     } textAlignment;
+    bool applyVrGameHudStyle;
 };
 
 static struct HudUtilsState sHudUtilsState = {
@@ -110,7 +113,43 @@ static inline bool djui_hud_text_font_is_legacy() {
     return sHudUtilsState.font < 0;
 }
 
+void djui_hud_set_vr_game_hud_style(bool enabled) {
+    sHudUtilsState.applyVrGameHudStyle = enabled;
+}
+
+static inline u8 djui_hud_vr_alpha(u8 alpha) {
+    return sHudUtilsState.applyVrGameHudStyle
+        ? get_hud_opacity_alpha(alpha)
+        : alpha;
+}
+
+static void djui_hud_apply_vr_spread(f32 *x, f32 *y) {
+    if (!sHudUtilsState.applyVrGameHudStyle || !vr_is_active()) {
+        return;
+    }
+
+    f32 screenWidth;
+    f32 screenHeight;
+    if (sHudUtilsState.resolution == RESOLUTION_N64) {
+        screenWidth = GFX_DIMENSIONS_ASPECT_RATIO * SCREEN_HEIGHT;
+        screenHeight = SCREEN_HEIGHT;
+    } else {
+        u32 windowWidth;
+        u32 windowHeight;
+        gfx_get_dimensions(&windowWidth, &windowHeight);
+        const f32 gfxScale = djui_gfx_get_scale();
+        screenWidth = (f32)windowWidth / gfxScale;
+        screenHeight = (f32)windowHeight / gfxScale;
+    }
+
+    const f32 factor =
+        (f32)clamp(configVrHudSpread, 80U, 200U) / 100.0f;
+    *x = screenWidth * 0.5f + (*x - screenWidth * 0.5f) * factor;
+    *y = screenHeight * 0.5f + (*y - screenHeight * 0.5f) * factor;
+}
+
 static void djui_hud_position_translate(f32* x, f32* y) {
+    djui_hud_apply_vr_spread(x, y);
     if (sHudUtilsState.resolution == RESOLUTION_DJUI) {
         djui_gfx_position_translate(x, y);
     } else {
@@ -347,7 +386,7 @@ void djui_hud_set_color(u8 r, u8 g, u8 b, u8 a) {
     sHudUtilsState.color.g = g;
     sHudUtilsState.color.b = b;
     sHudUtilsState.color.a = a;
-    gDPSetEnvColor(gDisplayListHead++, r, g, b, a);
+    gDPSetEnvColor(gDisplayListHead++, r, g, b, djui_hud_vr_alpha(a));
 }
 
 void djui_hud_reset_color(void) {
@@ -355,7 +394,8 @@ void djui_hud_reset_color(void) {
     sHudUtilsState.color.g = 255;
     sHudUtilsState.color.b = 255;
     sHudUtilsState.color.a = 255;
-    gDPSetEnvColor(gDisplayListHead++, 255, 255, 255, 255);
+    gDPSetEnvColor(gDisplayListHead++, 255, 255, 255,
+                   djui_hud_vr_alpha(255));
 }
 
 struct DjuiColor* djui_hud_get_text_color(void) {
@@ -632,7 +672,7 @@ static void djui_hud_print_text_internal(const char* message, f32 x, f32 y, f32 
         sHudUtilsState.textColor.r,
         sHudUtilsState.textColor.g,
         sHudUtilsState.textColor.b,
-        sHudUtilsState.textColor.a
+        djui_hud_vr_alpha(sHudUtilsState.textColor.a)
     );
 
     font->render_begin();
@@ -645,7 +685,7 @@ static void djui_hud_print_text_internal(const char* message, f32 x, f32 y, f32 
                 parsedColor.r,
                 parsedColor.g,
                 parsedColor.b,
-                parsedColor.a
+                djui_hud_vr_alpha(parsedColor.a)
             );
             continue;
         }

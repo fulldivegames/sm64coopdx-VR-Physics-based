@@ -10,6 +10,7 @@
 
 typedef struct QuestInput {
     XrInstance instance;
+    XrSession session;
     XrActionSet set;
     XrPath hands[2];
     XrAction grip_pose;
@@ -24,6 +25,7 @@ typedef struct QuestInput {
     XrSpace grip_spaces[2];
     XrSpace aim_spaces[2];
     bool ready;
+    bool active;
 } QuestInput;
 
 static QuestInput sInput;
@@ -90,6 +92,7 @@ static bool suggest_bindings(void) {
 bool quest_input_initialize(XrInstance instance, XrSession session) {
     memset(&sInput, 0, sizeof(sInput));
     sInput.instance = instance;
+    sInput.session = session;
     sInput.hands[0] = path("/user/hand/left");
     sInput.hands[1] = path("/user/hand/right");
     XrActionSetCreateInfo set_info = {
@@ -163,10 +166,15 @@ static void locate_pose(XrSpace space, XrSpace base, XrTime time,
 }
 
 void quest_input_update(XrSession session, XrSpace base_space, XrTime time) {
-    if (!sInput.ready) return;
+    if (!sInput.ready || session == XR_NULL_HANDLE || base_space == XR_NULL_HANDLE ||
+        session != sInput.session) return;
     XrActiveActionSet active = {.actionSet=sInput.set,.subactionPath=XR_NULL_PATH};
     XrActionsSyncInfo sync = {.type=XR_TYPE_ACTIONS_SYNC_INFO,.countActiveActionSets=1,.activeActionSets=&active};
-    if (XR_FAILED(xrSyncActions(session, &sync))) return;
+    if (XR_FAILED(xrSyncActions(session, &sync))) {
+        quest_input_suspend();
+        return;
+    }
+    sInput.active = true;
     for (uint32_t hand = 0; hand < 2; ++hand) {
         struct VrControllerState state;
         memset(&state, 0, sizeof(state));
@@ -189,7 +197,18 @@ void quest_input_update(XrSession session, XrSpace base_space, XrTime time) {
     }
 }
 
+void quest_input_suspend(void) {
+    if (!sInput.active) return;
+    struct VrControllerState state;
+    memset(&state, 0, sizeof(state));
+    for (uint32_t hand = 0; hand < 2; ++hand) {
+        quest_vr_bridge_update_controller(hand, &state, false);
+    }
+    sInput.active = false;
+}
+
 void quest_input_shutdown(void) {
+    quest_input_suspend();
     for (int hand=0; hand<2; ++hand) {
         if (sInput.grip_spaces[hand]) xrDestroySpace(sInput.grip_spaces[hand]);
         if (sInput.aim_spaces[hand]) xrDestroySpace(sInput.aim_spaces[hand]);

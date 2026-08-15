@@ -77,7 +77,9 @@ void bhv_flamethrower_loop(void) {
         // Preserve every collision sample while drawing only half of dense
         // flame streams. This reduces transparent overdraw without changing
         // the flamethrower's reach or damage coverage.
-        const s32 flameModel = configVrFlameOptimizations && (o->oTimer & 1)
+        const bool reduceFlames =
+            configVrFlameOptimizations || configVrUltraPerformanceMode;
+        const s32 flameModel = reduceFlames && (o->oTimer & 1)
             ? MODEL_NONE
             : model;
         flame = spawn_object_relative(o->oBehParams2ndByte, 0, 0, 0, o, flameModel, bhvFlamethrowerFlame);

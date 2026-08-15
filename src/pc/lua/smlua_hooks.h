@@ -189,6 +189,7 @@ bool smlua_call_action_hook(enum LuaActionHookType hookType, struct MarioState* 
 u32 smlua_get_action_interaction_type(struct MarioState* m);
 
 bool smlua_call_chat_command_hook(char* command);
+bool smlua_chat_command_exists(const char* command);
 void smlua_display_chat_commands(void);
 char** smlua_get_chat_player_list(void);
 char** smlua_get_chat_maincommands_list(void);

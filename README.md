@@ -7,7 +7,7 @@
   &nbsp;|&nbsp; <strong>Quest standalone edition</strong>
 </p>
 
-<h1 align="center">SM64 Co-Op DX VR — Quest Standalone</h1>
+<h1 align="center">sm64coopdx-VR-Standalone (Physics-based)</h1>
 
 <p align="center">
   Native ARM64/OpenXR VR for Meta Quest. No PC is required after installation.
@@ -16,7 +16,7 @@
 > [!WARNING]
 > This is an active, experimental fan project. The standalone edition has been tested on **Meta Quest 3 only**. It has **not been tested on Quest 2 at all**, and neither edition has been tested across every level, multiplayer situation, ROM hack, or mod combination.
 
-This repository contains the standalone Android/Quest port of [SM64 Co-Op DX VR for PC](https://github.com/fulldivegames/sm64coopdx-VR), derived from [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx). It runs the game natively on the headset through OpenXR and OpenGL ES while retaining the original project's multiplayer foundation, Lua/mod support where compatible, first- and third-person cameras, tracked hands, and physical VR interactions.
+This repository contains the standalone Android/Quest port of [sm64coopdx-VR (Physics-based)](https://github.com/fulldivegames/sm64coopdx-VR), derived from [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx). It runs the game natively on the headset through OpenXR and OpenGL ES while retaining the original project's multiplayer foundation, Lua/mod support where compatible, first- and third-person cameras, tracked hands, and physical VR interactions.
 There are videos on my YouTube channel: https://www.youtube.com/@fulldivegames667 that show off the mod.
 
 ## Download and install with SideQuest
@@ -34,7 +34,7 @@ The release is a single APK. Players do not need Git, Android Studio, Gradle, AD
 ### Install the APK
 
 1. Open this repository's [latest release](https://github.com/fulldivegames/sm64coopdx-VR-Standalone/releases/latest).
-2. Download `SM64-Co-Op-DX-VR-Quest-v0.5.13.apk` under **Assets**.
+2. Download `SM64-Co-Op-DX-VR-Quest-v0.6.0.apk` under **Assets**.
 3. Connect the Quest to your computer and allow the USB debugging prompt inside the headset.
 4. Open SideQuest and confirm that the headset indicator is connected.
 5. Click **Install APK file from folder** in SideQuest, choose the downloaded APK, and wait for the install-success message.
@@ -46,20 +46,20 @@ The release is a single APK. Players do not need Git, Android Studio, Gradle, AD
 Updates can be installed over the existing app through SideQuest. Keep the same Android application installed if you want its private ROM/configuration data to remain available. Back up important saves before testing a new release.
 
 > [!IMPORTANT]
-> Install v0.5.13 directly over an existing installation so the private ROM, save, and settings remain available. Do not uninstall the app first.
+> Install v0.6.0 directly over an existing installation so the private ROM, save, and settings remain available. Do not uninstall the app first.
 
 > [!IMPORTANT]
 > The APK contains no ROM and no Nintendo game assets. Do not upload, bundle, or redistribute a ROM with this project. The app validates the unmodified US ROM before importing it into private application storage.
 
 ## Install mods on Quest standalone
 
-Starting with v0.5.7, the standalone build loads compatible SM64 Co-Op DX mods from this easy-to-access folder on the Quest:
+The standalone build loads compatible SM64 Co-Op DX mods from this easy-to-access folder on the Quest:
 
 ```text
 /sdcard/SM64VR/mods/
 ```
 
-1. Install or update to v0.5.7 and launch it once. Android opens the **Allow access to manage all files** page; enable access for **SM64 Co-Op DX VR Standalone**. This permission is used only for the shared mod folder.
+1. Install or update to v0.6.0 and launch it once. Android opens the **Allow access to manage all files** page; enable access for **SM64 Co-Op DX VR Standalone**. This permission is used for the shared mod, DynOS, palette, and shader-cache folders.
 2. Close and reopen the game once after granting access. The game creates `/sdcard/SM64VR/mods/` automatically.
 3. Download a mod compatible with SM64 Co-Op DX. The official community browser is [mods.sm64coopdx.com](https://mods.sm64coopdx.com/mods/).
 4. Extract the archive. Copy the **extracted mod folder**, not the `.zip`, into `SM64VR/mods` with SideQuest's file manager. The mod files must be directly inside their own folder rather than inside an extra duplicate folder.
@@ -76,7 +76,7 @@ The previous private `Android/data/com.fulldivegames.sm64coopdxvr/files/mods/` l
 
 ### Install DynOS packs
 
-Launch the game once after installing v0.5.13. The game automatically creates:
+Launch the game once after installing v0.6.0. The game automatically creates:
 
 ```text
 /sdcard/SM64VR/dynos/packs/
@@ -90,9 +90,25 @@ Extract each DynOS pack and copy its complete pack folder into `SM64VR/dynos/pac
 
 Restart the game after copying packs, then enable them from the game's DynOS menu. Copy the extracted folder rather than the downloaded archive, and avoid an extra duplicate nesting level such as `My Pack/My Pack/files`.
 
+Custom palette files can be copied to:
+
+```text
+/sdcard/SM64VR/palettes/
+```
+
+The persistent learned shader cache is stored in `/sdcard/SM64VR/shader-cache/`. It is managed by the game; do not install mods there.
+
+### Mod compatibility in v0.6.0
+
+v0.6.0 includes expanded mod discovery, startup, menu, rendering, character-model, DynOS, and palette path compatibility. Character Selector was specifically tested with multiple character packs, including its in-game selection overlay. Multiple extracted DynOS packs are discovered from `dynos/packs`, and shared standalone paths now keep mods, packs, palettes, and shader-cache data accessible outside Android's restricted private-data folder.
+
+Compatibility is not universal. Mods that depend on desktop-native binaries, desktop-only graphics APIs, unsupported keyboard windows, extreme memory use, or assumptions about the original flat camera may still fail. Character packs can also define their own selection rules rather than appearing in the built-in Mario/Luigi/Toad/Wario/Waluigi list. Install one mod at a time when diagnosing a failure and report the exact mod name/version with a crash log when possible.
+
 Not every desktop mod is compatible with the standalone ARM64/OpenGL ES build. Mods that depend on desktop-only code, very large model or texture packs, and demanding ROM hacks may fail to load or run poorly. Install one mod at a time when troubleshooting. Only download mods you trust, and do not redistribute copyrighted game assets.
 
-## Default Quest controls
+## Tutorial: controls and how to play
+
+### Default Quest controls
 
 | Action | Default input |
 | --- | --- |
@@ -109,15 +125,11 @@ Not every desktop mod is compatible with the standalone ARM64/OpenGL ES build. M
 
 Open **Settings > VR > Controller Settings** to exchange the movement/camera sticks, remap the listed actions, or disable individual bindings.
 
-## How to play in VR
-
-### First person and movement
+### First-person mode and movement
 
 First Person Mode is the default. The headset controls the view and, by default, Mario's forward direction. The stick controls travel while Mario retains his established acceleration, momentum, skids, jumps, and landings. Camera Settings can instead use the left or right controller as the calibrated facing source.
 
 Swimming, Wing Cap flight, shell riding, cannon aiming, and pole dismounts follow the configured look direction. Looking up or down controls vertical swimming and flight. A normal action press is still required for swimming strokes.
-
-Third Person Mode remains available for players who prefer the original character-focused camera and conventional controls.
 
 ### Punching
 
@@ -157,6 +169,10 @@ Physical climbing is enabled by default, while Mario's standard automatic climbi
 - During a star/key collection screen, hold **Grip + Trigger** on either hand to show Mario's peace-sign glove.
 - During a successful painting/course exit, bring either **Grip + Trigger** hand to the headset or just above it to pull off the cap. Keep holding to carry it; release to throw it. The cap can be picked up again or returned to Mario's head. The disabled-by-default **Grab Cap at Any Time** option enables this throughout play.
 
+### Third-person mode
+
+Third Person Mode centers the stereoscopic view on Mario and is intended for conventional gamepad play. It remains independent of first-person tracked-hand and body-camera behavior, supports the default and free cameras, and can be used to play through the normal game without motion-control gestures.
+
 ## Comfort, immersion, and visual options
 
 All options in **Settings > VR > Immersion** default to enabled:
@@ -181,7 +197,7 @@ Painting entries use a short white comfort fade. The optional True First Person 
 | Controller Settings | Motion-controller enablement, stick selection, button mappings, and optional trigger punch |
 | Motion Control Settings | Punching, grabbing, climbing, dives, jump turning, hit ranges, and Bowser tuning |
 | Model Settings | Body visibility/placement, feet-only, ledge and pole-flip visibility, glove scale, rotation, and position |
-| Performance | Render scale from 10%-100% (80% default), optional FPS counter, and standalone performance options |
+| Performance | Render scale from 10%-100% (80% default), optional FPS counter, 72/90/120 Hz refresh selection, fog control, flame/lava optimization, and Ultra Performance Mode |
 | HUD Settings | HUD opacity and corner spread |
 | Immersion | Default-on comfort, audio, camera, underwater, cannon, and physical-crouch options |
 | Effects | Twirl tornado visual effect |
@@ -193,8 +209,21 @@ Painting entries use a short white comfort fade. The optional True First Person 
 - Quest color grading uses slightly deeper saturation and contrast than the PC build to reduce the washed-out appearance seen on Quest 3. The Brightness value itself is unchanged.
 - The game keeps Super Mario 64's deterministic 30 Hz gameplay simulation while rendering and tracking at the headset cadence. Physics are not globally accelerated.
 - Render Scale defaults to 80% and can be adjusted from 10% through 100%. Lower it if a demanding level or mod cannot maintain headset refresh. Menus remain full resolution.
+- Refresh Rate offers 72, 90, and 120 Hz and defaults to 120 Hz on both Quest 2 and Quest 3. The selected target is not a guarantee that every level or mod can maintain that frame rate.
+- **Ultra Performance Mode** reduces selected cosmetic effects and animation costs without removing enemies, signs, boxes, objectives, or other gameplay actors. Its warning accurately notes that visuals are degraded.
 - Multiplayer code remains present, but standalone online co-op has not been comprehensively validated.
 - Large Lua mods, model packs, ROM hacks, and texture packs may exceed standalone memory/performance budgets or rely on desktop-only behavior.
+
+## v0.6.0 — optimization and mod compatibility update
+
+- Major renderer batching and state-change reductions, including the distant Chain Chomp/BOB performance path
+- General actor, flame, lava, snow/effect, menu, shader-preparation, and startup optimizations
+- 72/90/120 Hz refresh-rate selector with the same 120 Hz default on Quest 2 and Quest 3
+- Correct HUD opacity behavior across coins, stars, keys, timer, camera status, and the power meter while keeping the optional FPS counter readable
+- Expanded shared paths for Lua mods, DynOS packs, custom palettes, and learned shader-cache data
+- Character Selector and multi-character-pack compatibility work, including a readable stereoscopic selection overlay
+- Safer asynchronous Quest text-entry teardown, fixing the player-count/server-menu crash when B closes an active field
+- Continued first- and third-person camera, physical interaction, climbing, controller, comfort, and mod-rendering compatibility work
 
 ## Troubleshooting
 

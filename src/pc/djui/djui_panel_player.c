@@ -10,6 +10,10 @@
 #include "game/level_update.h"
 #include "game/area.h"
 
+#if defined(__ANDROID__)
+extern const char* quest_android_shared_palette_path(void);
+#endif
+
 static unsigned int sPalettePresetIndex = 0;
 static unsigned int sCurrentPlayerPart = PANTS;
 static unsigned int sSliderChannels[3] = { 0 };
@@ -331,12 +335,8 @@ static void djui_panel_player_edit_palette_create(struct DjuiBase* caller) {
             djui_base_set_size_type(&sPalettePresetNameTextBox->base, DJUI_SVT_RELATIVE, DJUI_SVT_ABSOLUTE);
             djui_base_set_size(&sPalettePresetNameTextBox->base, 0.45f, 32);
             djui_base_set_alignment(&sPalettePresetNameTextBox->base, DJUI_HALIGN_RIGHT, DJUI_VALIGN_TOP);
-#ifdef __ANDROID__
-            djui_base_set_enabled(&sPalettePresetNameTextBox->base, false);
-#else
             djui_interactable_hook_value_change(&sPalettePresetNameTextBox->base, djui_panel_player_edit_palette_preset_name_text_change);
             djui_interactable_hook_focus(&sPalettePresetNameTextBox->base, djui_inputbox_on_focus_begin, NULL, djui_panel_player_edit_palette_preset_name_on_focus_end);
-#endif
         }
 
         struct DjuiRect* rect3 = djui_rect_container_create(body, 32);
@@ -388,12 +388,8 @@ static void djui_panel_player_name_active_palette(struct DjuiBase* caller) {
             djui_base_set_size_type(&sPalettePresetNameTextBox->base, DJUI_SVT_RELATIVE, DJUI_SVT_ABSOLUTE);
             djui_base_set_size(&sPalettePresetNameTextBox->base, 0.45f, 32);
             djui_base_set_alignment(&sPalettePresetNameTextBox->base, DJUI_HALIGN_RIGHT, DJUI_VALIGN_TOP);
-#ifdef __ANDROID__
-            djui_base_set_enabled(&sPalettePresetNameTextBox->base, false);
-#else
             djui_interactable_hook_value_change(&sPalettePresetNameTextBox->base, djui_panel_player_edit_palette_preset_name_text_change);
             djui_interactable_hook_focus(&sPalettePresetNameTextBox->base, djui_inputbox_on_focus_begin, NULL, djui_panel_player_edit_palette_preset_name_on_focus_end);
-#endif
         }
 
         struct DjuiRect* rect3 = djui_rect_container_create(body, 32);
@@ -540,6 +536,9 @@ void djui_panel_player_create(struct DjuiBase* caller) {
         player_palettes_reset();
         player_palettes_read(sys_resource_path(), true);
         player_palettes_read(fs_get_write_path(PALETTES_DIRECTORY), false);
+#if defined(__ANDROID__)
+        player_palettes_read(quest_android_shared_palette_path(), false);
+#endif
 
         char* palettePresets[MAX_PRESET_PALETTES + 1] = { DLANG(PALETTE, CUSTOM) };
         if (gPresetPaletteCount > 0) {

@@ -12,6 +12,10 @@ const struct PlayerPalette DEFAULT_MARIO_PALETTE =
 
 static ini_t* sPalette = NULL;
 
+#if defined(__ANDROID__)
+extern const char* quest_android_shared_palette_path(void);
+#endif
+
 struct PresetPalette gPresetPalettes[MAX_PRESET_PALETTES] = { 0 };
 u16 gPresetPaletteCount = 0;
 
@@ -156,7 +160,11 @@ void player_palettes_read(const char* palettesPath, bool appendPalettes) {
 
 void player_palette_export(char* name) {
     // construct palette path
+#if defined(__ANDROID__)
+    const char* palettesPath = quest_android_shared_palette_path();
+#else
     const char* palettesPath = fs_get_write_path(PALETTES_DIRECTORY);
+#endif
     char ppath[SYS_MAX_PATH] = "";
     snprintf(ppath, SYS_MAX_PATH, "%s/%s.ini", palettesPath, name);
     fs_sys_mkdir(palettesPath);
@@ -234,5 +242,20 @@ bool player_palette_delete(const char* palettesPath, char* name, bool appendPale
         LOG_INFO("Deleting palette '%s.ini'", name);
         return true;
     }
+#if defined(__ANDROID__)
+    if (!appendPalettes) {
+        snprintf(
+            ppath,
+            SYS_MAX_PATH,
+            "%s/%s.ini",
+            quest_android_shared_palette_path(),
+            name
+        );
+        if (remove(ppath) == 0) {
+            LOG_INFO("Deleting shared palette '%s.ini'", name);
+            return true;
+        }
+    }
+#endif
     return false;
 }

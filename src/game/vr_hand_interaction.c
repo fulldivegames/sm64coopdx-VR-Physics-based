@@ -7,6 +7,7 @@
 #include "engine/math_util.h"
 #include "engine/surface_collision.h"
 #include "engine/surface_load.h"
+#include "hardcoded.h"
 #include "interaction.h"
 #include "mario.h"
 #include "object_constants.h"
@@ -111,9 +112,11 @@ static bool sVrGripPressed[VR_CONTROLLER_COUNT] = {
 static struct Object* sVrTrackedHeldObject = NULL;
 static u32 sVrTrackedHeldHand = VR_CONTROLLER_COUNT;
 static u8 sVrTrackedHeldGripMask = 0;
+static Vec3f sVrTrackedHeldPreviousPosition = { 0.0f, 0.0f, 0.0f };
 static Vec3f sVrTrackedHeldPosition = { 0.0f, 0.0f, 0.0f };
 static Vec3f sVrTrackedHeldVelocity = { 0.0f, 0.0f, 0.0f };
 static bool sVrTrackedHeldPositionValid = false;
+static u32 sVrTrackedHeldPositionTimestamp = 0;
 static bool sVrTrackedReleaseInProgress = false;
 static struct Object* sVrTrackedHootObject = NULL;
 static u32 sVrTrackedHootHand = VR_CONTROLLER_COUNT;
@@ -260,7 +263,9 @@ static void vr_hand_interaction_clear_tracked_hold(void) {
     sVrTrackedHeldHand = VR_CONTROLLER_COUNT;
     sVrTrackedHeldGripMask = 0;
     sVrTrackedHeldPositionValid = false;
+    sVrTrackedHeldPositionTimestamp = 0;
     sVrTrackedReleaseInProgress = false;
+    vec3f_set(sVrTrackedHeldPreviousPosition, 0.0f, 0.0f, 0.0f);
     vec3f_set(sVrTrackedHeldPosition, 0.0f, 0.0f, 0.0f);
     vec3f_set(sVrTrackedHeldVelocity, 0.0f, 0.0f, 0.0f);
 }
@@ -754,11 +759,13 @@ bool vr_hand_interaction_apply_held_object_transform(
     }
 
     vec3f_copy(&object->oPosX, sVrTrackedHeldPosition);
+    vec3f_copy(
+        object->header.gfx.prevPos,
+        sVrTrackedHeldPreviousPosition
+    );
     vec3f_copy(object->header.gfx.pos, sVrTrackedHeldPosition);
-    // Floating gloves are late-patched from the newest OpenXR pose. Do not
-    // blend a physically held object toward its previous 30 Hz position or
-    // it visibly trails behind the hand despite sharing the same hold point.
-    object->header.gfx.skipInterpolationTimestamp = gGlobalTimer;
+    // Gameplay remains native-rate. Rendering interpolates normally, then
+    // late-patches the root to the newest tracked pose each OpenXR frame.
     object->header.gfx.node.flags |= GRAPH_RENDER_ACTIVE;
     object->header.gfx.node.flags &= ~GRAPH_RENDER_INVISIBLE;
     return true;
@@ -1095,9 +1102,21 @@ static void vr_hand_interaction_update_held_position(
         80.0f
     );
 
-    sVrTrackedHeldPosition[0] = handPosition[0];
-    sVrTrackedHeldPosition[1] = handPosition[1] - centerOffset;
-    sVrTrackedHeldPosition[2] = handPosition[2];
+    Vec3f nextPosition = {
+        handPosition[0],
+        handPosition[1] - centerOffset,
+        handPosition[2]
+    };
+    if (!sVrTrackedHeldPositionValid) {
+        vec3f_copy(sVrTrackedHeldPreviousPosition, nextPosition);
+    } else if (sVrTrackedHeldPositionTimestamp != gGlobalTimer) {
+        vec3f_copy(
+            sVrTrackedHeldPreviousPosition,
+            sVrTrackedHeldPosition
+        );
+    }
+    vec3f_copy(sVrTrackedHeldPosition, nextPosition);
+    sVrTrackedHeldPositionTimestamp = gGlobalTimer;
 
     const f32 currentSpeedSquared =
         handVelocity[0] * handVelocity[0] +
@@ -1244,9 +1263,26 @@ static bool vr_hand_interaction_grab_overlaps_object(
         objectHeight = 60.0f;
     }
 
-    const f32 objectBottom =
+    const bool specialHeavyGrab =
+        obj_has_behavior(object, bhvKingBobomb) ||
+        (object->oInteractionSubtype &
+            INT_SUBTYPE_GRABS_MARIO) != 0;
+    f32 objectBottom =
         object->oPosY - object->hitboxDownOffset;
-    const f32 objectTop = objectBottom + objectHeight;
+    f32 objectTop = objectBottom + objectHeight;
+    if (!specialHeavyGrab) {
+        const f32 horizontalScale = fmaxf(
+            fabsf(object->header.gfx.scale[0]),
+            fabsf(object->header.gfx.scale[2])
+        );
+        const f32 verticalScale =
+            fabsf(object->header.gfx.scale[1]);
+        objectRadius *= fmaxf(horizontalScale, 1.0f);
+        objectTop = objectBottom +
+            objectHeight * fmaxf(verticalScale, 1.0f);
+        objectBottom += fminf(object->oGraphYOffset, 0.0f);
+        objectTop += fmaxf(object->oGraphYOffset, 0.0f);
+    }
     const f32 closestY = clamp(
         handPosition[1],
         objectBottom,
@@ -3702,6 +3738,12 @@ static bool vr_hand_interaction_attack_object(
         return false;
     }
 
+    if ((mario->action & ACT_FLAG_SWIMMING) != 0 &&
+        (object->oInteractType & INTERACT_BREAKABLE) != 0 &&
+        !configVrCheatUnderwaterBoxPunching) {
+        return false;
+    }
+
     bool allowInteract = true;
     smlua_call_event_hooks(
         HOOK_ALLOW_INTERACT,
@@ -3812,7 +3854,8 @@ static void vr_hand_interaction_collect_coins_at_headset(
 ) {
     if (mario == NULL ||
         gObjectLists == NULL ||
-        sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_NONE) {
+        (sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_NONE &&
+         (mario->action & ACT_FLAG_SWIMMING) == 0)) {
         return;
     }
 
@@ -3829,9 +3872,9 @@ static void vr_hand_interaction_collect_coins_at_headset(
     const f32 headsetTop = headsetBottom +
         VR_HEADSET_INTERACTION_HEIGHT;
 
-    // Object collision is normally generated before Mario's late-frame HMD
-    // collider update. Scan only while physically climbing and only for coins,
-    // giving the headset a small, safe collectible extension without moving
+      // Object collision is normally generated before Mario's late-frame HMD
+      // collider update. Scan only while physically climbing or swimming,
+      // giving the headset a small, safe collectible extension without moving
     // Mario's environment collider or triggering enemies, hazards, and warps.
     for (s32 listIndex = 0;
          listIndex < NUM_OBJ_LISTS;
@@ -3843,10 +3886,21 @@ static void vr_hand_interaction_collect_coins_at_headset(
             struct Object* object = (struct Object*)node;
             node = node->next;
 
-            if ((object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
-                object->oIntangibleTimer != 0 ||
-                (object->oInteractType & INTERACT_COIN) == 0 ||
-                (object->oInteractStatus & INT_STATUS_INTERACTED) != 0) {
+              const bool coin =
+                  (object->oInteractType & INTERACT_COIN) != 0;
+              const bool oneUp =
+                  obj_has_behavior(object, bhv1upWalking) ||
+                  obj_has_behavior(object, bhv1upRunningAway) ||
+                  obj_has_behavior(object, bhv1upSliding) ||
+                  obj_has_behavior(object, bhv1Up) ||
+                  obj_has_behavior(object, bhv1upJumpOnApproach) ||
+                  obj_has_behavior(object, bhvHidden1up) ||
+                  obj_has_behavior(object, bhvHidden1upInPole);
+
+              if ((object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
+                  object->oIntangibleTimer != 0 ||
+                  (!coin && !oneUp) ||
+                  (object->oInteractStatus & INT_STATUS_INTERACTED) != 0) {
                 continue;
             }
 
@@ -3868,12 +3922,29 @@ static void vr_hand_interaction_collect_coins_at_headset(
                 continue;
             }
 
-            process_interaction(
-                mario,
-                INTERACT_COIN,
-                object,
-                interact_coin
-            );
+              if (coin) {
+                  // Yellow, red, and blue coins all use INTERACT_COIN, so the
+                  // same native interaction retains their values, counters,
+                  // red-coin star logic, sound, and networking.
+                  process_interaction(
+                      mario,
+                      INTERACT_COIN,
+                      object,
+                      interact_coin
+                  );
+              } else {
+                  play_sound(
+                      SOUND_GENERAL_COLLECT_1UP,
+                      gGlobalSoundSource
+                  );
+                  mario->numLives++;
+                  object->activeFlags = ACTIVE_FLAG_DEACTIVATED;
+                  if (gLevelValues.mushroom1UpHeal) {
+                      mario->healCounter = 31;
+                      mario->hurtCounter = 0;
+                  }
+                  network_send_collect_item(object);
+              }
         }
     }
 }
@@ -4198,7 +4269,8 @@ void vr_hand_interaction_update(struct MarioState* mario) {
     }
 
     if (canStartInteraction &&
-        sVrPhysicalClimbType != VR_PHYSICAL_CLIMB_NONE) {
+        (sVrPhysicalClimbType != VR_PHYSICAL_CLIMB_NONE ||
+         (mario->action & ACT_FLAG_SWIMMING) != 0)) {
         vr_hand_interaction_collect_coins_at_headset(mario);
     }
 
