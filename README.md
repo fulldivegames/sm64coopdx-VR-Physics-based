@@ -34,7 +34,7 @@ The release is a single APK. Players do not need Git, Android Studio, Gradle, AD
 ### Install the APK
 
 1. Open this repository's [latest release](https://github.com/fulldivegames/sm64coopdx-VR-Standalone/releases/latest).
-2. Download `SM64-Co-Op-DX-VR-Quest-v0.5.13.apk` under **Assets**.
+2. Download `SM64-Co-Op-DX-VR-Quest-v###.apk` under **Assets**.
 3. Connect the Quest to your computer and allow the USB debugging prompt inside the headset.
 4. Open SideQuest and confirm that the headset indicator is connected.
 5. Click **Install APK file from folder** in SideQuest, choose the downloaded APK, and wait for the install-success message.
