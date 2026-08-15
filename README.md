@@ -67,6 +67,8 @@ The standalone build loads compatible SM64 Co-Op DX mods from this easy-to-acces
 
 You can also create the folder and transfer an extracted mod with ADB:
 
+NOTE: If you have a lot of mods, your game might take longer to load or sometimes not respond when launching. Resets or waiting often works.
+
 ```powershell
 adb shell mkdir -p /sdcard/SM64VR/mods
 adb push "C:\path\to\ExtractedModFolder" /sdcard/SM64VR/mods/
@@ -105,6 +107,12 @@ v0.6.0 includes expanded mod discovery, startup, menu, rendering, character-mode
 Compatibility is not universal. Mods that depend on desktop-native binaries, desktop-only graphics APIs, unsupported keyboard windows, extreme memory use, or assumptions about the original flat camera may still fail. Character packs can also define their own selection rules rather than appearing in the built-in Mario/Luigi/Toad/Wario/Waluigi list. Install one mod at a time when diagnosing a failure and report the exact mod name/version with a crash log when possible.
 
 Not every desktop mod is compatible with the standalone ARM64/OpenGL ES build. Mods that depend on desktop-only code, very large model or texture packs, and demanding ROM hacks may fail to load or run poorly. Install one mod at a time when troubleshooting. Only download mods you trust, and do not redistribute copyrighted game assets.
+
+Known compatibility notes:
+
+- Loading many mods at once can increase startup time and memory use.
+- Render96 currently has known performance and crash issues on standalone.
+- Character Selector's in-game overlay was tested with multiple character packs for v0.6.0, but especially large or incompatible character packs can still cause instability.
 
 ## Tutorial: controls and how to play
 
