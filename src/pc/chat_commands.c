@@ -16,6 +16,25 @@
 
 static enum ChatConfirmCommand sConfirming = CCC_NONE;
 static u8 sConfirmPlayerIndex = 0;
+static char sQueuedChatCommand[256];
+static bool sChatCommandQueued = false;
+
+void queue_chat_command(const char* command) {
+    if (command == NULL || command[0] == '\0') return;
+    snprintf(sQueuedChatCommand, sizeof(sQueuedChatCommand), "%s", command);
+    sChatCommandQueued = true;
+}
+
+void exec_queued_chat_command(void) {
+    if (!sChatCommandQueued) return;
+    char command[sizeof(sQueuedChatCommand)];
+    snprintf(command, sizeof(command), "%s", sQueuedChatCommand);
+    sQueuedChatCommand[0] = '\0';
+    sChatCommandQueued = false;
+    if (!exec_chat_command(command)) {
+        djui_chat_message_create("Character Selector command is unavailable.");
+    }
+}
 
 static struct NetworkPlayer* chat_get_network_player(const char* name) {
     // check for id

@@ -7,14 +7,14 @@
   <a href="https://github.com/fulldivegames/sm64coopdx-VR-Standalone"><strong>Quest standalone edition</strong></a>
 </p>
 
-<h1 align="center">SM64 Co-Op DX VR</h1>
+<h1 align="center">sm64coopdx-VR (Physics-based)</h1>
 
 <p align="center">
   A native OpenXR VR fork of <a href="https://github.com/coop-deluxe/sm64coopdx">SM64 Co-Op DX</a> with first-person motion controls and an optional third-person gamepad mode.
 </p>
 
 > [!IMPORTANT]
-> The current public release is **v0.5.13**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination.
+> The current public release is **v0.6.0**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination.
 
 SM64 Co-Op DX VR currently targets 64-bit Windows, OpenGL, and OpenXR. It keeps the original game's flat-screen mode and multiplayer foundation while adding native stereoscopic rendering, 6DoF tracking, VR-aware cameras, remappable motion-controller input, physical interactions, comfort options, and extensive calibration settings.
 
@@ -77,30 +77,52 @@ Restart the game, then enable the pack from the DynOS menu. Install one mod or p
 
 The lower-left corner of the main menu shows the installed VR version and checks GitHub for a newer release. If an update is available, the menu provides a link to this repository's release page. The game does not silently download or install updates.
 
-## Core VR features
+## Install mods on Windows
 
-- Native stereoscopic OpenXR rendering with separate runtime-sized eye swapchains
-- Full 6DoF headset rotation and positional tracking
-- Live switching between First Person Mode, Third Person Mode, and normal flat play
-- Automatic tracking recalibration when VR starts plus manual recalibration controls
-- Head-directed first-person walking, steering, backpedaling, swimming, Wing Cap flight, shell riding, pole jumps, and cannon aiming
-- Smooth horizontal stick turning with render-rate interpolation
-- First-person camera isolation from scripted tunnels, doors, conversations, Bowser introductions, and other forced camera pulls
-- Character-specific first-person camera-height profiles for Mario, Luigi, Wario, Waluigi, and Toad
-- Adjustable camera height, forward/back placement, field of view, brightness, facing source, and facing calibration
-- Headset, left-controller, or right-controller facing direction, with automatic headset fallback if a selected controller loses tracking
-- Corrected stereo skyboxes, lighting, billboard presentation, terrain projection, eye separation, clipping, and VR culling behavior
-- Head-locked menus, pause screens, text boxes, Star Select, and HUD elements
-- HUD opacity and corner-spread controls
-- Optional fully opaque FPS counter positioned beneath the lives counter
-- Full-resolution menu rendering even when gameplay Render Scale is reduced
-- Complete left-eye desktop mirror for capture, with an option to disable desktop presentation entirely
-- Startup shader preparation and a learned shader cache for shaders encountered in later levels and mods
-- Version and update status displayed directly on the main menu
+The Windows release keeps the normal SM64 Co-Op DX mod layout inside the extracted game folder:
 
-## Camera and movement
+```text
+SM64-Co-Op-DX-VR-Windows-v0.6.0/
+├── mods/
+├── dynos/
+│   └── packs/
+└── palettes/
+```
 
-### First Person Mode
+1. Download a mod made for SM64 Co-Op DX from a source you trust, such as the [community mod browser](https://mods.sm64coopdx.com/mods/).
+2. Extract the download. Do not leave the mod as a ZIP unless its own instructions explicitly require that.
+3. Put Lua/gameplay mods in `mods/<Mod Name>/`.
+4. Put DynOS character/model packs in `dynos/packs/<Pack Name>/`.
+5. Put compatible palette files in `palettes/`.
+6. Restart the game. Enable gameplay mods from **Host > Mods** and DynOS packs from the DynOS menu.
+
+Avoid duplicate nesting such as `mods/My Mod/My Mod/files`. Install one mod or pack at a time when troubleshooting. Mods that replace camera, player animation, HUD, rendering, input, or character geometry can conflict with VR features even when they work in normal SM64 Co-Op DX.
+
+## Tutorial: controls and how to play
+
+### Default PC VR controls
+
+Physical button names vary by controller. **Primary** normally means A/X or the main trackpad/select click; **Secondary** normally means B/Y or the secondary/menu click.
+
+| Action | Default input |
+| --- | --- |
+| Move | Left stick or left trackpad |
+| Smooth turn / camera | Right stick or right trackpad |
+| Jump / cannon fire | Right Primary |
+| Attack / interact | Right Secondary |
+| Crouch | Left Trigger |
+| L button | Left stick/trackpad click |
+| R button | Right stick/trackpad click |
+| Pause | Left Menu |
+| Close fist / physical grab | Hold the matching hand Grip/Squeeze |
+| Button punch | Disabled by default; optionally Right Trigger |
+| Optional trigger jump | Disabled by default; optionally Right Trigger |
+
+Open **Settings > VR > Controller Settings** to select either stick for movement/camera and remap every listed action. Individual bindings can be disabled. A connected gamepad remains usable alongside the VR controllers.
+
+The PC build supplies native OpenXR bindings for Meta Touch, Valve Index, HTC Vive wands, Windows Mixed Reality/Samsung Odyssey, and Khronos simple controllers. It also supports the optional generic-controller profile so SteamVR and other OpenXR runtimes can map additional controllers. Runtime bindings can still vary, so use SteamVR's binding interface or the in-game remapping menu if a physical label differs.
+
+### First-person mode and movement
 
 First Person Mode is the default VR camera. The headset controls the view, and the configured facing source determines Mario's forward direction. The selected camera stick provides smooth horizontal turning without enabling vertical stick camera movement.
 
@@ -114,36 +136,7 @@ Swimming, active Wing Cap flight, and turtle-shell riding follow the direction y
 
 When Mario is actively swimming, flying, or shell riding, his first-person body can be hidden to avoid camera clipping. Painting entries immediately fade to white and remain covered for up to 1.5 seconds or until the destination/Act Select screen takes over, preventing views through unloaded castle geometry.
 
-### Third Person Mode
-
-Third Person Mode keeps the character visible and centers the VR view on Mario. It works with the original SM64 Co-Op DX camera and with the built-in free camera. Camera distance is adjustable, and the tracked first-person hands and camera state are cleared when switching modes.
-
-### True First Person and True Diving
-
-**True First Person** is an experimental option that follows animated body height and action motion. During flips, dives, and rollouts, animation pitch and roll can affect the view while horizontal heading remains stable. Ordinary running remains upright rather than inheriting every small model tilt.
-
-**True Diving** applies the animated dive attachment only during a dive. Both options can cause discomfort or motion sickness and are disabled by default.
-
-## Default VR controller layout
-
-Physical button names differ between controller brands. In the menu, **Primary** usually means A/X and **Secondary** usually means B/Y.
-
-| Action | Default input |
-| --- | --- |
-| Move | Left stick |
-| Smooth turn / camera | Right stick |
-| Jump / cannon fire | Right Primary |
-| Attack / interact | Right Secondary |
-| Crouch | Left Trigger |
-| L button | Left stick click |
-| R button | Right stick click |
-| Pause | Left Menu |
-| Close fist / physical grab | Hold the matching hand Grip |
-| Button punch | Disabled by default; optionally Right Trigger |
-
-Open **Settings > VR > Controller Settings** to select either stick for movement/camera and remap every listed action. Individual bindings can be disabled. A connected gamepad remains usable alongside the VR controllers.
-
-## Physical actions
+### Physical actions
 
 ### Punching
 
@@ -173,7 +166,7 @@ Reach either tracked glove to Bowser's tail and hold that grip. Move the held ha
 
 Grip a supported interaction point to attach to it, then release the grip to let go. The implementation keeps the game's existing action and networking paths wherever possible.
 
-## Physical climbing
+### Physical climbing
 
 Physical climbing is enabled by default. **Enable Standard Climbing** is disabled by default so touching a pole or hangable ceiling does not automatically take control away from the player's hands.
 
@@ -194,6 +187,26 @@ The torso and legs are hidden automatically during physical climbing; tracked gl
 ### Climb Any Wall or Ceiling cheat
 
 The disabled-by-default **Cheats > Climb Any Wall or Ceiling** option extends physical gripping to ordinary solid vertical walls and overhead ceiling surfaces. Floors remain excluded. This is a cheat and may bypass intended level routes or encounter unusual modded collision. **Flying Speed (%)** ranges from the original 100% speed to 300% and defaults to 100%.
+
+### Third-person mode
+
+Third Person Mode centers the stereoscopic VR view on Mario and is intended for conventional gamepad play. It works with both the original SM64 Co-Op DX camera and the built-in free camera. Camera distance is adjustable, Mario remains the visual focus, and first-person tracked-hand/body state is cleared when switching modes.
+
+### True First Person and True Diving
+
+**True First Person** is an experimental option that follows animated body height and action motion. During flips, dives, and rollouts, animation pitch and roll can affect the view while horizontal heading remains stable. Ordinary running remains upright rather than inheriting every small model tilt.
+
+**True Diving** applies the animated dive attachment only during a dive. Both options can cause discomfort or motion sickness and are disabled by default.
+
+## Core VR features
+
+- Native stereoscopic OpenXR rendering with separate runtime-sized eye swapchains
+- Full 6DoF headset rotation and positional tracking
+- Live switching between First Person Mode, Third Person Mode, and normal flat play
+- Tracked, player-colored gloves and optional body presentation
+- Physical punching, grabbing, throwing, diving, crouching, climbing, cap handling, swimming, flight, shell riding, and cannon aiming
+- Head-locked VR menus, pause screens, text boxes, Star Select, character-selection overlays, and HUD elements
+- Head-tracked 3D audio, comfort effects, performance controls, shader preparation, and a complete left-eye desktop mirror
 
 ## Immersion and comfort
 
@@ -227,14 +240,14 @@ The headset remains free inside the cannon. With the default Aim Direction Cone 
 | Submenu | Main controls |
 | --- | --- |
 | Camera Settings | Camera mode, third-person distance, character-specific first-person height, forward/back placement, headset/left-hand/right-hand facing source, facing calibration, FOV, and brightness |
-| Controller Settings | Motion-controller input, movement/camera stick selection, action mappings, and optional trigger punching |
+| Controller Settings | Motion-controller input, movement/camera stick selection, action mappings, optional trigger punching, and optional Right Trigger Jump |
 | Motion Control Settings | Physical punches, physical grabbing, physical climbing, standard grabbing/climbing, swing release, motion dives, jump turning, punch thresholds, collider length, and Bowser tuning |
 | Model Settings | Body and Hand pages; torso/legs, optional feet-only view, crawl, ledge, pole-flip, and mounted-action visibility, body placement, glove size, rotation, and position |
-| Performance | Headset Render Scale, optional FPS counter, Desktop View, and desktop mirror frame rate |
+| Performance | Headset Render Scale, FPS counter, Desktop View, mirror frame rate, fog control, Flame & Lava Optimizations, and Ultra Performance Mode |
 | HUD Settings | HUD opacity and corner spread |
 | Immersion | Crouch/sand camera, face-stuck blackout, cannon cone, 3D sound, ledge camera, underwater filter, side-flip follow, wall-jump turn, and physical crouching |
 | Effects | Twirl Tornado Effect |
-| Cheats | Climb Any Wall or Ceiling and Flying Speed (100%-300%; 100% default) |
+| Cheats | Climb Any Wall or Ceiling plus flying, swimming, and running speed controls |
 | Experimental | Flat first person, True First Person, True Diving (Camera Effect), Arms Mode, and original Mario movement |
 
 Every VR submenu includes **Set to Defaults**.
@@ -250,34 +263,21 @@ Every VR submenu includes **Set to Defaults**.
 
 This project keeps Super Mario 64's original 30 Hz gameplay simulation and renders interpolated headset frames at the OpenXR runtime's cadence. Raising the simulation rate globally would change physics, animation timing, multiplayer behavior, and mod assumptions, so high-refresh VR smoothness is handled through render interpolation and late headset/controller poses instead.
 
-## v0.5.6 summary
+## Mod compatibility
 
-- Physical pole, tree, monkey-bar, native ceiling, and hand-over-hand climbing
-- Optional climbing on any vertical wall or overhead ceiling
-- Independent physical versus standard grabbing/climbing controls
-- Headset-synchronized climbing collision, coin collection, safe release, and swing-off momentum
-- Configurable headset/left-controller/right-controller movement-facing source
-- Turn-on-landing support that preserves jump momentum and combo state
-- HUD corner spread and independent full-resolution VR menus
-- Brightness control
-- Main-menu installed-version display, update status, and GitHub link
-- Immersive crouch/sand camera motion and face-stuck blackout
-- Cannon aim-bound enforcement with four fixed guidance arrows
-- Head-tracked horizontal 3D positional audio
-- Immediate 1.5-second painting-entry comfort fade
-- Improved first-person water exits
-- Standard climbing disabled by default while standard grabbing remains enabled
-- Repeated skid/side-flip velocity validation to prevent rare ground-launch bugs
-- Additional OpenXR, controller tracking, shader-cache, billboard, UI, interaction, and render hot-path optimizations
-- New SM64 Co-Op DX VR branding used by the game and project page
-- Optional opaque FPS counter that follows HUD corner spread
-- Reusable physical cap handling with throwing, re-grabbing, head reattachment, and a disabled-by-default anytime-cap option
-- Hand-swing-directed physical Bowser releases
-- Default-on body hiding during native ledge grabs and pull-ups
-- Optional cap removal at any time, physical re-equipping, throwing, grounded fading, and a deliberately vigorous shake gesture that grants the Wing Cap
-- Configurable Mario-body opacity plus a smooth look-down transparency comfort effect that excludes the tracked gloves
-- Weight-preserving one- and two-handed physical Bowser control with controller-swing-directed releases
-- Runtime hitch attribution for game, Lua, network, audio, shader compilation, rendering, and OpenXR stalls
+v0.6.0 expands compatibility around mod discovery, Lua HUD/menu presentation, character models, DynOS packs, palettes, controller profiles, and renderer state changes. Character Selector was specifically tested with multiple character packs, including its in-game selection overlay. Standard extracted mods, multiple DynOS packs, and custom palette files use the paths documented above.
+
+Compatibility is not universal. Mods that replace camera, player action, input, HUD, rendering, collision, or character geometry can conflict with VR behavior. Install one at a time when troubleshooting and report the exact mod name/version, headset/runtime, and reproduction steps. A mod working in normal SM64 Co-Op DX does not guarantee that every first-person physical interaction will behave correctly.
+
+## v0.6.0 — optimization and mod compatibility update
+
+- Major renderer batching and texture-state reductions, including the distant Chain Chomp/BOB performance path
+- General actor, flame, lava, snow/effect, menu, shader-preparation, and startup optimizations
+- Correct HUD opacity across coins, stars, keys, timer, camera status, and the power meter while preserving the optional opaque FPS counter
+- Character Selector and multi-character-pack compatibility work with stereoscopic menu presentation
+- Expanded Lua mod, DynOS pack, palette, character-model, and shader-cache compatibility paths
+- Native OpenXR binding suggestions for Meta Touch, Valve Index, HTC Vive, Windows Mixed Reality/Samsung Odyssey, and simple/generic controllers through runtimes including SteamVR
+- Continued stability work across first person, third person, physical carrying, climbing, caps, Bowser throws, menus, and mod-heavy startup
 
 ## Troubleshooting
 

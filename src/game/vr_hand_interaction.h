@@ -9,6 +9,10 @@ struct MarioState;
 struct Object;
 
 void vr_hand_interaction_update(struct MarioState* mario);
+void vr_hand_interaction_apply_hand_collision_position(
+    u32 hand,
+    Vec3f position
+);
 void vr_hand_interaction_update_headset_collider(
     struct MarioState* mario
 );

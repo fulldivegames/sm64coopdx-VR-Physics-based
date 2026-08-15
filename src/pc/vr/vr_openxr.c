@@ -125,6 +125,7 @@ static bool sControllerVelocityFallbackLogged = false;
 static bool sControllerActionsReady = false;
 static bool sControllerActionsAttached = false;
 static bool sControllerSyncErrorLogged = false;
+static bool sGenericControllerProfileEnabled = false;
 static XrSessionState sSessionState = XR_SESSION_STATE_UNKNOWN;
 static bool sSessionRunning = false;
 static XrEnvironmentBlendMode sEnvironmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
@@ -807,6 +808,40 @@ static bool vr_openxr_create_controller_actions(void) {
         sizeof(simpleBindings) / sizeof(simpleBindings[0])
     );
 
+    // XR_KHR_generic_controller is an optional OpenXR 1.0 fallback profile.
+    // SteamVR and other desktop runtimes can map unfamiliar motion controllers
+    // to these semantic actions, while still preferring the hardware-specific
+    // Touch, Index, Vive, or WMR suggestions above when one is available.
+    if (sGenericControllerProfileEnabled) {
+        const struct VrOpenXrBindingSpec genericBindings[] = {
+            { sGripPoseAction, "/user/hand/left/input/grip/pose" },
+            { sGripPoseAction, "/user/hand/right/input/grip/pose" },
+            { sAimPoseAction, "/user/hand/left/input/aim/pose" },
+            { sAimPoseAction, "/user/hand/right/input/aim/pose" },
+            { sTriggerAction, "/user/hand/left/input/trigger/value" },
+            { sTriggerAction, "/user/hand/right/input/trigger/value" },
+            { sSqueezeAction, "/user/hand/left/input/squeeze/value" },
+            { sSqueezeAction, "/user/hand/right/input/squeeze/value" },
+            { sThumbstickAction, "/user/hand/left/input/thumbstick" },
+            { sThumbstickAction, "/user/hand/right/input/thumbstick" },
+            { sPrimaryButtonAction, "/user/hand/left/input/primary/click" },
+            { sPrimaryButtonAction, "/user/hand/right/input/primary/click" },
+            { sSecondaryButtonAction, "/user/hand/left/input/secondary/click" },
+            { sSecondaryButtonAction, "/user/hand/right/input/secondary/click" },
+            { sMenuButtonAction, "/user/hand/left/input/secondary/click" },
+            { sMenuButtonAction, "/user/hand/right/input/secondary/click" },
+            { sThumbstickButtonAction, "/user/hand/left/input/thumbstick/click" },
+            { sThumbstickButtonAction, "/user/hand/right/input/thumbstick/click" },
+            { sHapticAction, "/user/hand/left/output/haptic" },
+            { sHapticAction, "/user/hand/right/output/haptic" }
+        };
+        vr_openxr_suggest_controller_bindings(
+            "/interaction_profiles/khr/generic_controller",
+            genericBindings,
+            sizeof(genericBindings) / sizeof(genericBindings[0])
+        );
+    }
+
     sControllerActionsReady = true;
     printf("[VR] OpenXR motion-controller action set is ready.\n");
     return true;
@@ -884,7 +919,7 @@ static bool vr_openxr_attach_controller_actions(void) {
     return true;
 }
 
-static bool vr_openxr_has_opengl_extension(void) {
+static bool vr_openxr_has_instance_extension(const char* extensionName) {
     uint32_t extensionCount = 0;
 
     XrResult result =
@@ -929,20 +964,20 @@ static bool vr_openxr_has_opengl_extension(void) {
         return false;
     }
 
-    bool foundOpenGL = false;
+    bool found = false;
 
     for (uint32_t i = 0; i < extensionCount; i++) {
         if (strcmp(
                 extensions[i].extensionName,
-                XR_KHR_OPENGL_ENABLE_EXTENSION_NAME
+                extensionName
             ) == 0) {
-            foundOpenGL = true;
+            found = true;
             break;
         }
     }
 
     free(extensions);
-    return foundOpenGL;
+    return found;
 }
 
 static bool vr_openxr_choose_blend_mode(void) {
@@ -1474,7 +1509,9 @@ bool vr_openxr_startup(void) {
 
     printf("[VR] Checking for OpenGL OpenXR support...\n");
 
-    if (!vr_openxr_has_opengl_extension()) {
+    if (!vr_openxr_has_instance_extension(
+            XR_KHR_OPENGL_ENABLE_EXTENSION_NAME
+        )) {
         printf("[VR] OpenXR runtime does not provide XR_KHR_opengl_enable.\n");
         vr_openxr_shutdown();
         return false;
@@ -1482,9 +1519,22 @@ bool vr_openxr_startup(void) {
 
     printf("[VR] XR_KHR_opengl_enable is supported.\n");
 
-    const char* enabledExtensions[] = {
-        XR_KHR_OPENGL_ENABLE_EXTENSION_NAME
+    const char* enabledExtensions[2] = {
+        XR_KHR_OPENGL_ENABLE_EXTENSION_NAME,
+        NULL
     };
+    uint32_t enabledExtensionCount = 1;
+
+    // Keep requesting OpenXR 1.0 for compatibility with older desktop
+    // runtimes, and opt into the standardized generic controller profile when
+    // it is exposed as an extension. This gives SteamVR a broad fallback for
+    // controllers beyond the explicitly suggested profiles.
+    if (vr_openxr_has_instance_extension("XR_KHR_generic_controller")) {
+        enabledExtensions[enabledExtensionCount++] =
+            "XR_KHR_generic_controller";
+        sGenericControllerProfileEnabled = true;
+        printf("[VR] Generic OpenXR controller fallback is supported.\n");
+    }
 
     XrInstanceCreateInfo createInfo = { 0 };
     createInfo.type = XR_TYPE_INSTANCE_CREATE_INFO;
@@ -1506,7 +1556,7 @@ bool vr_openxr_startup(void) {
     createInfo.applicationInfo.engineVersion = 1;
     createInfo.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 0);
 
-    createInfo.enabledExtensionCount = 1;
+    createInfo.enabledExtensionCount = enabledExtensionCount;
     createInfo.enabledExtensionNames = enabledExtensions;
 
     XrResult result =
@@ -1545,6 +1595,13 @@ bool vr_openxr_startup(void) {
 
     if (XR_SUCCEEDED(result)) {
         printf("[VR] OpenXR runtime: %s\n", instanceProperties.runtimeName);
+        if (strstr(instanceProperties.runtimeName, "SteamVR") != NULL ||
+            strstr(instanceProperties.runtimeName, "Steam") != NULL) {
+            printf(
+                "[VR] SteamVR OpenXR runtime detected; controller bindings "
+                "can be customized in SteamVR.\n"
+            );
+        }
     }
 
     XrSystemGetInfo systemInfo = { 0 };
@@ -3909,6 +3966,7 @@ void vr_openxr_shutdown(void) {
 
     sInstance = XR_NULL_HANDLE;
     sSystemId = XR_NULL_SYSTEM_ID;
+    sGenericControllerProfileEnabled = false;
 
     if (sLoader != NULL) {
         FreeLibrary(sLoader);

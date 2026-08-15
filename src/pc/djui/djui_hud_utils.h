@@ -64,6 +64,11 @@ extern bool gDjuiHudLockMouse;
 
 void djui_hud_clear_interp_data();
 
+// Native render boundary used for game HUD hooks. Mod-provided HUD elements
+// inherit the same VR corner spread and opacity as the built-in HUD while this
+// boundary is active; full-screen menus deliberately remain unaffected.
+void djui_hud_set_vr_game_hud_style(bool enabled);
+
 /* |description|Gets the current DJUI HUD resolution|descriptionEnd| */
 u8 djui_hud_get_resolution(void);
 /* |description|Sets the current DJUI HUD resolution|descriptionEnd| */

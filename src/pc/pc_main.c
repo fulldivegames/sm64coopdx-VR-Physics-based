@@ -49,6 +49,7 @@
 #include "pc/debuglog.h"
 #include "pc/utils/misc.h"
 #include "pc/mods/mods.h"
+#include "pc/chat_commands.h"
 #include "pc/vr/vr.h"
 
 #include "debug_context.h"
@@ -554,6 +555,10 @@ void *audio_thread(UNUSED void *arg) {
 }
 
 void produce_one_frame(void) {
+    // Execute native-menu Lua commands at a game-tick boundary, never while
+    // DJUI is building a render list or invoking HUD hooks.
+    exec_queued_chat_command();
+
     const bool measureVrFrame = vr_is_active();
     const f64 frameStart = measureVrFrame ? clock_elapsed_f64() : 0.0;
     f64 stageStart = frameStart;

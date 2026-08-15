@@ -55,6 +55,8 @@ struct GLTexture {
     GLuint gltex;
     GLfloat size[2];
     bool filter;
+    bool sampler_initialized;
+    bool sampler_linear;
 };
 
 static struct ShaderProgram shader_program_pool[CC_MAX_SHADERS];
@@ -133,11 +135,30 @@ static inline void gfx_opengl_set_shader_uniforms(struct ShaderProgram *prg) {
         }
     }
 
-    glUniform1i(prg->uniform_locations[8], configFiltering);
+    const int activeFiltering =
+        configVrUltraPerformanceMode && configFiltering == 2
+            ? 1
+            : configFiltering;
+    glUniform1i(prg->uniform_locations[8], activeFiltering);
 }
 
 static inline void gfx_opengl_set_texture_uniforms(struct ShaderProgram *prg, const int tile) {
     if (prg->used_textures[tile] && opengl_tex[tile]) {
+        // Three-point filtering samples exact texel centers itself. Keeping
+        // GL_LINEAR enabled made every one of its three taps a four-texel
+        // bilinear lookup. Mode 1 remains ordinary hardware bilinear.
+        const bool samplerLinear =
+            opengl_tex[tile]->filter && configFiltering == 1;
+        if (!opengl_tex[tile]->sampler_initialized ||
+            opengl_tex[tile]->sampler_linear != samplerLinear) {
+            glActiveTexture(GL_TEXTURE0 + tile);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                            samplerLinear ? GL_LINEAR : GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+                            samplerLinear ? GL_LINEAR : GL_NEAREST);
+            opengl_tex[tile]->sampler_initialized = true;
+            opengl_tex[tile]->sampler_linear = samplerLinear;
+        }
         glUniform2f(prg->uniform_locations[tile*2 + 0], opengl_tex[tile]->size[0], opengl_tex[tile]->size[1]);
         glUniform1i(prg->uniform_locations[tile*2 + 1], opengl_tex[tile]->filter);
     }
@@ -524,7 +545,6 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
         append_line(fs_buf, &fs_len, "hsv.x = fract(hsv.x + uShaderFlagValues[0]);");
         append_line(fs_buf, &fs_len, "vec3 finalColor = hsv2rgb(hsv);");
         append_line(fs_buf, &fs_len, "texel.rgb = finalColor;");
-        append_line(fs_buf, &fs_len, "}");
 
         // saturation
         append_line(fs_buf, &fs_len, "if (uShaderFlags[1] == 1) {");
@@ -563,6 +583,7 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
         append_line(fs_buf, &fs_len, "if (uShaderFlags[7] == 1) {");
         append_line(fs_buf, &fs_len, "float scan = sin(gl_FragCoord.y * 1.5) * 0.04;");
         append_line(fs_buf, &fs_len, "texel.rgb -= scan * uShaderFlagValues[7];");
+        append_line(fs_buf, &fs_len, "}");
         append_line(fs_buf, &fs_len, "}");
     }
 
@@ -819,7 +840,8 @@ static uint32_t gfx_cm_to_opengl(uint32_t val) {
 }
 
 static void gfx_opengl_set_sampler_parameters(int tile, bool linear_filter, uint32_t cms, uint32_t cmt) {
-    const GLenum filter = linear_filter ? GL_LINEAR : GL_NEAREST;
+    const bool samplerLinear = linear_filter && configFiltering == 1;
+    const GLenum filter = samplerLinear ? GL_LINEAR : GL_NEAREST;
     glActiveTexture(GL_TEXTURE0 + tile);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
@@ -828,6 +850,8 @@ static void gfx_opengl_set_sampler_parameters(int tile, bool linear_filter, uint
     opengl_curtex = tile;
     if (opengl_tex[tile]) {
         opengl_tex[tile]->filter = linear_filter;
+        opengl_tex[tile]->sampler_initialized = true;
+        opengl_tex[tile]->sampler_linear = samplerLinear;
         gfx_opengl_set_texture_uniforms(opengl_prg, tile);
     }
 }
@@ -872,7 +896,8 @@ static void gfx_opengl_set_use_alpha(bool use_alpha) {
 
 static void gfx_opengl_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
     //printf("flushing %d tris\n", buf_vbo_num_tris);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * buf_vbo_len, buf_vbo, GL_STREAM_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * buf_vbo_len,
+                 buf_vbo, GL_STREAM_DRAW);
     glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
 }
 

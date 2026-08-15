@@ -101,13 +101,16 @@ unsigned int configVrFov                          = 100;
 unsigned int configVrBrightness                   = 100;
 unsigned int configVrRenderScale                  = 100;
 bool         configVrShowFps                      = false;
-bool         configVrFlameOptimizations            = false;
+bool         configVrFlameOptimizations           = false;
+bool         configVrUltraPerformanceMode         = false;
+bool         configVrDisableFog                   = true;
 bool         configVrDesktopMirror                = true;
 unsigned int configVrDesktopMirrorFps             = 60;
 unsigned int configVrHudOpacity                   = 100;
 unsigned int configVrHudSpread                    = 120;
 bool         configVrMotionControllerInput        = true;
 bool         configVrPunchButton                  = false;
+bool         configVrRightTriggerJump             = false;
 unsigned int configVrMoveStick                    = VR_CONTROLLER_STICK_LEFT;
 unsigned int configVrCameraStick                  = VR_CONTROLLER_STICK_RIGHT;
 unsigned int configVrJumpBinding                  = VR_CONTROLLER_BINDING_RIGHT_PRIMARY;
@@ -124,6 +127,7 @@ bool         configVrStandardClimbing             = false;
 bool         configVrSwingClimbRelease            = true;
 bool         configVrCheatSurfaceClimbing         = false;
 bool         configVrCheatShakingHatWingCap       = false;
+bool         configVrCheatUnderwaterBoxPunching   = false;
 unsigned int configVrFlyingSpeed                  = VR_FLYING_SPEED_DEFAULT;
 unsigned int configVrSwimmingSpeed                = VR_SWIMMING_SPEED_DEFAULT;
 unsigned int configVrRunningSpeed                 = VR_RUNNING_SPEED_DEFAULT;
@@ -174,6 +178,7 @@ bool         configVrExperimentalFlatFirstPerson  = false;
 bool         configVrExperimentalTrueFirstPerson  = false;
 bool         configVrExperimentalTrueDiving       = false;
 bool         configVrExperimentalArmsMode         = false;
+bool         configVrExperimentalClimbableColliders = false;
 bool         configVrExperimentalMountedBody      = false;
 bool         configVrTopPoleFlipBody              = false;
 bool         configVrHideBodyOnLedge              = true;
@@ -427,12 +432,15 @@ static const struct ConfigOption options[] = {
     {.name = "vr_render_scale",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrRenderScale},
     {.name = "vr_show_fps",                    .type = CONFIG_TYPE_BOOL, .boolValue = &configVrShowFps},
     {.name = "vr_flame_optimizations",          .type = CONFIG_TYPE_BOOL, .boolValue = &configVrFlameOptimizations},
+    {.name = "vr_ultra_performance_mode",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrUltraPerformanceMode},
+    {.name = "vr_disable_fog",                  .type = CONFIG_TYPE_BOOL, .boolValue = &configVrDisableFog},
     {.name = "vr_desktop_mirror",              .type = CONFIG_TYPE_BOOL, .boolValue = &configVrDesktopMirror},
     {.name = "vr_desktop_mirror_fps",          .type = CONFIG_TYPE_UINT, .uintValue = &configVrDesktopMirrorFps},
     {.name = "vr_hud_opacity",                 .type = CONFIG_TYPE_UINT, .uintValue = &configVrHudOpacity},
     {.name = "vr_hud_spread",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrHudSpread},
     {.name = "vr_motion_controller_input",     .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControllerInput},
     {.name = "vr_punch_button",                .type = CONFIG_TYPE_BOOL, .boolValue = &configVrPunchButton},
+    {.name = "vr_right_trigger_jump",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrRightTriggerJump},
     {.name = "vr_move_stick",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrMoveStick},
     {.name = "vr_camera_stick",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrCameraStick},
     {.name = "vr_jump_binding",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrJumpBinding},
@@ -449,6 +457,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_swing_climb_release",         .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSwingClimbRelease},
     {.name = "vr_cheat_surface_climbing",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrCheatSurfaceClimbing},
     {.name = "vr_cheat_shaking_hat_wing_cap",  .type = CONFIG_TYPE_BOOL, .boolValue = &configVrCheatShakingHatWingCap},
+    {.name = "vr_cheat_underwater_box_punching", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrCheatUnderwaterBoxPunching},
     {.name = "vr_flying_speed",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrFlyingSpeed},
     {.name = "vr_swimming_speed",              .type = CONFIG_TYPE_UINT, .uintValue = &configVrSwimmingSpeed},
     {.name = "vr_running_speed",               .type = CONFIG_TYPE_UINT, .uintValue = &configVrRunningSpeed},
@@ -498,6 +507,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_experimental_true_first_person", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalTrueFirstPerson},
     {.name = "vr_experimental_true_diving",      .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalTrueDiving},
     {.name = "vr_experimental_arms_mode",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalArmsMode},
+    {.name = "vr_experimental_climbable_colliders", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalClimbableColliders},
     {.name = "vr_experimental_mounted_body",    .type = CONFIG_TYPE_BOOL, .boolValue = &configVrExperimentalMountedBody},
     {.name = "vr_top_pole_flip_body",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrTopPoleFlipBody},
     {.name = "vr_hide_body_on_ledge",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrHideBodyOnLedge},

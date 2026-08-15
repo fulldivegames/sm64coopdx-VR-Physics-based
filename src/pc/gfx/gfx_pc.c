@@ -31,6 +31,7 @@
 #include "pc/debug_context.h"
 #include "pc/pc_main.h"
 #include "pc/platform.h"
+#include "pc/vr/vr.h"
 #include "pc/utils/misc.h"
 
 #include "pc/fs/fs.h"
@@ -179,10 +180,16 @@ static bool sOnlyTextureChangeOnAddrChange = false;
 static void gfx_update_loaded_texture(uint8_t tile_number, uint32_t size_bytes, const uint8_t* addr) {
     if (tile_number >= MAX_TILES) { return; }
     tile_number = rdp.texture_tile[tile_number].index;
-    if (!sOnlyTextureChangeOnAddrChange) {
-        rdp.textures_changed[tile_number] = true;
-    } else if (!rdp.textures_changed[tile_number]) {
-        rdp.textures_changed[tile_number] = rdp.loaded_texture[tile_number].addr != addr;
+    if (!rdp.textures_changed[tile_number]) {
+        // Reissuing an N64 load command for the texture that is already
+        // selected does not require another host texture lookup or a VBO
+        // flush. Large level display lists repeat these commands heavily;
+        // treating every repeat as a change fragments otherwise compatible
+        // triangles into hundreds of tiny GLES/GL draws.
+        rdp.textures_changed[tile_number] =
+            rdp.loaded_texture[tile_number].addr != addr ||
+            (!sOnlyTextureChangeOnAddrChange &&
+             rdp.loaded_texture[tile_number].size_bytes != size_bytes);
     }
     rdp.loaded_texture[tile_number].size_bytes = size_bytes;
     rdp.loaded_texture[tile_number].addr = addr;
@@ -1132,7 +1139,8 @@ static void OPTIMIZE_O3 gfx_sp_vertex(size_t n_vertices, size_t dest_index, cons
         d->z = z;
         d->w = w;
 
-        if (rsp.geometry_mode & G_FOG) {
+        if (!(configVrDisableFog && vr_is_active()) &&
+            (rsp.geometry_mode & G_FOG)) {
             if (fabsf(w) < 0.001f) {
                 // To avoid division by zero
                 w = 0.001f;
@@ -1250,7 +1258,8 @@ static void OPTIMIZE_O3 gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t 
     cm->texture_edge   = (rdp.other_mode_l & CVG_X_ALPHA)               == CVG_X_ALPHA;
     cm->use_dither     = (rdp.other_mode_l & G_AC_DITHER)               == G_AC_DITHER;
     cm->use_2cycle     = (rdp.other_mode_h & (3U << G_MDSFT_CYCLETYPE)) == G_CYC_2CYCLE;
-    cm->use_fog        = (rdp.other_mode_l >> 30)                       == G_BL_CLR_FOG;
+    cm->use_fog        = !(configVrDisableFog && vr_is_active()) &&
+                         (rdp.other_mode_l >> 30) == G_BL_CLR_FOG;
     cm->light_map      = (rsp.geometry_mode & G_LIGHT_MAP_EXT)          == G_LIGHT_MAP_EXT;
     cm->world_geometry = gShaderFlagsEnabled && (v1->world_geometry && v2->world_geometry && v3->world_geometry);
 
@@ -1576,6 +1585,12 @@ static void gfx_dp_set_texture_image(UNUSED uint32_t format, uint32_t size, UNUS
 }
 
 static void gfx_dp_set_tile(uint8_t fmt, uint32_t siz, uint32_t line, uint32_t tmem, uint8_t tile, uint32_t palette, uint32_t cmt, uint32_t maskt, uint32_t shiftt, uint32_t cms, uint32_t masks, uint32_t shifts) {
+    const bool textureInterpretationChanged =
+        tile < MAX_TEXTURES &&
+        (rdp.texture_tile[tile].fmt != fmt ||
+         rdp.texture_tile[tile].siz != siz ||
+         rdp.texture_tile[tile].line_size_bytes != line * 8 ||
+         rdp.texture_tile[tile].palette != palette);
     rdp.texture_tile[tile].fmt = fmt;
     rdp.texture_tile[tile].siz = siz;
     rdp.texture_tile[tile].cms = cms;
@@ -1589,9 +1604,8 @@ static void gfx_dp_set_tile(uint8_t fmt, uint32_t siz, uint32_t line, uint32_t t
     rdp.texture_tile[tile].palette = palette;
     // For some reason toad player's face breaks without this line, everything else is fine though
     rdp.texture_tile[tile].index = (tile == G_TX_LOADTILE ? tmem/256 : (tile == G_TX_LOADTILE_6_UNKNOWN ? 1 : 0));
-    if (!sOnlyTextureChangeOnAddrChange) {
-        rdp.textures_changed[0] = true;
-        rdp.textures_changed[1] = true;
+    if (!sOnlyTextureChangeOnAddrChange && textureInterpretationChanged) {
+        rdp.textures_changed[tile] = true;
     }
 }
 
@@ -1600,10 +1614,9 @@ static void gfx_dp_set_tile_size(uint8_t tile, uint16_t uls, uint16_t ult, uint1
     rdp.texture_tile[tile].ult = ult;
     rdp.texture_tile[tile].lrs = lrs;
     rdp.texture_tile[tile].lrt = lrt;
-    if (!sOnlyTextureChangeOnAddrChange) {
-        rdp.textures_changed[0] = true;
-        rdp.textures_changed[1] = true;
-    }
+    // Tile bounds are consumed while each vertex is written into the host
+    // VBO. They do not alter the uploaded texture, so invalidating both host
+    // texture slots here only forces redundant draw-call breaks.
 }
 
 static void gfx_dp_load_tlut(uint8_t tile, uint32_t high_index) {
@@ -2624,6 +2637,9 @@ static void gfx_pc_precomp_shader_exact(uint32_t rgb1, uint32_t alpha1, uint32_t
 
     struct CombineMode* cm = &rdp.combine_mode;
     cm->flags = flags;
+    if (configVrDisableFog) {
+        cm->use_fog = false;
+    }
 
     gfx_lookup_or_create_color_combiner(cm);
 }

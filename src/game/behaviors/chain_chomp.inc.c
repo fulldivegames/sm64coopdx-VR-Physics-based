@@ -121,13 +121,16 @@ static void chain_chomp_update_chain_segments(void) {
         f32 offsetX = segment->posX - prevSegment->posX;
         f32 offsetY = segment->posY - prevSegment->posY;
         f32 offsetZ = segment->posZ - prevSegment->posZ;
-        f32 offset = sqrtf(offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ);
+        f32 offsetSq = offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ;
+        f32 maxOffset = o->oChainChompMaxDistBetweenChainParts;
 
-        if (offset > o->oChainChompMaxDistBetweenChainParts) {
-            offset = o->oChainChompMaxDistBetweenChainParts / offset;
-            offsetX *= offset;
-            offsetY *= offset;
-            offsetZ *= offset;
+        // A negative maximum is deliberately used during the end of a lunge
+        // to snap the chain back and forth, so retain that original path.
+        if (maxOffset < 0.0f || offsetSq > maxOffset * maxOffset) {
+            f32 scale = maxOffset / sqrtf(offsetSq);
+            offsetX *= scale;
+            offsetY *= scale;
+            offsetZ *= scale;
         }
 
         // Cap distance to pivot (so that it stretches when the chomp moves far
@@ -136,14 +139,13 @@ static void chain_chomp_update_chain_segments(void) {
         offsetX += prevSegment->posX;
         offsetY += prevSegment->posY;
         offsetZ += prevSegment->posZ;
-        offset = sqrtf(offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ);
-
         f32 maxTotalOffset = o->oChainChompMaxDistFromPivotPerChainPart * (5 - i);
-        if (offset > maxTotalOffset) {
-            offset = maxTotalOffset / offset;
-            offsetX *= offset;
-            offsetY *= offset;
-            offsetZ *= offset;
+        offsetSq = offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ;
+        if (offsetSq > maxTotalOffset * maxTotalOffset) {
+            f32 scale = maxTotalOffset / sqrtf(offsetSq);
+            offsetX *= scale;
+            offsetY *= scale;
+            offsetZ *= scale;
         }
 
         segment->posX = offsetX;

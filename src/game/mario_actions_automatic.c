@@ -1134,6 +1134,22 @@ s32 act_in_cannon(struct MarioState *m) {
                     !vrHeadsetAim ||
                     !configVrImmersiveCannonCone ||
                     sVrCannonHeadsetWithinBounds;
+                const bool vrCannonFireBlocked =
+                    (m->input & INPUT_A_PRESSED) &&
+                    localPlayer &&
+                    !vrCannonFireAllowed;
+                if (vrCannonFireBlocked) {
+                    // A rejected shot is still an active aiming attempt. Do
+                    // not let the fire input leak into camera processing or
+                    // clear the native cannon mask/reticle; keep the player
+                    // inside the cannon so they can re-aim and try again.
+                    m->input &= ~INPUT_A_PRESSED;
+                    if (m->area != NULL && m->area->camera != NULL) {
+                        m->area->camera->mode = CAMERA_MODE_INSIDE_CANNON;
+                    }
+                    gLakituState.mode = CAMERA_MODE_INSIDE_CANNON;
+                    sVrCannonGuidanceActive = true;
+                }
                 if ((m->input & INPUT_A_PRESSED) &&
                     localPlayer &&
                     vrCannonFireAllowed) {

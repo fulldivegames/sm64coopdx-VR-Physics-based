@@ -17,6 +17,10 @@
   matching 3D-style red/blue "VR" mark. Replace the standalone home-menu and
   loading-screen logo with it so PC, Android, release packaging, and the
   GitHub README all present the same SM64 Co-Op DX VR branding.
+- Standalone custom palettes live in `/sdcard/SM64VR/palettes`. The app must
+  create this folder automatically, load user-supplied `.ini` palettes from
+  it, and save newly exported palettes there. On the next standalone release,
+  add this path as a short side note in the README's mod-install section.
 - Port the Quest swimming surface-exit behavior to PC: while near the surface,
   pressing jump with the movement stick forward should exit the water when the
   headset is aimed at least 45 degrees upward. This replaces the unintuitive

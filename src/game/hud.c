@@ -428,6 +428,13 @@ static void render_vr_hud_fps(void) {
     gDPSetEnvColor(gDisplayListHead++, 0xFF, 0xFF, 0xFF, 0xFF);
     print_text(x, y, "FPS");
     print_text_fmt_int(x + 32, y, "%d", djui_fps_display_get());
+
+    // FPS intentionally ignores HUD opacity, but it shares the environment
+    // color register with every HUD glyph rendered after it. Restore the
+    // configured alpha immediately so the FPS counter cannot make the coin,
+    // star, timer, or power-meter readouts opaque.
+    gDPSetEnvColor(gDisplayListHead++, 0xFF, 0xFF, 0xFF,
+                   get_hud_opacity_alpha(0xFF));
 }
 
 /**
@@ -695,6 +702,8 @@ void render_hud_red_coins_and_secrets_radar(void) {
 void render_hud_coins(void) {
     const s32 anchorX = 168;
     const s32 anchorY = HUD_TOP_Y;
+    gDPSetEnvColor(gDisplayListHead++, 0xFF, 0xFF, 0xFF,
+                   get_hud_opacity_alpha(0xFF));
     print_text(vr_hud_group_x(168, anchorX), vr_hud_group_y(HUD_TOP_Y, anchorY), "+"); // 'Coin' glyph
     print_text(vr_hud_group_x(184, anchorX), vr_hud_group_y(HUD_TOP_Y, anchorY), "*"); // 'X' glyph
     print_text_fmt_int(vr_hud_group_x(198, anchorX), vr_hud_group_y(HUD_TOP_Y, anchorY), "%d", gHudDisplay.coins);
@@ -726,6 +735,8 @@ void render_hud_stars(void) {
 
     const s32 anchorX = GFX_DIMENSIONS_RECT_FROM_RIGHT_EDGE(HUD_STARS_X);
     const s32 anchorY = HUD_TOP_Y;
+    gDPSetEnvColor(gDisplayListHead++, 0xFF, 0xFF, 0xFF,
+                   get_hud_opacity_alpha(0xFF));
     print_text(vr_hud_group_x(GFX_DIMENSIONS_RECT_FROM_RIGHT_EDGE(HUD_STARS_X), anchorX), vr_hud_group_y(HUD_TOP_Y, anchorY), "-"); // 'Star' glyph
     if (showX == 1) {
         print_text(vr_hud_group_x(GFX_DIMENSIONS_RECT_FROM_RIGHT_EDGE(HUD_STARS_X) + 16, anchorX), vr_hud_group_y(HUD_TOP_Y, anchorY), "*"); // 'X' glyph
@@ -740,6 +751,9 @@ void render_hud_stars(void) {
  */
 void render_hud_keys(void) {
     s16 i;
+
+    gDPSetEnvColor(gDisplayListHead++, 0xFF, 0xFF, 0xFF,
+                   get_hud_opacity_alpha(0xFF));
 
     for (i = 0; i < gHudDisplay.keys; i++) {
         print_text((i * 16) + 220, 142, "/"); // unused glyph - beta key
@@ -757,6 +771,9 @@ void render_hud_timer(void) {
     u16 timerFracSecs;
     const s32 anchorX = GFX_DIMENSIONS_RECT_FROM_RIGHT_EDGE(150);
 #define VR_TIMER_X(x) vr_hud_group_x((x), anchorX)
+
+    gDPSetEnvColor(gDisplayListHead++, 0xFF, 0xFF, 0xFF,
+                   get_hud_opacity_alpha(0xFF));
 
     hudLUT = segmented_to_virtual(&main_hud_lut);
     timerValFrames = gHudDisplay.timer;
@@ -822,6 +839,9 @@ void render_hud_camera_status(void) {
         return;
     }
 
+    gDPSetEnvColor(gDisplayListHead++, 0xFF, 0xFF, 0xFF,
+                   get_hud_opacity_alpha(0xFF));
+
     gSPDisplayList(gDisplayListHead++, dl_hud_img_begin);
     render_hud_tex_lut(x, y, (*cameraLUT)[GLYPH_CAM_CAMERA]);
 
@@ -864,6 +884,10 @@ void render_hud(void) {
         vr_face_stuck_blackout_active();
     const bool underwaterFilter =
         vr_underwater_filter_active();
+    const bool cannonHudActive =
+        gMarioStates[0].action == ACT_IN_CANNON &&
+        gCurrentArea != NULL &&
+        gCurrentArea->camera != NULL;
 
     if (hudDisplayFlags == HUD_DISPLAY_NONE) {
         sPowerMeterHUD.animation = POWER_METER_HIDDEN;
@@ -872,7 +896,8 @@ void render_hud(void) {
     }
     if (hudDisplayFlags == HUD_DISPLAY_NONE &&
         !faceStuckBlackout &&
-        !underwaterFilter) {
+        !underwaterFilter &&
+        !cannonHudActive) {
         return;
     }
     {
@@ -930,7 +955,7 @@ void render_hud(void) {
         gDPSetEnvColor(gDisplayListHead++, 0xFF, 0xFF, 0xFF,
                        get_hud_opacity_alpha(0xFF));
 
-        if (gCurrentArea != NULL && gCurrentArea->camera != NULL && gCurrentArea->camera->mode == CAMERA_MODE_INSIDE_CANNON) {
+        if (cannonHudActive) {
             render_hud_cannon_reticle();
             render_vr_cannon_guidance_arrows();
         }

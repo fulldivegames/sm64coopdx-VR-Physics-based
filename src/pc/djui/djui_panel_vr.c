@@ -90,8 +90,17 @@ static void djui_panel_vr_performance_defaults(struct DjuiBase* caller) {
     configVrRenderScale = 100;
     configVrShowFps = false;
     configVrFlameOptimizations = false;
+    configVrUltraPerformanceMode = false;
+    configVrDisableFog = true;
     configVrDesktopMirror = true;
     configVrDesktopMirrorFps = 60;
+}
+
+static void djui_panel_vr_ultra_performance_changed(struct DjuiBase* caller) {
+    (void)caller;
+    if (configVrUltraPerformanceMode) {
+        configVrTwirlTornadoEffect = false;
+    }
 }
 
 static void djui_panel_vr_experimental_defaults(struct DjuiBase* caller) {
@@ -101,6 +110,7 @@ static void djui_panel_vr_experimental_defaults(struct DjuiBase* caller) {
     configVrExperimentalTrueFirstPerson = false;
     configVrExperimentalTrueDiving = false;
     configVrExperimentalArmsMode = false;
+    configVrExperimentalClimbableColliders = false;
     configVrOriginalMarioMovement = false;
     configVrBackpedalSpeed = VR_BACKPEDAL_SPEED_DEFAULT;
 }
@@ -112,6 +122,7 @@ static void djui_panel_vr_controller_defaults(
 
     configVrMotionControllerInput = true;
     configVrPunchButton = false;
+    configVrRightTriggerJump = false;
     configVrMoveStick = VR_CONTROLLER_STICK_LEFT;
     configVrCameraStick = VR_CONTROLLER_STICK_RIGHT;
     configVrJumpBinding =
@@ -126,6 +137,22 @@ static void djui_panel_vr_controller_defaults(
         VR_CONTROLLER_BINDING_RIGHT_STICK_CLICK;
     configVrPauseBinding =
         VR_CONTROLLER_BINDING_LEFT_MENU;
+}
+
+static void djui_panel_vr_right_trigger_jump_changed(
+    UNUSED struct DjuiBase* caller
+) {
+    if (configVrRightTriggerJump) {
+        configVrPunchButton = false;
+    }
+}
+
+static void djui_panel_vr_punch_button_changed(
+    UNUSED struct DjuiBase* caller
+) {
+    if (configVrPunchButton) {
+        configVrRightTriggerJump = false;
+    }
 }
 
 static void djui_panel_vr_motion_control_defaults(
@@ -187,6 +214,7 @@ static void djui_panel_vr_cheat_defaults(struct DjuiBase* caller) {
 
     configVrCheatSurfaceClimbing = false;
     configVrCheatShakingHatWingCap = false;
+    configVrCheatUnderwaterBoxPunching = false;
     configVrFlyingSpeed = VR_FLYING_SPEED_DEFAULT;
     configVrSwimmingSpeed = VR_SWIMMING_SPEED_DEFAULT;
     configVrRunningSpeed = VR_RUNNING_SPEED_DEFAULT;
@@ -401,6 +429,20 @@ static void djui_panel_vr_performance_create(struct DjuiBase* caller) {
 
         djui_checkbox_create(
             body,
+            "Ultra Performance Mode (Degrades Visuals)",
+            &configVrUltraPerformanceMode,
+            djui_panel_vr_ultra_performance_changed
+        );
+
+        djui_checkbox_create(
+            body,
+            "Disable Fog",
+            &configVrDisableFog,
+            NULL
+        );
+
+        djui_checkbox_create(
+            body,
             "Desktop View",
             &configVrDesktopMirror,
             NULL
@@ -466,6 +508,13 @@ static void djui_panel_vr_experimental_create(struct DjuiBase* caller) {
             body,
             "Arms Mode",
             &configVrExperimentalArmsMode,
+            NULL
+        );
+
+        djui_checkbox_create(
+            body,
+            "Colliders for Poles, Trees, and Hangables",
+            &configVrExperimentalClimbableColliders,
             NULL
         );
 
@@ -615,7 +664,14 @@ static void djui_panel_vr_controller_settings_create(
             body,
             "Enable Punch Button (Right Trigger)",
             &configVrPunchButton,
-            NULL
+            djui_panel_vr_punch_button_changed
+        );
+
+        djui_checkbox_create(
+            body,
+            "Right Trigger Jump",
+            &configVrRightTriggerJump,
+            djui_panel_vr_right_trigger_jump_changed
         );
 
         djui_button_create(
@@ -1190,6 +1246,12 @@ static void djui_panel_vr_cheats_create(struct DjuiBase* caller) {
             body,
             "Shaking Hat Gives Wing Cap (Grab Cap at Any Time Required)",
             &configVrCheatShakingHatWingCap,
+            NULL
+        );
+        djui_checkbox_create(
+            body,
+            "Punch Boxes While Underwater",
+            &configVrCheatUnderwaterBoxPunching,
             NULL
         );
 

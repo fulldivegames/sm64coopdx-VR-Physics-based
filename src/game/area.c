@@ -463,7 +463,9 @@ void render_game(void) {
             if (gServerSettings.nametags && !gDjuiInMainMenu) {
                 nametags_render();
             }
+            djui_hud_set_vr_game_hud_style(true);
             smlua_call_event_hooks(HOOK_ON_HUD_RENDER_BEHIND, djui_reset_hud_params);
+            djui_hud_set_vr_game_hud_style(false);
             djui_gfx_displaylist_end();
         }
         render_hud();
@@ -505,7 +507,9 @@ void render_game(void) {
         }
     } else {
         // this will get drawn over anyways
+        djui_hud_set_vr_game_hud_style(true);
         smlua_call_event_hooks(HOOK_ON_HUD_RENDER_BEHIND, djui_reset_hud_params);
+        djui_hud_set_vr_game_hud_style(false);
 
         render_text_labels();
         if (gViewportClip != NULL) {

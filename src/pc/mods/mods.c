@@ -189,15 +189,6 @@ static void mods_sort(struct Mods* mods) {
     }
 }
 
-static u32 mods_count_directory(char* modsBasePath) {
-    struct dirent* dir = NULL;
-    DIR* d = opendir(modsBasePath);
-    u32 pathCount = 0;
-    while ((dir = readdir(d)) != NULL) pathCount++;
-    closedir(d);
-    return pathCount;
-}
-
 static void mods_load(struct Mods* mods, char* modsBasePath, UNUSED bool isUserModPath) {
     LOADING_SCREEN_MUTEX(snprintf(gCurrLoadingSegment.str, 256, "Generating DynOS Packs In %s Mod Path:\n\\#808080\\%s", isUserModPath ? "User" : "Local", modsBasePath));
 
@@ -227,7 +218,13 @@ static void mods_load(struct Mods* mods, char* modsBasePath, UNUSED bool isUserM
         LOG_ERROR("Could not open directory '%s'", modsBasePath);
         return;
     }
-    UNUSED f32 count = (f32) mods_count_directory(modsBasePath);
+    u32 pathCount = 0;
+    while ((dir = readdir(d)) != NULL) {
+        if (strcmp(dir->d_name, ".") == 0 ||
+            strcmp(dir->d_name, "..") == 0) continue;
+        pathCount++;
+    }
+    rewinddir(d);
 
     LOADING_SCREEN_MUTEX(
         loading_screen_reset_progress_bar();
@@ -236,7 +233,8 @@ static void mods_load(struct Mods* mods, char* modsBasePath, UNUSED bool isUserM
 
     // iterate
     char path[SYS_MAX_PATH] = { 0 };
-    for (u32 i = 0; (dir = readdir(d)) != NULL; ++i) {
+    u32 processedCount = 0;
+    while ((dir = readdir(d)) != NULL) {
 
         // sanity check / fill path[]
         if (!directory_sanity_check(dir, modsBasePath, path)) { continue; }
@@ -248,7 +246,12 @@ static void mods_load(struct Mods* mods, char* modsBasePath, UNUSED bool isUserM
             break;
         }
 
-        LOADING_SCREEN_MUTEX(gCurrLoadingSegment.percentage = (f32) i / count);
+        processedCount++;
+        LOADING_SCREEN_MUTEX(
+            gCurrLoadingSegment.percentage = pathCount > 0
+                ? (f32) processedCount / (f32) pathCount
+                : 1.0f
+        );
     }
 
     closedir(d);

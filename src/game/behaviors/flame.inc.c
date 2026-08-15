@@ -22,9 +22,16 @@ void bhv_small_piranha_flame_loop(void) {
 
         obj_compute_vel_from_move_pitch(o->oSmallPiranhaFlameStartSpeed);
         cur_obj_move_standard(-78);
-        if (!configVrFlameOptimizations || (o->oTimer & 1) == 0) {
-            spawn_object_with_scale(o, o->oSmallPiranhaFlameModel, bhvSmallPiranhaFlame,
-                                    (configVrFlameOptimizations ? 0.55f : 0.4f) * o->header.gfx.scale[0]);
+        const bool reduceFlames =
+            configVrFlameOptimizations || configVrUltraPerformanceMode;
+        if (!reduceFlames || (o->oTimer & 1) == 0) {
+            spawn_object_with_scale(
+                o,
+                o->oSmallPiranhaFlameModel,
+                bhvSmallPiranhaFlame,
+                (reduceFlames ? 0.55f : 0.4f) *
+                    o->header.gfx.scale[0]
+            );
         }
 
         if (o->oTimer > o->oSmallPiranhaFlameNextFlameTimer) {

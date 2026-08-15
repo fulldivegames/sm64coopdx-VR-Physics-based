@@ -13,6 +13,7 @@
 #include "audio/external.h"
 #include "obj_behaviors.h"
 #include "pc/utils/misc.h"
+#include "pc/configfile.h"
 
 /**
  * This file contains the function that handles 'environment effects',
@@ -41,6 +42,14 @@ s16 gSnowParticleMaxCount;
 /* DATA */
 s8 gEnvFxMode = 0;
 UNUSED s32 D_80330644 = 0;
+
+static s16 envfx_active_snow_particle_count(void) {
+    if (!configVrUltraPerformanceMode) {
+        return gSnowParticleCount;
+    }
+    const s16 cap = (gEnvFxMode == ENVFX_SNOW_WATER) ? 10 : 35;
+    return gSnowParticleCount < cap ? gSnowParticleCount : cap;
+}
 
 /// Template for a snow particle triangle
 Vtx gSnowTempVtx[3] = { { { { -5, 5, 0 },  0, { 0, 0 },   { 0xFF, 0xFF, 0xFF, 0xFF } } },
@@ -75,7 +84,7 @@ void patch_snow_particles_before(void) {
         vec3s_copy(sSnowGfxPrevCamTo, sSnowGfxCamTo);
         vec3s_copy(sSnowGfxPrevMarioPos, sSnowGfxMarioPos);
         sSnowGfxHistoryValid = true;
-        for (s32 i = 0; i < gSnowParticleCount; i++) {
+        for (s32 i = 0; i < envfx_active_snow_particle_count(); i++) {
             vec3s_set((gEnvFxBuffer + i)->prevPos, (gEnvFxBuffer + i)->xPos, (gEnvFxBuffer + i)->yPos, (gEnvFxBuffer + i)->zPos);
         }
         sSnowGfxPos = NULL;
@@ -270,7 +279,7 @@ void envfx_update_snow_normal(s32 snowCylinderX, s32 snowCylinderY, s32 snowCyli
     s32 deltaY = snowCylinderY - gSnowCylinderLastPos[1];
     s32 deltaZ = snowCylinderZ - gSnowCylinderLastPos[2];
 
-    for (i = 0; i < gSnowParticleCount; i++) {
+    for (i = 0; i < envfx_active_snow_particle_count(); i++) {
         (gEnvFxBuffer + i)->isAlive =
             envfx_is_snowflake_alive(i, snowCylinderX, snowCylinderY, snowCylinderZ);
         if ((gEnvFxBuffer + i)->isAlive == 0) {
@@ -306,7 +315,7 @@ void envfx_update_snow_blizzard(s32 snowCylinderX, s32 snowCylinderY, s32 snowCy
     s32 deltaY = snowCylinderY - gSnowCylinderLastPos[1];
     s32 deltaZ = snowCylinderZ - gSnowCylinderLastPos[2];
 
-    for (i = 0; i < gSnowParticleCount; i++) {
+    for (i = 0; i < envfx_active_snow_particle_count(); i++) {
         (gEnvFxBuffer + i)->isAlive =
             envfx_is_snowflake_alive(i, snowCylinderX, snowCylinderY, snowCylinderZ);
         if ((gEnvFxBuffer + i)->isAlive == 0) {
@@ -353,7 +362,7 @@ UNUSED static s32 is_in_mystery_snow_area(s32 x, UNUSED s32 y, s32 z) {
 void envfx_update_snow_water(s32 snowCylinderX, s32 snowCylinderY, s32 snowCylinderZ) {
     s32 i;
 
-    for (i = 0; i < gSnowParticleCount; i++) {
+    for (i = 0; i < envfx_active_snow_particle_count(); i++) {
         (gEnvFxBuffer + i)->isAlive =
             envfx_is_snowflake_alive(i, snowCylinderX, snowCylinderY, snowCylinderZ);
         if ((gEnvFxBuffer + i)->isAlive == 0) {
@@ -506,7 +515,7 @@ Gfx *envfx_update_snow_internal(s32 snowMode, Vec3s marioPos, Vec3s camFrom, Vec
     if (interpolated && sSnowGfxPos) {
         gfxStart = sSnowGfxPos;
     } else {
-        gfxStart = (Gfx *) alloc_display_list((gSnowParticleCount * 6 + 3) * sizeof(Gfx));
+        gfxStart = (Gfx *) alloc_display_list((envfx_active_snow_particle_count() * 6 + 3) * sizeof(Gfx));
         sSnowGfxPos = gfxStart;
         if (sSnowGfxMode != snowMode) {
             sSnowGfxHistoryValid = false;
@@ -574,7 +583,7 @@ Gfx *envfx_update_snow_internal(s32 snowMode, Vec3s marioPos, Vec3s camFrom, Vec
         gSPDisplayList(gfx++, &tiny_bubble_dl_0B006CD8); // snowflake with blue edge
     }
 
-    for (i = 0; i < gSnowParticleCount; i += 5) {
+    for (i = 0; i < envfx_active_snow_particle_count(); i += 5) {
         append_snowflake_vertex_buffer(gfx++, i, (s16 *) &vertex1, (s16 *) &vertex2, (s16 *) &vertex3, interpolated);
 
         gSP1Triangle(gfx++, 0, 1, 2, 0);

@@ -3032,10 +3032,12 @@ s16 render_pause_courses_and_castle(void) {
                 }
 
 #ifdef VERSION_EU
-                if (gPlayer1Controller->buttonPressed & (A_BUTTON | Z_TRIG | START_BUTTON))
+                if ((gPlayer1Controller->buttonPressed & (A_BUTTON | Z_TRIG | START_BUTTON)) ||
+                    (vr_is_active() && (gPlayer1Controller->buttonPressed & B_BUTTON)))
 #else
                 if (gPlayer1Controller->buttonPressed & A_BUTTON
-                 || gPlayer1Controller->buttonPressed & START_BUTTON)
+                 || gPlayer1Controller->buttonPressed & START_BUTTON
+                 || (vr_is_active() && (gPlayer1Controller->buttonPressed & B_BUTTON)))
 #endif
                 {
                     bool allowExit = true;
@@ -3075,10 +3077,12 @@ s16 render_pause_courses_and_castle(void) {
                 }
 
 #ifdef VERSION_EU
-                if (gPlayer1Controller->buttonPressed & (A_BUTTON | Z_TRIG | START_BUTTON))
+                if ((gPlayer1Controller->buttonPressed & (A_BUTTON | Z_TRIG | START_BUTTON)) ||
+                    (vr_is_active() && (gPlayer1Controller->buttonPressed & B_BUTTON)))
 #else
                 if (gPlayer1Controller->buttonPressed & A_BUTTON
-                 || gPlayer1Controller->buttonPressed & START_BUTTON)
+                 || gPlayer1Controller->buttonPressed & START_BUTTON
+                 || (vr_is_active() && (gPlayer1Controller->buttonPressed & B_BUTTON)))
 #endif
                 {
                     level_set_transition(0, NULL);

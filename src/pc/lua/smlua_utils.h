@@ -59,6 +59,9 @@ const char* smlua_lnt_to_str(struct LSTNetworkType* lnt);
 
 s64 smlua_get_integer_mod_variable(u16 modIndex, const char* variable);
 s64 smlua_get_any_integer_mod_variable(const char* variable);
+bool smlua_get_boolean_mod_variable(u16 modIndex, const char* variable, bool* value);
+s32 smlua_find_boolean_mod_variable(const char* variable, bool* value);
+bool smlua_get_any_boolean_mod_variable(const char* variable, bool* value);
 LuaFunction smlua_get_function_mod_variable(u16 modIndex, const char *variable);
 LuaFunction smlua_get_any_function_mod_variable(const char *variable);
 

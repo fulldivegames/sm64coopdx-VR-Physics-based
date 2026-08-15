@@ -55,8 +55,13 @@ const char* network_get_player_text_color_string(u8 localIndex) {
 
 extern s16 gMenuMode;
 bool network_check_singleplayer_pause(void) {
+    const bool standalone = gNetworkType == NT_NONE;
+    const bool oneNetworkPlayer =
+        network_player_connected_count() == 1;
     return ((gMenuMode != -1) || (gCameraMovementFlags & CAM_MOVE_PAUSE_SCREEN)) &&
-        !gDjuiInPlayerMenu && network_player_connected_count() == 1 && mods_get_all_pausable();
+        !gDjuiInPlayerMenu &&
+        (standalone ||
+         (oneNetworkPlayer && mods_get_all_pausable()));
 }
 
 const char* network_discord_id_from_local_index(u8 localIndex) {

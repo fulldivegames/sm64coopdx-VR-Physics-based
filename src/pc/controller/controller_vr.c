@@ -528,7 +528,14 @@ static void controller_vr_read(OSContPad* pad) {
         }
     }
 
+    if (configVrRightTriggerJump &&
+        rightAvailable &&
+        right.trigger >= VR_TRIGGER_THRESHOLD) {
+        pad->button |= A_BUTTON;
+    }
+
     if (configVrPunchButton &&
+        !configVrRightTriggerJump &&
         rightAvailable &&
         right.trigger >= VR_TRIGGER_THRESHOLD) {
         pad->button |= B_BUTTON;

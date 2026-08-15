@@ -43,12 +43,16 @@ void DynOS_Gfx_GeneratePacks(const char* directory) {
     if (!modsDir) { return; }
 
     struct dirent *dir = NULL;
-    DIR* d = opendir(directory);
     u32 pathCount = 0;
-    while ((dir = readdir(d)) != NULL) pathCount++;
-    closedir(d);
+    while ((dir = readdir(modsDir)) != NULL) {
+        if (SysPath(dir->d_name) == "." ||
+            SysPath(dir->d_name) == "..") continue;
+        pathCount++;
+    }
+    rewinddir(modsDir);
 
-    for (u32 i = 0; (dir = readdir(modsDir)) != NULL; ++i) {
+    u32 processedCount = 0;
+    while ((dir = readdir(modsDir)) != NULL) {
         // Skip . and ..
         if (SysPath(dir->d_name) == ".") continue;
         if (SysPath(dir->d_name) == "..") continue;
@@ -58,7 +62,12 @@ void DynOS_Gfx_GeneratePacks(const char* directory) {
 
         // generate packs
         DynOS_Gfx_GenerateModPacks(sModPath);
-        LOADING_SCREEN_MUTEX(gCurrLoadingSegment.percentage = (f32) i / (f32) pathCount);
+        processedCount++;
+        LOADING_SCREEN_MUTEX(
+            gCurrLoadingSegment.percentage = pathCount > 0
+                ? (f32) processedCount / (f32) pathCount
+                : 1.0f
+        );
     }
 
     closedir(modsDir);

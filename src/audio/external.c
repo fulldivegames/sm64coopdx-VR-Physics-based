@@ -837,10 +837,12 @@ void create_next_audio_buffer(s16 *samples, u32 num_samples) {
 extern f32 *smlua_get_vec3f_for_play_sound(f32 *pos);
 
 void play_sound(s32 soundBits, f32 *pos) {
-    MUTEX_LOCK(gAudioThread);
-
     pos = smlua_get_vec3f_for_play_sound(pos);
+#ifndef __ANDROID__
     smlua_call_event_hooks(HOOK_ON_PLAY_SOUND, soundBits, pos, &soundBits);
+#endif
+
+    MUTEX_LOCK(gAudioThread);
     sSoundRequests[sSoundRequestCount].soundBits = soundBits;
     sSoundRequests[sSoundRequestCount].position = pos;
     sSoundRequests[sSoundRequestCount].customFreqScale = 0;
@@ -850,10 +852,12 @@ void play_sound(s32 soundBits, f32 *pos) {
 }
 
 void play_sound_with_freq_scale(s32 soundBits, f32* pos, f32 freqScale) {
-    MUTEX_LOCK(gAudioThread);
-
     pos = smlua_get_vec3f_for_play_sound(pos);
+#ifndef __ANDROID__
     smlua_call_event_hooks(HOOK_ON_PLAY_SOUND, soundBits, pos, &soundBits);
+#endif
+
+    MUTEX_LOCK(gAudioThread);
     sSoundRequests[sSoundRequestCount].soundBits = soundBits;
     sSoundRequests[sSoundRequestCount].position = pos;
     sSoundRequests[sSoundRequestCount].customFreqScale = freqScale;

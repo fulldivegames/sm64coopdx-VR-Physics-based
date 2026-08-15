@@ -28,6 +28,7 @@
 #include "spawn_object.h"
 #include "spawn_sound.h"
 #include "pc/network/network.h"
+#include "pc/configfile.h"
 #include "pc/lua/smlua_hooks.h"
 #include "pc/lua/utils/smlua_camera_utils.h"
 #include "pc/lua/utils/smlua_model_utils.h"
@@ -2684,6 +2685,10 @@ void cur_obj_spawn_particles(struct SpawnParticlesInfo *info) {
     s32 i;
     f32 scale;
     s32 numParticles = info->count;
+
+    if (configVrUltraPerformanceMode && numParticles > 3) {
+        numParticles = 3;
+    }
 
     // If there are a lot of objects already, limit the number of particles
     if (gPrevFrameObjectCount > (OBJECT_POOL_CAPACITY * 150 / 240) && numParticles > 10) {
