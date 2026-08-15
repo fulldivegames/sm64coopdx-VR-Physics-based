@@ -67,6 +67,8 @@ Starting with v0.5.7, the standalone build loads compatible SM64 Co-Op DX mods f
 
 You can also create the folder and transfer an extracted mod with ADB:
 
+NOTE: If you have a lot of mods, your game might take longer to load or sometimes not respond when launching. Resets or waiting often works.
+
 ```powershell
 adb shell mkdir -p /sdcard/SM64VR/mods
 adb push "C:\path\to\ExtractedModFolder" /sdcard/SM64VR/mods/
@@ -91,6 +93,13 @@ Extract each DynOS pack and copy its complete pack folder into `SM64VR/dynos/pac
 Restart the game after copying packs, then enable them from the game's DynOS menu. Copy the extracted folder rather than the downloaded archive, and avoid an extra duplicate nesting level such as `My Pack/My Pack/files`.
 
 Not every desktop mod is compatible with the standalone ARM64/OpenGL ES build. Mods that depend on desktop-only code, very large model or texture packs, and demanding ROM hacks may fail to load or run poorly. Install one mod at a time when troubleshooting. Only download mods you trust, and do not redistribute copyrighted game assets.
+
+Mod Compatibility notes:
+I will update any mod compatibility issues that I find or am told here:
+Render96 - Issues and crashing
+
+
+
 
 ## Default Quest controls
 
