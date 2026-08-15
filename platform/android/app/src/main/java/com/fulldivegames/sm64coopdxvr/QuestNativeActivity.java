@@ -8,16 +8,6 @@ import android.os.Build;
 import android.os.Environment;
 import android.provider.Settings;
 import android.util.Log;
-import android.graphics.Color;
-import android.text.Editable;
-import android.text.InputType;
-import android.text.TextWatcher;
-import android.view.Gravity;
-import android.view.WindowManager;
-import android.view.inputmethod.InputMethodManager;
-import android.content.Context;
-import android.widget.EditText;
-import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import java.io.File;
@@ -28,6 +18,8 @@ import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Locale;
 
 import org.json.JSONArray;
@@ -41,83 +33,16 @@ public final class QuestNativeActivity extends NativeActivity {
     private static final String SHARED_DYNOS_PACK_DIRECTORY =
             "/sdcard/SM64VR/dynos/packs";
     private boolean requestedSharedStorageAccess;
-    private EditText vrKeyboardInput;
-    private boolean suppressVrKeyboardText;
     private static final String US_ROM_SHA1 =
             "9bef1128717f958171a4afac3ed78ee2bb4e86ce";
     private static final String RELEASES_API =
             "https://api.github.com/repos/fulldivegames/sm64coopdx-VR-Standalone/releases?per_page=20";
 
-    private static native void nativeOnVrKeyboardText(String text);
-
-    public void showVrKeyboard(final String initialText) {
-        runOnUiThread(() -> {
-            if (vrKeyboardInput == null) {
-                vrKeyboardInput = new EditText(this);
-                vrKeyboardInput.setSingleLine(true);
-                vrKeyboardInput.setInputType(InputType.TYPE_CLASS_TEXT |
-                        InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-                vrKeyboardInput.setTextColor(Color.TRANSPARENT);
-                vrKeyboardInput.setBackgroundColor(Color.TRANSPARENT);
-                vrKeyboardInput.setAlpha(0.01f);
-                vrKeyboardInput.addTextChangedListener(new TextWatcher() {
-                    @Override public void beforeTextChanged(CharSequence s,
-                            int start, int count, int after) {}
-                    @Override public void onTextChanged(CharSequence s,
-                            int start, int before, int count) {}
-                    @Override public void afterTextChanged(Editable editable) {
-                        if (!suppressVrKeyboardText) {
-                            nativeOnVrKeyboardText(editable.toString());
-                        }
-                    }
-                });
-                FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
-                        32, 32, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-                addContentView(vrKeyboardInput, params);
-            }
-            suppressVrKeyboardText = true;
-            vrKeyboardInput.setText(initialText != null ? initialText : "");
-            vrKeyboardInput.setSelection(vrKeyboardInput.length());
-            suppressVrKeyboardText = false;
-            vrKeyboardInput.setVisibility(EditText.VISIBLE);
-            vrKeyboardInput.requestFocusFromTouch();
-            getWindow().setSoftInputMode(
-                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING |
-                    WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
-            vrKeyboardInput.postDelayed(() -> {
-                InputMethodManager inputMethod = (InputMethodManager)
-                        getSystemService(Context.INPUT_METHOD_SERVICE);
-                if (inputMethod != null && vrKeyboardInput.hasFocus()) {
-                    inputMethod.restartInput(vrKeyboardInput);
-                    inputMethod.showSoftInput(vrKeyboardInput,
-                            InputMethodManager.SHOW_FORCED);
-                }
-            }, 150);
-        });
-    }
-
-    public void hideVrKeyboard() {
-        runOnUiThread(() -> {
-            if (vrKeyboardInput == null) return;
-            InputMethodManager inputMethod = (InputMethodManager)
-                    getSystemService(Context.INPUT_METHOD_SERVICE);
-            if (inputMethod != null) {
-                inputMethod.hideSoftInputFromWindow(
-                        vrKeyboardInput.getWindowToken(), 0);
-            }
-            vrKeyboardInput.clearFocus();
-            vrKeyboardInput.setVisibility(EditText.GONE);
-        });
-    }
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         installBundledResources();
+        normalizeCustomPaletteNames();
         super.onCreate(savedInstanceState);
-        // Horizon OS uses an overlay surface for its system keyboard. This
-        // focus mode lets that overlay appear above an immersive NativeActivity.
-        getWindow().addFlags(
-                WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
         prepareSharedContentDirectories();
         checkForStandaloneUpdate();
         File rom = new File(getExternalFilesDir(null), ROM_NAME);
@@ -145,6 +70,52 @@ public final class QuestNativeActivity extends NativeActivity {
             createSharedDirectory(SHARED_MOD_DIRECTORY, "mod");
             createSharedDirectory(SHARED_DYNOS_PACK_DIRECTORY, "DynOS pack");
         }
+    }
+
+    private void normalizeCustomPaletteNames() {
+        File paletteDirectory = new File(getExternalFilesDir(null), "palettes");
+        File[] palettes = paletteDirectory.listFiles(file ->
+                file.isFile() && file.getName().toLowerCase(Locale.ROOT).endsWith(".ini") &&
+                !isBundledCharacterPalette(file.getName()));
+        if (palettes == null || palettes.length == 0) return;
+
+        boolean alreadyNormalized = palettes.length <= 100;
+        for (int number = 1; alreadyNormalized && number <= palettes.length; number++) {
+            File expected = new File(paletteDirectory, "Custom " + number + ".ini");
+            alreadyNormalized = expected.isFile();
+        }
+        if (alreadyNormalized) return;
+
+        Arrays.sort(palettes, Comparator
+                .comparingLong(File::lastModified)
+                .thenComparing(File::getName, String.CASE_INSENSITIVE_ORDER));
+        int count = Math.min(palettes.length, 100);
+        File[] temporary = new File[count];
+        for (int i = 0; i < count; i++) {
+            temporary[i] = new File(paletteDirectory,
+                    ".palette-migration-" + i + ".tmp");
+            if (!palettes[i].equals(temporary[i]) &&
+                    !palettes[i].renameTo(temporary[i])) {
+                Log.w(TAG, "Could not stage palette rename: " + palettes[i]);
+                temporary[i] = null;
+            }
+        }
+        for (int i = 0; i < count; i++) {
+            if (temporary[i] == null) continue;
+            File destination = new File(paletteDirectory,
+                    "Custom " + (i + 1) + ".ini");
+            if (!temporary[i].renameTo(destination)) {
+                Log.w(TAG, "Could not rename palette to " + destination);
+            }
+        }
+    }
+
+    private boolean isBundledCharacterPalette(String fileName) {
+        return fileName.equalsIgnoreCase("Mario.ini") ||
+                fileName.equalsIgnoreCase("Luigi.ini") ||
+                fileName.equalsIgnoreCase("Toad.ini") ||
+                fileName.equalsIgnoreCase("Wario.ini") ||
+                fileName.equalsIgnoreCase("Waluigi.ini");
     }
 
     private void createSharedDirectory(String path, String label) {

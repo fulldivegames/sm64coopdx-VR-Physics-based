@@ -9,9 +9,6 @@
     <uses-feature
         android:name="oculus.software.handtracking"
         android:required="false" />
-    <uses-feature
-        android:name="oculus.software.overlay_keyboard"
-        android:required="false" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -27,9 +24,6 @@
         <meta-data
             android:name="com.oculus.supportedDevices"
             android:value="all" />
-        <meta-data
-            android:name="com.oculus.vr.focusaware"
-            android:value="true" />
 
         <activity
             android:name="com.fulldivegames.sm64coopdxvr.QuestNativeActivity"

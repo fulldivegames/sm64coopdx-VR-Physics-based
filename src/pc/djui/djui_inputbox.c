@@ -8,45 +8,6 @@
 #include "game/segment2.h"
 #include "pc/controller/controller_keyboard.h"
 
-static u8 sCursorBlink = 0;
-static void djui_inputbox_on_change(struct DjuiInputbox* inputbox);
-
-#ifdef __ANDROID__
-#include <pthread.h>
-extern void quest_android_show_keyboard(const char* initialText);
-extern void quest_android_hide_keyboard(void);
-static pthread_mutex_t sAndroidTextMutex = PTHREAD_MUTEX_INITIALIZER;
-static struct DjuiInputbox* sAndroidInputbox = NULL;
-static char sAndroidPendingText[4096];
-static bool sAndroidTextPending = false;
-
-void djui_inputbox_android_queue_text(const char* text) {
-    pthread_mutex_lock(&sAndroidTextMutex);
-    snprintf(sAndroidPendingText, sizeof(sAndroidPendingText), "%s",
-             text != NULL ? text : "");
-    sAndroidTextPending = true;
-    pthread_mutex_unlock(&sAndroidTextMutex);
-}
-
-static void djui_inputbox_android_apply_pending(
-    struct DjuiInputbox* inputbox
-) {
-    pthread_mutex_lock(&sAndroidTextMutex);
-    if (sAndroidTextPending && sAndroidInputbox == inputbox) {
-        snprintf(inputbox->buffer, inputbox->bufferSize, "%s",
-                 sAndroidPendingText);
-        inputbox->selection[0] = djui_unicode_len(inputbox->buffer);
-        inputbox->selection[1] = inputbox->selection[0];
-        sAndroidTextPending = false;
-        pthread_mutex_unlock(&sAndroidTextMutex);
-        sCursorBlink = 0;
-        djui_inputbox_on_change(inputbox);
-        return;
-    }
-    pthread_mutex_unlock(&sAndroidTextMutex);
-}
-#endif
-
 #define DJUI_INPUTBOX_YOFF (-3)
 #define DJUI_INPUTBOX_MAX_BLINK 50
 #define DJUI_INPUTBOX_MID_BLINK (DJUI_INPUTBOX_MAX_BLINK / 2)
@@ -55,6 +16,7 @@ static void djui_inputbox_android_apply_pending(
 u8 gDjuiInputHeldShift   = 0;
 u8 gDjuiInputHeldControl = 0;
 u8 gDjuiInputHeldAlt     = 0;
+static u8 sCursorBlink = 0;
 
 static void djui_inputbox_update_style(struct DjuiBase* base) {
     struct DjuiInputbox* inputbox = (struct DjuiInputbox*)base;
@@ -380,24 +342,10 @@ void djui_inputbox_on_focus_begin(UNUSED struct DjuiBase* base) {
     gDjuiInputHeldControl = 0;
     gDjuiInputHeldAlt     = 0;
     gWindowApi->start_text_input();
-#ifdef __ANDROID__
-    pthread_mutex_lock(&sAndroidTextMutex);
-    sAndroidInputbox = (struct DjuiInputbox*)base;
-    sAndroidTextPending = false;
-    pthread_mutex_unlock(&sAndroidTextMutex);
-    quest_android_show_keyboard(sAndroidInputbox->buffer);
-#endif
 }
 
 void djui_inputbox_on_focus_end(UNUSED struct DjuiBase* base) {
     gWindowApi->stop_text_input();
-#ifdef __ANDROID__
-    pthread_mutex_lock(&sAndroidTextMutex);
-    sAndroidInputbox = NULL;
-    sAndroidTextPending = false;
-    pthread_mutex_unlock(&sAndroidTextMutex);
-    quest_android_hide_keyboard();
-#endif
 }
 
 void djui_inputbox_on_text_input(struct DjuiBase *base, char* text) {
@@ -611,9 +559,6 @@ static void djui_inputbox_keep_selection_in_view(struct DjuiInputbox* inputbox) 
 
 static bool djui_inputbox_render(struct DjuiBase* base) {
     struct DjuiInputbox* inputbox = (struct DjuiInputbox*)base;
-#ifdef __ANDROID__
-    djui_inputbox_android_apply_pending(inputbox);
-#endif
     struct DjuiBaseRect* comp     = &base->comp;
     const struct DjuiFont* font   = gDjuiFonts[configDjuiThemeFont == 0 ? FONT_NORMAL : FONT_ALIASED];
     djui_rect_render(base);

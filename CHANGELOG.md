@@ -2,12 +2,11 @@
 
 ## v0.5.14 - 2026-08-14
 
-- Fixed Quest system keyboard activation for settings text fields, including custom palette preset naming.
+- Automatically names standalone custom palette presets Custom 1 through Custom 100.
 - Restored the bundled Mario, Luigi, Toad, Wario, and Waluigi palette presets without overwriting existing user palette files.
 
 ## v0.5.13 - 2026-08-14
 
-- Added the native Quest system keyboard to standalone settings text fields, including palette preset naming.
 - Improved physical King Bob-omb grab reach without changing regular Bob-omb behavior.
 - Improved compatibility for valid renamed or repackaged DynOS actor binaries.
 - Moved Quest-specific mod and DynOS installation instructions directly below first-time setup.

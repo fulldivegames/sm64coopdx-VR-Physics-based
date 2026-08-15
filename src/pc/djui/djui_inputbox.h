@@ -22,9 +22,6 @@ extern u8 gDjuiInputHeldAlt;
 
 void djui_inputbox_on_focus_begin(UNUSED struct DjuiBase* base);
 void djui_inputbox_on_focus_end(UNUSED struct DjuiBase* base);
-#ifdef __ANDROID__
-void djui_inputbox_android_queue_text(const char* text);
-#endif
 void djui_inputbox_set_text_color(struct DjuiInputbox* inputbox, u8 r, u8 g, u8 b, u8 a);
 void djui_inputbox_set_text(struct DjuiInputbox* inputbox, char* text);
 void djui_inputbox_select_all(struct DjuiInputbox* inputbox);

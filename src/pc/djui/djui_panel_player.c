@@ -155,6 +155,24 @@ static char* djui_panel_player_edit_palette_preset_name_get_text(void) {
             }
         }
     }
+#ifdef __ANDROID__
+    if (name[0] == 'U' && strcmp(name, "Unnamed") == 0) {
+        static char customName[32];
+        for (int number = 1; number <= 100; number++) {
+            bool alreadyUsed = false;
+            snprintf(customName, sizeof(customName), "Custom %d", number);
+            for (int i = 0; i < gPresetPaletteCount; i++) {
+                if (strcmp(gPresetPalettes[i].name, customName) == 0) {
+                    alreadyUsed = true;
+                    break;
+                }
+            }
+            if (!alreadyUsed) return customName;
+        }
+        snprintf(customName, sizeof(customName), "Custom 100");
+        return customName;
+    }
+#endif
     return name;
 }
 
@@ -313,8 +331,12 @@ static void djui_panel_player_edit_palette_create(struct DjuiBase* caller) {
             djui_base_set_size_type(&sPalettePresetNameTextBox->base, DJUI_SVT_RELATIVE, DJUI_SVT_ABSOLUTE);
             djui_base_set_size(&sPalettePresetNameTextBox->base, 0.45f, 32);
             djui_base_set_alignment(&sPalettePresetNameTextBox->base, DJUI_HALIGN_RIGHT, DJUI_VALIGN_TOP);
+#ifdef __ANDROID__
+            djui_base_set_enabled(&sPalettePresetNameTextBox->base, false);
+#else
             djui_interactable_hook_value_change(&sPalettePresetNameTextBox->base, djui_panel_player_edit_palette_preset_name_text_change);
             djui_interactable_hook_focus(&sPalettePresetNameTextBox->base, djui_inputbox_on_focus_begin, NULL, djui_panel_player_edit_palette_preset_name_on_focus_end);
+#endif
         }
 
         struct DjuiRect* rect3 = djui_rect_container_create(body, 32);
@@ -366,8 +388,12 @@ static void djui_panel_player_name_active_palette(struct DjuiBase* caller) {
             djui_base_set_size_type(&sPalettePresetNameTextBox->base, DJUI_SVT_RELATIVE, DJUI_SVT_ABSOLUTE);
             djui_base_set_size(&sPalettePresetNameTextBox->base, 0.45f, 32);
             djui_base_set_alignment(&sPalettePresetNameTextBox->base, DJUI_HALIGN_RIGHT, DJUI_VALIGN_TOP);
+#ifdef __ANDROID__
+            djui_base_set_enabled(&sPalettePresetNameTextBox->base, false);
+#else
             djui_interactable_hook_value_change(&sPalettePresetNameTextBox->base, djui_panel_player_edit_palette_preset_name_text_change);
             djui_interactable_hook_focus(&sPalettePresetNameTextBox->base, djui_inputbox_on_focus_begin, NULL, djui_panel_player_edit_palette_preset_name_on_focus_end);
+#endif
         }
 
         struct DjuiRect* rect3 = djui_rect_container_create(body, 32);
