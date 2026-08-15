@@ -94,7 +94,9 @@ Restart the game after copying packs, then enable them from the game's DynOS men
 
 Not every desktop mod is compatible with the standalone ARM64/OpenGL ES build. Mods that depend on desktop-only code, very large model or texture packs, and demanding ROM hacks may fail to load or run poorly. Install one mod at a time when troubleshooting. Only download mods you trust, and do not redistribute copyrighted game assets.
 
+ IMPORTANT!
  Mod Compatibility notes:
+ Having tons of mods can cause performance issues at this point in time.
  I will update any mod compatibility issues that I find or am told here:
 
  Render96 - Issues, poor performance and crashing
