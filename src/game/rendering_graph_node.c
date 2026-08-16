@@ -252,9 +252,9 @@ static Mtx* sVrControllerHandMatrices[VR_CONTROLLER_COUNT] = { 0 };
 static bool sVrControllerHandClosed[VR_CONTROLLER_COUNT] = { false };
 
 #define VR_PAINTING_EXIT_HAT_GRAB_HEIGHT 22.0f
-#define VR_PAINTING_EXIT_HAT_HORIZONTAL_REACH 44.0f
-#define VR_PAINTING_EXIT_HAT_REACH_BELOW 23.0f
-#define VR_PAINTING_EXIT_HAT_REACH_ABOVE 40.0f
+#define VR_PAINTING_EXIT_HAT_HORIZONTAL_REACH 24.0f
+#define VR_PAINTING_EXIT_HAT_REACH_BELOW 13.0f
+#define VR_PAINTING_EXIT_HAT_REACH_ABOVE 22.0f
 #define VR_PAINTING_EXIT_HAT_REATTACH_HORIZONTAL_RADIUS 40.0f
 #define VR_PAINTING_EXIT_HAT_REATTACH_BELOW 35.0f
 #define VR_PAINTING_EXIT_HAT_REATTACH_ABOVE 50.0f
@@ -268,6 +268,10 @@ static u32 sVrPaintingExitHatStartFrame = 0;
 static Vec3f sVrPaintingExitHatLastPosition = { 0.0f, 0.0f, 0.0f };
 static Vec3f sVrPaintingExitHatVelocity = { 0.0f, 0.0f, 0.0f };
 static bool sVrPaintingExitHatPickupLatched = false;
+static bool sVrPaintingExitHatTriggerDown[VR_CONTROLLER_COUNT] = {
+    false,
+    false
+};
 static bool sVrPaintingExitHatWingCap = false;
 static bool sVrPaintingExitHatShakeVelocityValid = false;
 static Vec3f sVrPaintingExitHatShakeVelocity = { 0.0f, 0.0f, 0.0f };
@@ -506,11 +510,20 @@ static void vr_update_painting_exit_hat_gesture(void) {
     if (!vr_is_active()) {
         vr_clear_painting_exit_hat_hold();
         sVrPaintingExitHatPickupLatched = false;
+        for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
+            sVrPaintingExitHatTriggerDown[hand] = false;
+        }
         return;
     }
 
     bool pickupInputDown = false;
+    bool triggerPressedEdge[VR_CONTROLLER_COUNT] = { false, false };
     for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
+        const bool triggerDown =
+            tracked[hand] && states[hand].trigger >= 0.55f;
+        triggerPressedEdge[hand] =
+            triggerDown && !sVrPaintingExitHatTriggerDown[hand];
+        sVrPaintingExitHatTriggerDown[hand] = triggerDown;
         pickupInputDown = pickupInputDown ||
             (tracked[hand] &&
              states[hand].squeeze >= 0.55f &&
@@ -610,7 +623,7 @@ static void vr_update_painting_exit_hat_gesture(void) {
             for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
                 if (!tracked[hand] ||
                     states[hand].squeeze < 0.55f ||
-                    states[hand].trigger < 0.55f ||
+                    !triggerPressedEdge[hand] ||
                     vr_painting_exit_hat_distance_squared(
                         hands[hand], capPosition) >
                             pickupRadiusSquared) {
@@ -648,7 +661,7 @@ static void vr_update_painting_exit_hat_gesture(void) {
     for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
         if (!tracked[hand] ||
             states[hand].squeeze < 0.55f ||
-            states[hand].trigger < 0.55f) {
+            !triggerPressedEdge[hand]) {
             continue;
         }
         const f32 dx = hands[hand][0] - head[0];

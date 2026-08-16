@@ -77,13 +77,14 @@
 #define VR_FIRE_FLOWER_SPAWN_VELOCITY 6.0f
 #define VR_FIRE_FLOWER_GRAVITY 0.65f
 #define VR_FIRE_FLOWER_FALL_SPEED 7.0f
-#define VR_FIREBALL_FORM_DELAY_FRAMES 15U
-#define VR_FIREBALL_FORM_FRAMES 75U
+#define VR_FIREBALL_FORM_DELAY_FRAMES 6U
+#define VR_FIREBALL_FORM_FRAMES 60U
 #define VR_FIREBALL_READY_FRAMES \
     (VR_FIREBALL_FORM_DELAY_FRAMES + VR_FIREBALL_FORM_FRAMES)
 #define VR_FIREBALL_TRIGGER_THRESHOLD 0.55f
 #define VR_FIREBALL_MIN_THROW_SPEED 60.0f
-#define VR_FIREBALL_MAX_LIFETIME 300U
+#define VR_FIREBALL_MAX_LIFETIME 180U
+#define VR_FIREBALL_PROJECTILE_COUNT 8U
 
 #define VR_ANCHORABLE_INTERACT_TYPES ( \
     INTERACT_BOUNCE_TOP | \
@@ -234,10 +235,13 @@ static s16 sVrFireFlowerArea = -1;
 static struct Object* sVrFireFlowerPickups[VR_FIRE_FLOWER_PICKUP_COUNT] = { NULL };
 static f32 sVrFireFlowerPickupVelocityY[VR_FIRE_FLOWER_PICKUP_COUNT] = { 0.0f };
 static bool sVrFireFlowerPickupLanded[VR_FIRE_FLOWER_PICKUP_COUNT] = { false };
-static struct Object* sVrFireballObject = NULL;
-static bool sVrFireballProjectile = false;
-static u16 sVrFireballLifetime = 0;
-static Vec3f sVrFireballVelocity = { 0.0f, 0.0f, 0.0f };
+static struct Object* sVrFireballChargeObject = NULL;
+static struct Object*
+    sVrFireballProjectiles[VR_FIREBALL_PROJECTILE_COUNT] = { NULL };
+static u16
+    sVrFireballProjectileLifetime[VR_FIREBALL_PROJECTILE_COUNT] = { 0 };
+static Vec3f
+    sVrFireballProjectileVelocity[VR_FIREBALL_PROJECTILE_COUNT] = { { 0 } };
 static Vec3f sVrFireballRememberedVelocity = { 0.0f, 0.0f, 0.0f };
 static f32 sVrHeadsetColliderSavedRadius = 50.0f;
 static f32 sVrHeadsetColliderSavedHeight = 160.0f;
@@ -245,6 +249,7 @@ static f32 sVrHeadsetColliderSavedDownOffset = 0.0f;
 struct VrHandCollisionState {
     bool rawPositionValid;
     bool constraintActive;
+    struct Object* constraintObject;
     Vec3f previousRawPosition;
     Vec3f constraintNormal;
     f32 constraintOriginOffset;
@@ -296,6 +301,13 @@ void vr_hand_interaction_apply_hand_collision_position(
         !sVrHandCollision[hand].constraintActive) {
         return;
     }
+    if (sVrHandCollision[hand].constraintObject != NULL &&
+        (sVrHandCollision[hand].constraintObject->activeFlags &
+            ACTIVE_FLAG_ACTIVE) == 0) {
+        sVrHandCollision[hand].constraintActive = false;
+        sVrHandCollision[hand].constraintObject = NULL;
+        return;
+    }
     const f32 radius = fminf(
         vr_hand_interaction_fist_radius(),
         VR_HAND_COLLISION_RADIUS_MAX
@@ -320,6 +332,7 @@ static void vr_hand_interaction_set_hand_constraint(
     const struct Surface* surface
 ) {
     sVrHandCollision[hand].constraintActive = true;
+    sVrHandCollision[hand].constraintObject = surface->object;
     sVrHandCollision[hand].constraintNormal[0] = surface->normal.x;
     sVrHandCollision[hand].constraintNormal[1] = surface->normal.y;
     sVrHandCollision[hand].constraintNormal[2] = surface->normal.z;
@@ -342,6 +355,16 @@ static bool vr_hand_interaction_resolve_hand_collision(
     bool collided = false;
     struct Surface* collisionSurface = NULL;
 
+    // Dynamic collision surfaces can disappear on the same frame that a
+    // punch breaks their object. Never keep constraining a tracked hand to
+    // the stale plane after its block has been deactivated.
+    if (state->constraintActive && state->constraintObject != NULL &&
+        (state->constraintObject->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
+        state->constraintActive = false;
+        state->constraintObject = NULL;
+        state->rawPositionValid = false;
+    }
+
     if (state->constraintActive) {
         const f32 distance =
             state->constraintNormal[0] * rawPosition[0] +
@@ -356,6 +379,7 @@ static bool vr_hand_interaction_resolve_hand_collision(
             collided = distance < radius;
         } else {
             state->constraintActive = false;
+            state->constraintObject = NULL;
         }
     }
 
@@ -399,6 +423,7 @@ static bool vr_hand_interaction_resolve_hand_collision(
             }
         } else if (sweepLength > VR_HAND_COLLISION_MAX_SWEEP) {
             state->constraintActive = false;
+            state->constraintObject = NULL;
         }
     }
 
@@ -4409,18 +4434,55 @@ static void vr_special_moves_delete_object(struct Object** object) {
     }
 }
 
-static void vr_special_moves_clear_fireball(void) {
-    vr_special_moves_delete_object(&sVrFireballObject);
-    sVrFireballProjectile = false;
+static void vr_special_moves_clear_fireball_charge(void) {
+    vr_special_moves_delete_object(&sVrFireballChargeObject);
     sVrFireballChargeFrames = 0;
-    sVrFireballLifetime = 0;
-    vec3f_set(sVrFireballVelocity, 0.0f, 0.0f, 0.0f);
     vec3f_set(sVrFireballRememberedVelocity, 0.0f, 0.0f, 0.0f);
+}
+
+static void vr_special_moves_clear_fireball_projectile(u32 slot) {
+    if (slot >= VR_FIREBALL_PROJECTILE_COUNT) {
+        return;
+    }
+    vr_special_moves_delete_object(&sVrFireballProjectiles[slot]);
+    sVrFireballProjectileLifetime[slot] = 0;
+    vec3f_set(
+        sVrFireballProjectileVelocity[slot],
+        0.0f,
+        0.0f,
+        0.0f
+    );
+}
+
+static u32 vr_special_moves_allocate_fireball_projectile(void) {
+    u32 oldestSlot = 0;
+    u16 oldestLifetime = 0;
+    for (u32 slot = 0; slot < VR_FIREBALL_PROJECTILE_COUNT; slot++) {
+        struct Object* projectile = sVrFireballProjectiles[slot];
+        if (projectile == NULL ||
+            (projectile->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
+            vr_special_moves_clear_fireball_projectile(slot);
+            return slot;
+        }
+        if (sVrFireballProjectileLifetime[slot] >= oldestLifetime) {
+            oldestLifetime = sVrFireballProjectileLifetime[slot];
+            oldestSlot = slot;
+        }
+    }
+
+    // Eight simultaneous shots is already far beyond normal charged play. If the
+    // pool is saturated, recycle only the oldest shot instead of blocking a
+    // new charge or allowing an unbounded object allocation.
+    vr_special_moves_clear_fireball_projectile(oldestSlot);
+    return oldestSlot;
 }
 
 static void vr_special_moves_reset_power(void) {
     sVrFireFlowerPowered = false;
-    vr_special_moves_clear_fireball();
+    vr_special_moves_clear_fireball_charge();
+    for (u32 slot = 0; slot < VR_FIREBALL_PROJECTILE_COUNT; slot++) {
+        vr_special_moves_clear_fireball_projectile(slot);
+    }
 }
 
 bool vr_special_moves_fire_flower_active(void) {
@@ -4440,7 +4502,7 @@ bool vr_special_moves_grant_fire_flower(void) {
 
 Gfx* geo_vr_fireball_color(
     s32 callContext,
-    UNUSED struct GraphNode* node,
+    struct GraphNode* node,
     UNUSED void* context
 ) {
     if (callContext != GEO_CONTEXT_RENDER ||
@@ -4452,6 +4514,11 @@ Gfx* geo_vr_fireball_color(
         return NULL;
     }
     struct Object* object = (struct Object*)gCurGraphNodeObject;
+    struct GraphNodeGenerated* generated =
+        (struct GraphNodeGenerated*)node;
+    generated->fnNode.node.flags =
+        (generated->fnNode.node.flags & 0xFF) |
+        (LAYER_TRANSPARENT << 8);
     const u8 alpha = (u8)clamp(
         object->oOpacity,
         0,
@@ -4711,59 +4778,70 @@ static bool vr_special_moves_projectile_hits_enemy(
     return false;
 }
 
-static void vr_special_moves_update_projectile(struct MarioState* mario) {
-    struct Object* projectile = sVrFireballObject;
-    if (!sVrFireballProjectile || projectile == NULL) {
-        return;
-    }
-    if ((projectile->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
-        ++sVrFireballLifetime > VR_FIREBALL_MAX_LIFETIME) {
-        vr_special_moves_clear_fireball();
-        return;
-    }
+static void vr_special_moves_update_projectiles(struct MarioState* mario) {
+    for (u32 slot = 0; slot < VR_FIREBALL_PROJECTILE_COUNT; slot++) {
+        struct Object* projectile = sVrFireballProjectiles[slot];
+        if (projectile == NULL) {
+            continue;
+        }
+        if ((projectile->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
+            ++sVrFireballProjectileLifetime[slot] >
+                VR_FIREBALL_MAX_LIFETIME) {
+            vr_special_moves_clear_fireball_projectile(slot);
+            continue;
+        }
 
-    projectile->oPosX += sVrFireballVelocity[0];
-    projectile->oPosY += sVrFireballVelocity[1];
-    projectile->oPosZ += sVrFireballVelocity[2];
-    sVrFireballVelocity[1] -= 2.0f;
-    projectile->oAnimState = (s32)((gGlobalTimer >> 1) & 7U);
+        Vec3f* velocity = &sVrFireballProjectileVelocity[slot];
+        projectile->oPosX += (*velocity)[0];
+        projectile->oPosY += (*velocity)[1];
+        projectile->oPosZ += (*velocity)[2];
+        (*velocity)[1] -= 2.0f;
+        projectile->oAnimState = (s32)((gGlobalTimer >> 1) & 7U);
 
-    struct WallCollisionData wall = {
-        .x = projectile->oPosX,
-        .y = projectile->oPosY,
-        .z = projectile->oPosZ,
-        .offsetY = 0.0f,
-        .radius = 20.0f,
-    };
-    if (find_wall_collisions(&wall) > 0 && wall.walls[0] != NULL) {
-        const f32 nx = wall.walls[0]->normal.x;
-        const f32 nz = wall.walls[0]->normal.z;
-        const f32 dot = sVrFireballVelocity[0] * nx +
-            sVrFireballVelocity[2] * nz;
-        sVrFireballVelocity[0] -= 2.0f * dot * nx;
-        sVrFireballVelocity[2] -= 2.0f * dot * nz;
-        projectile->oPosX = wall.x;
-        projectile->oPosZ = wall.z;
-    }
+        struct WallCollisionData wall = {
+            .x = projectile->oPosX,
+            .y = projectile->oPosY,
+            .z = projectile->oPosZ,
+            .offsetY = 0.0f,
+            .radius = 20.0f,
+        };
+        if (find_wall_collisions(&wall) > 0 &&
+            wall.walls[0] != NULL) {
+            const f32 nx = wall.walls[0]->normal.x;
+            const f32 nz = wall.walls[0]->normal.z;
+            const f32 dot = (*velocity)[0] * nx +
+                (*velocity)[2] * nz;
+            (*velocity)[0] -= 2.0f * dot * nx;
+            (*velocity)[2] -= 2.0f * dot * nz;
+            projectile->oPosX = wall.x;
+            projectile->oPosZ = wall.z;
+        }
 
-    struct Surface* floor = NULL;
-    const f32 floorHeight = find_floor(
-        projectile->oPosX,
-        projectile->oPosY + 80.0f,
-        projectile->oPosZ,
-        &floor
-    );
-    if (floor != NULL && projectile->oPosY < floorHeight + 18.0f) {
-        projectile->oPosY = floorHeight + 18.0f;
-        sVrFireballVelocity[1] = 8.0f;
-        sVrFireballVelocity[0] *= 0.985f;
-        sVrFireballVelocity[2] *= 0.985f;
-    }
-    obj_update_gfx_pos_and_angle(projectile);
+        struct Surface* floor = NULL;
+        const f32 floorHeight = find_floor(
+            projectile->oPosX,
+            projectile->oPosY + 80.0f,
+            projectile->oPosZ,
+            &floor
+        );
+        if (floor != NULL &&
+            projectile->oPosY < floorHeight + 18.0f) {
+            projectile->oPosY = floorHeight + 18.0f;
+            (*velocity)[1] = 8.0f;
+            (*velocity)[0] *= 0.985f;
+            (*velocity)[2] *= 0.985f;
+        }
+        obj_update_gfx_pos_and_angle(projectile);
 
-    if (vr_special_moves_projectile_hits_enemy(mario, projectile)) {
-        vr_apply_haptic(VR_CONTROLLER_RIGHT, 0.65f, 0.08f, -1.0f);
-        vr_special_moves_clear_fireball();
+        if (vr_special_moves_projectile_hits_enemy(mario, projectile)) {
+            vr_apply_haptic(
+                VR_CONTROLLER_RIGHT,
+                0.65f,
+                0.08f,
+                -1.0f
+            );
+            vr_special_moves_clear_fireball_projectile(slot);
+        }
     }
 }
 
@@ -4774,7 +4852,7 @@ static bool vr_special_moves_try_quick_fireball(
         (mario->input & INPUT_B_PRESSED) == 0 ||
         !vr_special_moves_fire_flower_active() ||
         mario->heldObj != NULL || sVrTrackedHeldObject != NULL ||
-        sVrFireballObject != NULL ||
+        sVrFireballChargeObject != NULL ||
         sVrPhysicalClimbType != VR_PHYSICAL_CLIMB_NONE ||
         vr_is_controller_holding_cap(VR_CONTROLLER_LEFT) ||
         vr_is_controller_holding_cap(VR_CONTROLLER_RIGHT)) {
@@ -4794,38 +4872,37 @@ static bool vr_special_moves_try_quick_fireball(
     const f32 forwardX = sins(yaw);
     const f32 forwardZ = coss(yaw);
 
-    sVrFireballObject = spawn_object(
+    const u32 slot = vr_special_moves_allocate_fireball_projectile();
+    struct Object* projectile = spawn_object(
         mario->marioObj,
         MODEL_VR_FIREBALL,
         bhvStaticObject
     );
-    if (sVrFireballObject == NULL) {
+    if (projectile == NULL) {
         return false;
     }
+    sVrFireballProjectiles[slot] = projectile;
 
-    sVrFireballObject->oPosX = origin[0] + forwardX * 42.0f;
-    sVrFireballObject->oPosY = origin[1] - 18.0f;
-    sVrFireballObject->oPosZ = origin[2] + forwardZ * 42.0f;
-    sVrFireballObject->oOpacity = 255;
-    sVrFireballObject->oAnimState =
+    projectile->oPosX = origin[0] + forwardX * 42.0f;
+    projectile->oPosY = origin[1] - 18.0f;
+    projectile->oPosZ = origin[2] + forwardZ * 42.0f;
+    projectile->oOpacity = 255;
+    projectile->oAnimState =
         (s32)((gGlobalTimer >> 1) & 7U);
-    obj_scale(sVrFireballObject, 0.45f);
-    obj_update_gfx_pos_and_angle(sVrFireballObject);
+    obj_scale(projectile, 0.45f);
+    obj_update_gfx_pos_and_angle(projectile);
 
     vec3f_set(
-        sVrFireballVelocity,
+        sVrFireballProjectileVelocity[slot],
         forwardX * 22.0f,
         4.0f,
         forwardZ * 22.0f
     );
-    vec3f_set(sVrFireballRememberedVelocity, 0.0f, 0.0f, 0.0f);
-    sVrFireballProjectile = true;
-    sVrFireballLifetime = 0;
-    sVrFireballChargeFrames = 0;
+    sVrFireballProjectileLifetime[slot] = 0;
     mario->input &= ~INPUT_B_PRESSED;
     play_sound(
         SOUND_OBJ_FLAME_BLOWN,
-        sVrFireballObject->header.gfx.cameraToObject
+        projectile->header.gfx.cameraToObject
     );
     vr_apply_haptic(VR_CONTROLLER_RIGHT, 0.25f, 0.05f, -1.0f);
     return true;
@@ -4870,9 +4947,9 @@ static bool vr_special_moves_update_fireball_hand(
         sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_NONE;
     const bool chargingInput = triggerPressed && canCharge;
     const bool wasCharging = sVrFireballChargeFrames > 0 ||
-        (sVrFireballObject != NULL && !sVrFireballProjectile);
+        sVrFireballChargeObject != NULL;
 
-    if (chargingInput && !sVrFireballProjectile) {
+    if (chargingInput) {
         const u16 previousFrames = sVrFireballChargeFrames;
         sVrFireballChargeFrames = (u16)min(
             sVrFireballChargeFrames + 1U,
@@ -4881,10 +4958,10 @@ static bool vr_special_moves_update_fireball_hand(
 
         // Grip may be held before or after the trigger. The charge is driven
         // by the combined held state, so no single input-edge frame can be
-        // missed. Wait half a second, then visibly form for 2.5 seconds.
-        if (sVrFireballObject == NULL &&
+        // missed. Wait 0.2 seconds, then visibly form for 2.0 seconds.
+        if (sVrFireballChargeObject == NULL &&
             sVrFireballChargeFrames >= VR_FIREBALL_FORM_DELAY_FRAMES) {
-            sVrFireballObject = spawn_object(
+            sVrFireballChargeObject = spawn_object(
                 mario->marioObj,
                 MODEL_VR_FIREBALL,
                 bhvStaticObject
@@ -4895,7 +4972,7 @@ static bool vr_special_moves_update_fireball_hand(
                 0.0f,
                 0.0f
             );
-            if (sVrFireballObject != NULL) {
+            if (sVrFireballChargeObject != NULL) {
                 vr_apply_haptic(
                     VR_CONTROLLER_RIGHT,
                     0.18f,
@@ -4904,7 +4981,7 @@ static bool vr_special_moves_update_fireball_hand(
                 );
             }
         }
-        if (sVrFireballObject != NULL) {
+        if (sVrFireballChargeObject != NULL) {
             const f32 progress = clamp(
                 (f32)(sVrFireballChargeFrames -
                     VR_FIREBALL_FORM_DELAY_FRAMES) /
@@ -4913,14 +4990,18 @@ static bool vr_special_moves_update_fireball_hand(
                 1.0f
             );
             for (u32 axis = 0; axis < 3; axis++) {
-                (&sVrFireballObject->oPosX)[axis] = position[axis];
+                (&sVrFireballChargeObject->oPosX)[axis] =
+                    position[axis];
             }
-            sVrFireballObject->oAnimState =
+            sVrFireballChargeObject->oAnimState =
                 (s32)((gGlobalTimer >> 1) & 7U);
-            sVrFireballObject->oOpacity =
+            sVrFireballChargeObject->oOpacity =
                 (s32)(51.0f + progress * 204.0f);
-            obj_scale(sVrFireballObject, 0.05f + progress * 0.55f);
-            obj_update_gfx_pos_and_angle(sVrFireballObject);
+            obj_scale(
+                sVrFireballChargeObject,
+                0.05f + progress * 0.55f
+            );
+            obj_update_gfx_pos_and_angle(sVrFireballChargeObject);
 
             const f32 speedSq = velocity[0] * velocity[0] +
                 velocity[1] * velocity[1] + velocity[2] * velocity[2];
@@ -4954,36 +5035,46 @@ static bool vr_special_moves_update_fireball_hand(
         }
     }
 
-    if (!chargingInput && wasCharging && !sVrFireballProjectile) {
+    if (!chargingInput && wasCharging) {
         const f32 speedSq =
             sVrFireballRememberedVelocity[0] * sVrFireballRememberedVelocity[0] +
             sVrFireballRememberedVelocity[1] * sVrFireballRememberedVelocity[1] +
             sVrFireballRememberedVelocity[2] * sVrFireballRememberedVelocity[2];
-        if (sVrFireballObject != NULL &&
+        if (sVrFireballChargeObject != NULL &&
             sVrFireballChargeFrames >= VR_FIREBALL_READY_FRAMES &&
             speedSq >= VR_FIREBALL_MIN_THROW_SPEED * VR_FIREBALL_MIN_THROW_SPEED) {
+            const u32 slot =
+                vr_special_moves_allocate_fireball_projectile();
             for (u32 axis = 0; axis < 3; axis++) {
-                sVrFireballVelocity[axis] =
+                sVrFireballProjectileVelocity[slot][axis] =
                     sVrFireballRememberedVelocity[axis] *
                     VR_THROW_VELOCITY_SCALE;
             }
-            sVrFireballObject->oOpacity = 255;
-            obj_scale(sVrFireballObject, 0.6f);
-            sVrFireballProjectile = true;
-            sVrFireballLifetime = 0;
+            sVrFireballChargeObject->oOpacity = 255;
+            obj_scale(sVrFireballChargeObject, 0.6f);
+            sVrFireballProjectiles[slot] = sVrFireballChargeObject;
+            sVrFireballProjectileLifetime[slot] = 0;
             play_sound(
                 SOUND_OBJ_FLAME_BLOWN,
-                sVrFireballObject->header.gfx.cameraToObject
+                sVrFireballChargeObject->header.gfx.cameraToObject
+            );
+            sVrFireballChargeObject = NULL;
+            sVrFireballChargeFrames = 0;
+            vec3f_set(
+                sVrFireballRememberedVelocity,
+                0.0f,
+                0.0f,
+                0.0f
             );
         } else {
-            vr_special_moves_clear_fireball();
+            vr_special_moves_clear_fireball_charge();
         }
     }
     if ((!canCharge || !configVrSpecialFireFlower) &&
-        !sVrFireballProjectile && sVrFireballObject != NULL) {
-        vr_special_moves_clear_fireball();
+        sVrFireballChargeObject != NULL) {
+        vr_special_moves_clear_fireball_charge();
     }
-    return sVrFireballObject != NULL && !sVrFireballProjectile;
+    return sVrFireballChargeObject != NULL;
 }
 
 void vr_hand_interaction_update(struct MarioState* mario) {
@@ -5000,7 +5091,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         vr_special_moves_reset_power();
     }
     vr_special_moves_update_pickups(mario);
-    vr_special_moves_update_projectile(mario);
+    vr_special_moves_update_projectiles(mario);
     vr_special_moves_try_quick_fireball(mario);
     vr_hand_interaction_apply_carry_speed(mario);
 
@@ -5032,8 +5123,8 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         trackingAvailable &&
         (mario->action & ACT_FLAG_INTANGIBLE) == 0;
     if (!trackingAvailable) {
-        if (sVrFireballObject != NULL && !sVrFireballProjectile) {
-            vr_special_moves_clear_fireball();
+        if (sVrFireballChargeObject != NULL) {
+            vr_special_moves_clear_fireball_charge();
         }
         if (sVrInteractionTrackingActive ||
             sVrTrackedHeldObject != NULL ||
@@ -5211,6 +5302,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         } else {
             sVrHandCollision[hand].rawPositionValid = false;
             sVrHandCollision[hand].constraintActive = false;
+            sVrHandCollision[hand].constraintObject = NULL;
         }
         if (positionValid) {
             vec3f_copy(

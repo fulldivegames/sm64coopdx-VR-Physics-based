@@ -12,7 +12,7 @@ const GeoLayout vr_fire_flower_geo[] = {
 const GeoLayout vr_fireball_geo[] = {
     GEO_NODE_START(),
     GEO_OPEN_NODE(),
-        GEO_ASM(0, geo_vr_fireball_color),
+        GEO_ASM(LAYER_TRANSPARENT + 3, geo_vr_fireball_color),
         GEO_BILLBOARD(),
         GEO_OPEN_NODE(),
             GEO_SWITCH_CASE(8, geo_switch_anim_state),
