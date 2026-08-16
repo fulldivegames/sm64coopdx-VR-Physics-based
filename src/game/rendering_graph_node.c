@@ -35,6 +35,7 @@
 #include "vr_hand_interaction.h"
 #include "hardcoded.h"
 #include "levels/menu/header.h"
+#include "actors/common1.h"
 #include "actors/mario/geo_header.h"
 #include "behavior_data.h"
 #include "object_helpers.h"
