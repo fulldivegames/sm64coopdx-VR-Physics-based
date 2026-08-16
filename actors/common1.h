@@ -166,6 +166,14 @@ extern const GeoLayout mushroom_1up_geo[];
 extern const GeoLayout vr_fire_flower_geo[];
 extern const Gfx vr_fire_flower_dl[];
 extern const GeoLayout vr_fireball_geo[];
+extern const Gfx vr_fireball_frame_0_dl[];
+extern const Gfx vr_fireball_frame_1_dl[];
+extern const Gfx vr_fireball_frame_2_dl[];
+extern const Gfx vr_fireball_frame_3_dl[];
+extern const Gfx vr_fireball_frame_4_dl[];
+extern const Gfx vr_fireball_frame_5_dl[];
+extern const Gfx vr_fireball_frame_6_dl[];
+extern const Gfx vr_fireball_frame_7_dl[];
 extern const Gfx mushroom_1up_seg3_dl_0302A628[];
 extern const Gfx mushroom_1up_seg3_dl_0302A660[];
 
