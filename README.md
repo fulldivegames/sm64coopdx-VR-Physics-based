@@ -14,7 +14,7 @@
 </p>
 
 > [!WARNING]
-> This is an active, experimental fan project. The standalone edition has been tested on **Meta Quest 3 only**. It has **not been tested on Quest 2 at all**, and neither edition has been tested across every level, multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur.
+> COOP NOT CURRENTLY WORKING ON STANDALONE! This is an active, experimental fan project. The standalone edition has been tested on **Meta Quest 3 only**. It has **not been tested on Quest 2 at all**, and neither edition has been tested across every level, multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur.
 
 This repository contains the standalone Android/Quest port of [sm64coopdx-VR (Physics-based)](https://github.com/fulldivegames/sm64coopdx-VR), derived from [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx). It runs the game natively on the headset through OpenXR and OpenGL ES while retaining the original project's multiplayer foundation, Lua/mod support where compatible, first- and third-person cameras, tracked hands, and physical VR interactions.
 There are videos on my YouTube channel: https://www.youtube.com/@fulldivegames667 that show off the mod.
