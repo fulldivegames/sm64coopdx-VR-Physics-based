@@ -69,5 +69,10 @@ bool vr_special_moves_spawn_fire_flower(
     struct MarioState* owner
 );
 bool vr_special_moves_fire_flower_active(void);
+Gfx* geo_vr_fireball_color(
+    s32 callContext,
+    struct GraphNode* node,
+    void* context
+);
 
 #endif // VR_HAND_INTERACTION_H
