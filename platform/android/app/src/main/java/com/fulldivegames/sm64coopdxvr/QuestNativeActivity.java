@@ -229,8 +229,10 @@ public final class QuestNativeActivity extends NativeActivity {
             Log.i(TAG, "Bundled language resources installed.");
             copyMissingAssetDirectory("palettes", new File(root, "palettes"));
             Log.i(TAG, "Bundled character palettes installed.");
+            copyMissingAssetDirectory("mods", new File(root, "mods"));
+            Log.i(TAG, "Bundled session mods installed.");
         } catch (IOException exception) {
-            Log.e(TAG, "Could not install bundled language resources.", exception);
+            Log.e(TAG, "Could not install bundled resources.", exception);
         }
     }
 
