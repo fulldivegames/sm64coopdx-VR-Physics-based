@@ -11,6 +11,9 @@ tasks.register("syncSm64ResourceAssets", Sync) {
     from("../../../palettes") {
         into("palettes")
     }
+    from("../../../mods") {
+        into("mods")
+    }
     into(generatedResourceAssets)
 }
 
