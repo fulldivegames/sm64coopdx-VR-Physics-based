@@ -64,5 +64,10 @@ bool vr_hand_interaction_get_bowser_controls(
     bool* releaseYawValid
 );
 bool vr_hand_interaction_bowser_spin_active(void);
+bool vr_special_moves_spawn_fire_flower(
+    struct Object* box,
+    struct MarioState* owner
+);
+bool vr_special_moves_fire_flower_active(void);
 
 #endif // VR_HAND_INTERACTION_H

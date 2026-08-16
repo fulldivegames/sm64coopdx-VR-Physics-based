@@ -1,4 +1,5 @@
 #include <PR/ultratypes.h>
+#include <string.h>
 
 #include "sm64.h"
 #include "area.h"
@@ -29,6 +30,7 @@
 #include "pc/mods/mods.h"
 #include "pc/configfile.h"
 #include "pc/vr/vr.h"
+#include "vr_hand_interaction.h"
 
 #define TOAD_STAR_1_REQUIREMENT gBehaviorValues.ToadStar1Requirement
 #define TOAD_STAR_2_REQUIREMENT gBehaviorValues.ToadStar2Requirement
@@ -864,6 +866,20 @@ static struct PlayerColor geo_mario_get_player_color(
 ) {
     struct PlayerColor color = { 0 };
     struct MarioBodyState* bodyState = &gBodyStates[index];
+    struct PlayerPalette firePalette;
+    if (index == 0 && vr_special_moves_fire_flower_active()) {
+        firePalette = *palette;
+        const Color red = { 210, 24, 24 };
+        const Color white = { 255, 255, 255 };
+        const Color brown = { 92, 48, 24 };
+        memcpy(firePalette.parts[PANTS], red, sizeof(Color));
+        memcpy(firePalette.parts[SHIRT], white, sizeof(Color));
+        memcpy(firePalette.parts[GLOVES], white, sizeof(Color));
+        memcpy(firePalette.parts[SHOES], brown, sizeof(Color));
+        memcpy(firePalette.parts[CAP], white, sizeof(Color));
+        memcpy(firePalette.parts[EMBLEM], white, sizeof(Color));
+        palette = &firePalette;
+    }
     for (s32 part = 0; part != PLAYER_PART_MAX; ++part) {
         color.parts[part] = (Lights1) gdSPDefLights1(
             // Shadow
