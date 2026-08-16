@@ -72,6 +72,11 @@
 #define VR_BOWSER_MIN_HAND_RADIUS_METERS 0.10f
 #define VR_FIRE_FLOWER_PICKUP_COUNT 16
 #define VR_FIRE_FLOWER_PICKUP_RADIUS 115.0f
+#define VR_FIRE_FLOWER_HEAD_PICKUP_RADIUS 58.0f
+#define VR_FIRE_FLOWER_HAND_PICKUP_RADIUS 52.0f
+#define VR_FIRE_FLOWER_SPAWN_VELOCITY 6.0f
+#define VR_FIRE_FLOWER_GRAVITY 0.65f
+#define VR_FIRE_FLOWER_FALL_SPEED 7.0f
 #define VR_FIREBALL_CHARGE_FRAMES 75U
 #define VR_FIREBALL_TRIGGER_THRESHOLD 0.55f
 #define VR_FIREBALL_MIN_THROW_SPEED 60.0f
@@ -225,6 +230,8 @@ static u16 sVrFireballChargeFrames = 0;
 static s16 sVrFireFlowerLevel = -1;
 static s16 sVrFireFlowerArea = -1;
 static struct Object* sVrFireFlowerPickups[VR_FIRE_FLOWER_PICKUP_COUNT] = { NULL };
+static f32 sVrFireFlowerPickupVelocityY[VR_FIRE_FLOWER_PICKUP_COUNT] = { 0.0f };
+static bool sVrFireFlowerPickupLanded[VR_FIRE_FLOWER_PICKUP_COUNT] = { false };
 static struct Object* sVrFireballObject = NULL;
 static bool sVrFireballProjectile = false;
 static u16 sVrFireballLifetime = 0;
@@ -4479,6 +4486,8 @@ bool vr_special_moves_spawn_fire_flower(
         pickup->oOpacity = 255;
         obj_scale(pickup, 0.75f);
         sVrFireFlowerPickups[i] = pickup;
+        sVrFireFlowerPickupVelocityY[i] = VR_FIRE_FLOWER_SPAWN_VELOCITY;
+        sVrFireFlowerPickupLanded[i] = false;
         return true;
     }
     return false;
@@ -4488,6 +4497,24 @@ static void vr_special_moves_update_pickups(struct MarioState* mario) {
     if (mario == NULL || mario->marioObj == NULL) {
         return;
     }
+    Vec3f headsetPosition;
+    const bool headsetValid =
+        vr_get_stabilized_headset_world_position(headsetPosition, false);
+    Vec3f handPositions[VR_CONTROLLER_COUNT];
+    bool handValid[VR_CONTROLLER_COUNT] = { false, false };
+    for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
+        struct VrControllerState state = { 0 };
+        Vec3f velocity;
+        handValid[hand] =
+            vr_get_controller_state(hand, &state) &&
+            vr_get_controller_world_fist_raw_from_state(
+                hand,
+                &state,
+                handPositions[hand],
+                velocity
+            );
+    }
+
     for (u32 i = 0; i < VR_FIRE_FLOWER_PICKUP_COUNT; i++) {
         struct Object* pickup = sVrFireFlowerPickups[i];
         if (pickup == NULL) {
@@ -4495,19 +4522,98 @@ static void vr_special_moves_update_pickups(struct MarioState* mario) {
         }
         if ((pickup->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
             sVrFireFlowerPickups[i] = NULL;
+            sVrFireFlowerPickupVelocityY[i] = 0.0f;
+            sVrFireFlowerPickupLanded[i] = false;
             continue;
         }
 
         pickup->oFaceAngleYaw += 0x600;
-        pickup->oPosY = pickup->oHomeY + 65.0f +
-            sins((s16)(gGlobalTimer * 0x500)) * 10.0f;
+        if (!sVrFireFlowerPickupLanded[i]) {
+            pickup->oPosY += sVrFireFlowerPickupVelocityY[i];
+            sVrFireFlowerPickupVelocityY[i] = fmaxf(
+                sVrFireFlowerPickupVelocityY[i] -
+                    VR_FIRE_FLOWER_GRAVITY,
+                -VR_FIRE_FLOWER_FALL_SPEED
+            );
+
+            struct Surface* floor = NULL;
+            const f32 floorHeight = find_floor(
+                pickup->oPosX,
+                pickup->oPosY + 80.0f,
+                pickup->oPosZ,
+                &floor
+            );
+            if (floor != NULL && pickup->oPosY <= floorHeight) {
+                pickup->oPosY = floorHeight;
+                sVrFireFlowerPickupVelocityY[i] = 0.0f;
+                sVrFireFlowerPickupLanded[i] = true;
+            }
+        }
         obj_update_gfx_pos_and_angle(pickup);
-        if (dist_between_objects(pickup, mario->marioObj) <=
-            VR_FIRE_FLOWER_PICKUP_RADIUS) {
+
+        const f32 px = pickup->oPosX;
+        const f32 py = pickup->oPosY + 28.0f;
+        const f32 pz = pickup->oPosZ;
+        const f32 bodyDx = px - mario->marioObj->oPosX;
+        const f32 bodyDy = py -
+            (mario->marioObj->oPosY + 45.0f);
+        const f32 bodyDz = pz - mario->marioObj->oPosZ;
+        bool collected = bodyDx * bodyDx + bodyDy * bodyDy +
+            bodyDz * bodyDz <=
+            VR_FIRE_FLOWER_PICKUP_RADIUS *
+                VR_FIRE_FLOWER_PICKUP_RADIUS;
+        u32 collectingHand = VR_CONTROLLER_COUNT;
+        if (!collected && headsetValid) {
+            const f32 dx = px - headsetPosition[0];
+            const f32 dy = py - headsetPosition[1];
+            const f32 dz = pz - headsetPosition[2];
+            collected = dx * dx + dy * dy + dz * dz <=
+                VR_FIRE_FLOWER_HEAD_PICKUP_RADIUS *
+                    VR_FIRE_FLOWER_HEAD_PICKUP_RADIUS;
+        }
+        for (u32 hand = 0;
+             !collected && hand < VR_CONTROLLER_COUNT;
+             hand++) {
+            if (!handValid[hand]) {
+                continue;
+            }
+            const f32 dx = px - handPositions[hand][0];
+            const f32 dy = py - handPositions[hand][1];
+            const f32 dz = pz - handPositions[hand][2];
+            if (dx * dx + dy * dy + dz * dz <=
+                VR_FIRE_FLOWER_HAND_PICKUP_RADIUS *
+                    VR_FIRE_FLOWER_HAND_PICKUP_RADIUS) {
+                collected = true;
+                collectingHand = hand;
+            }
+        }
+
+        if (collected) {
             vr_special_moves_grant_fire_flower();
-            vr_apply_haptic(VR_CONTROLLER_LEFT, 0.45f, 0.10f, -1.0f);
-            vr_apply_haptic(VR_CONTROLLER_RIGHT, 0.45f, 0.10f, -1.0f);
+            if (collectingHand < VR_CONTROLLER_COUNT) {
+                vr_apply_haptic(
+                    collectingHand,
+                    0.45f,
+                    0.10f,
+                    -1.0f
+                );
+            } else {
+                vr_apply_haptic(
+                    VR_CONTROLLER_LEFT,
+                    0.30f,
+                    0.08f,
+                    -1.0f
+                );
+                vr_apply_haptic(
+                    VR_CONTROLLER_RIGHT,
+                    0.30f,
+                    0.08f,
+                    -1.0f
+                );
+            }
             vr_special_moves_delete_object(&sVrFireFlowerPickups[i]);
+            sVrFireFlowerPickupVelocityY[i] = 0.0f;
+            sVrFireFlowerPickupLanded[i] = false;
         }
     }
 }
@@ -4619,6 +4725,93 @@ static void vr_special_moves_update_projectile(struct MarioState* mario) {
     }
 }
 
+static bool vr_special_moves_try_quick_fireball(
+    struct MarioState* mario
+) {
+    if (mario == NULL || mario->marioObj == NULL ||
+        (mario->input & INPUT_B_PRESSED) == 0 ||
+        !vr_special_moves_fire_flower_active() ||
+        mario->heldObj != NULL || sVrTrackedHeldObject != NULL ||
+        sVrFireballObject != NULL ||
+        sVrPhysicalClimbType != VR_PHYSICAL_CLIMB_NONE ||
+        vr_is_controller_holding_cap(VR_CONTROLLER_LEFT) ||
+        vr_is_controller_holding_cap(VR_CONTROLLER_RIGHT) ||
+        vr_is_controller_holding_fire_flower(VR_CONTROLLER_LEFT) ||
+        vr_is_controller_holding_fire_flower(VR_CONTROLLER_RIGHT)) {
+        return false;
+    }
+
+    Vec3f origin;
+    if (!vr_get_stabilized_headset_world_position(origin, false)) {
+        vec3f_set(
+            origin,
+            mario->pos[0],
+            mario->pos[1] + 90.0f,
+            mario->pos[2]
+        );
+    }
+    const s16 yaw = vr_get_first_person_view_yaw();
+    const f32 forwardX = sins(yaw);
+    const f32 forwardZ = coss(yaw);
+
+    sVrFireballObject = spawn_object(
+        mario->marioObj,
+        MODEL_VR_FIREBALL,
+        bhvStaticObject
+    );
+    if (sVrFireballObject == NULL) {
+        return false;
+    }
+
+    sVrFireballObject->oPosX = origin[0] + forwardX * 42.0f;
+    sVrFireballObject->oPosY = origin[1] - 18.0f;
+    sVrFireballObject->oPosZ = origin[2] + forwardZ * 42.0f;
+    sVrFireballObject->oOpacity = 255;
+    sVrFireballObject->oAnimState =
+        (s32)((gGlobalTimer >> 1) & 7U);
+    obj_scale(sVrFireballObject, 0.45f);
+    obj_update_gfx_pos_and_angle(sVrFireballObject);
+
+    vec3f_set(
+        sVrFireballVelocity,
+        forwardX * 22.0f,
+        4.0f,
+        forwardZ * 22.0f
+    );
+    vec3f_set(sVrFireballRememberedVelocity, 0.0f, 0.0f, 0.0f);
+    sVrFireballProjectile = true;
+    sVrFireballLifetime = 0;
+    sVrFireballChargeFrames = 0;
+    mario->input &= ~INPUT_B_PRESSED;
+    play_sound(
+        SOUND_OBJ_FLAME_BLOWN,
+        sVrFireballObject->header.gfx.cameraToObject
+    );
+    vr_apply_haptic(VR_CONTROLLER_RIGHT, 0.25f, 0.05f, -1.0f);
+    return true;
+}
+
+static void vr_hand_interaction_apply_carry_speed(
+    struct MarioState* mario
+) {
+    if (!configVrImmersiveCarrySpeed || mario == NULL ||
+        mario->heldObj == NULL ||
+        sVrTrackedHeldObject != mario->heldObj) {
+        return;
+    }
+
+    // Native holding locomotion applies this factor itself. Physical holds
+    // deliberately bypass those actions, so mirror the same carrying pace
+    // only when the native action will not do it for us.
+    switch (mario->action) {
+        case ACT_HOLD_WALKING:
+        case ACT_HOLD_HEAVY_WALKING:
+        case ACT_HOLD_DECELERATING:
+            return;
+    }
+    mario->intendedMag *= 0.4f;
+}
+
 static bool vr_special_moves_update_fireball_hand(
     struct MarioState* mario,
     const struct VrControllerState* state,
@@ -4721,6 +4914,8 @@ void vr_hand_interaction_update(struct MarioState* mario) {
     }
     vr_special_moves_update_pickups(mario);
     vr_special_moves_update_projectile(mario);
+    vr_special_moves_try_quick_fireball(mario);
+    vr_hand_interaction_apply_carry_speed(mario);
 
     const bool headsetTrackingAvailable =
         vr_is_active() &&

@@ -142,6 +142,7 @@ bool         configVrImmersiveLedgeCamera         = true;
 bool         configVrImmersiveUnderwaterFilter    = true;
 bool         configVrImmersiveRemovableCap        = false;
 bool         configVrImmersiveLookDownTransparency = true;
+bool         configVrImmersiveCarrySpeed          = false;
 bool         configVrMovementOverhaul             = false;
 bool         configVrMarioPunchSound              = true;
 bool         configVrMotionControlledDive         = true;
@@ -475,6 +476,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_immersive_underwater_filter",  .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveUnderwaterFilter},
     {.name = "vr_immersive_removable_cap",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveRemovableCap},
     {.name = "vr_immersive_look_down_transparency", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveLookDownTransparency},
+    {.name = "vr_immersive_carry_speed",         .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveCarrySpeed},
     {.name = "vr_mario_punch_sound",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMarioPunchSound},
     {.name = "vr_motion_controlled_dive",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControlledDive},
     {.name = "vr_motion_controlled_ground_dive",.type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControlledGroundDive},
