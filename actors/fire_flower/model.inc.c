@@ -11,6 +11,13 @@ static const Vtx vr_fire_flower_billboard_vtx[] = {
     {{{-64, 128, 0}, 0, {   0,   0}, {255, 255, 255, 255}}},
 };
 
+static const Vtx vr_fire_flower_held_vtx[] = {
+    {{{-28,  8, 0}, 0, {   0, 992}, {255, 255, 255, 255}}},
+    {{{ 28,  8, 0}, 0, { 992, 992}, {255, 255, 255, 255}}},
+    {{{ 28, 64, 0}, 0, { 992,   0}, {255, 255, 255, 255}}},
+    {{{-28, 64, 0}, 0, {   0,   0}, {255, 255, 255, 255}}},
+};
+
 const Gfx vr_fire_flower_dl[] = {
     gsDPPipeSync(),
     gsDPSetCombineMode(G_CC_DECALRGBA, G_CC_DECALRGBA),
@@ -27,27 +34,18 @@ const Gfx vr_fire_flower_dl[] = {
     gsSPEndDisplayList(),
 };
 
-// Reuse the game's animated flame frames, but leave the environment color to
-// geo_vr_fireball_color so every object can smoothly ramp its own opacity.
-const Gfx vr_fireball_base_dl[] = {
-    gsSPClearGeometryMode(G_LIGHTING | G_SHADING_SMOOTH),
-    gsDPSetCombineMode(G_CC_FADEA, G_CC_FADEA),
-    gsDPSetTile(G_IM_FMT_IA, G_IM_SIZ_16b, 0, 0, G_TX_LOADTILE, 0,
-        G_TX_CLAMP, 5, G_TX_NOLOD, G_TX_CLAMP, 5, G_TX_NOLOD),
-    gsDPLoadSync(),
-    gsDPLoadBlock(G_TX_LOADTILE, 0, 0, 32 * 32 - 1,
-        CALC_DXT(32, G_IM_SIZ_16b_BYTES)),
-    gsDPSetTile(G_IM_FMT_IA, G_IM_SIZ_16b, 8, 0, G_TX_RENDERTILE, 0,
-        G_TX_CLAMP, 5, G_TX_NOLOD, G_TX_CLAMP, 5, G_TX_NOLOD),
-    gsDPSetTileSize(0, 0, 0, (32 - 1) << G_TEXTURE_IMAGE_FRAC,
-        (32 - 1) << G_TEXTURE_IMAGE_FRAC),
+const Gfx vr_fire_flower_held_dl[] = {
+    gsDPPipeSync(),
+    gsDPSetCombineMode(G_CC_DECALRGBA, G_CC_DECALRGBA),
+    gsSPClearGeometryMode(G_LIGHTING | G_CULL_BACK),
     gsSPTexture(0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, G_ON),
-    gsSPVertex(flame_seg3_vertex_030172E0, 4, 0),
+    gsDPLoadTextureBlock(vr_fire_flower_texture, G_IM_FMT_RGBA,
+        G_IM_SIZ_16b, 32, 32, 0, G_TX_CLAMP, G_TX_CLAMP, 5, 5,
+        G_TX_NOLOD, G_TX_NOLOD),
+    gsSPVertex(vr_fire_flower_held_vtx, 4, 0),
     gsSP2Triangles(0, 1, 2, 0, 0, 2, 3, 0),
     gsSPTexture(0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, G_OFF),
-    gsDPPipeSync(),
-    gsSPSetGeometryMode(G_LIGHTING | G_SHADING_SMOOTH),
-    gsDPSetEnvColor(255, 255, 255, 255),
+    gsSPSetGeometryMode(G_LIGHTING | G_CULL_BACK),
     gsDPSetCombineMode(G_CC_SHADE, G_CC_SHADE),
     gsSPEndDisplayList(),
 };
@@ -56,7 +54,28 @@ const Gfx vr_fireball_base_dl[] = {
     const Gfx name[] = { \
         gsDPPipeSync(), \
         gsDPSetTextureImage(G_IM_FMT_IA, G_IM_SIZ_16b, 1, texture), \
-        gsSPDisplayList(vr_fireball_base_dl), \
+        gsSPClearGeometryMode(G_LIGHTING | G_SHADING_SMOOTH), \
+        gsDPSetCombineMode(G_CC_FADEA, G_CC_FADEA), \
+        gsDPSetTile(G_IM_FMT_IA, G_IM_SIZ_16b, 0, 0, \
+            G_TX_LOADTILE, 0, G_TX_CLAMP, 5, G_TX_NOLOD, \
+            G_TX_CLAMP, 5, G_TX_NOLOD), \
+        gsDPLoadSync(), \
+        gsDPLoadBlock(G_TX_LOADTILE, 0, 0, 32 * 32 - 1, \
+            CALC_DXT(32, G_IM_SIZ_16b_BYTES)), \
+        gsDPSetTile(G_IM_FMT_IA, G_IM_SIZ_16b, 8, 0, \
+            G_TX_RENDERTILE, 0, G_TX_CLAMP, 5, G_TX_NOLOD, \
+            G_TX_CLAMP, 5, G_TX_NOLOD), \
+        gsDPSetTileSize(0, 0, 0, \
+            (32 - 1) << G_TEXTURE_IMAGE_FRAC, \
+            (32 - 1) << G_TEXTURE_IMAGE_FRAC), \
+        gsSPTexture(0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, G_ON), \
+        gsSPVertex(flame_seg3_vertex_030172E0, 4, 0), \
+        gsSP2Triangles(0, 1, 2, 0, 0, 2, 3, 0), \
+        gsSPTexture(0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, G_OFF), \
+        gsDPPipeSync(), \
+        gsSPSetGeometryMode(G_LIGHTING | G_SHADING_SMOOTH), \
+        gsDPSetEnvColor(255, 255, 255, 255), \
+        gsDPSetCombineMode(G_CC_SHADE, G_CC_SHADE), \
         gsSPEndDisplayList(), \
     }
 
