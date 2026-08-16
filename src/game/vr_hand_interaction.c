@@ -4393,6 +4393,30 @@ bool vr_special_moves_fire_flower_active(void) {
     return configVrSpecialFireFlower && sVrFireFlowerPowered;
 }
 
+Gfx* geo_vr_fireball_color(
+    s32 callContext,
+    UNUSED struct GraphNode* node,
+    UNUSED void* context
+) {
+    if (callContext != GEO_CONTEXT_RENDER ||
+        gCurGraphNodeObject == NULL) {
+        return NULL;
+    }
+    Gfx* displayList = alloc_display_list(2 * sizeof(Gfx));
+    if (displayList == NULL) {
+        return NULL;
+    }
+    const u8 alpha = (u8)clamp(
+        gCurGraphNodeObject->oOpacity,
+        0,
+        255
+    );
+    // Warmer than the stock red flame (255, 50, 0) without becoming yellow.
+    gDPSetEnvColor(&displayList[0], 255, 105, 0, alpha);
+    gSPEndDisplayList(&displayList[1]);
+    return displayList;
+}
+
 bool vr_special_moves_spawn_fire_flower(
     struct Object* box,
     struct MarioState* owner
@@ -4577,7 +4601,7 @@ static bool vr_special_moves_update_fireball_hand(
         !sVrFireballProjectile) {
         sVrFireballObject = spawn_object(
             mario->marioObj,
-            MODEL_RED_FLAME,
+            MODEL_VR_FIREBALL,
             bhvStaticObject
         );
         sVrFireballChargeFrames = 0;

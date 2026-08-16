@@ -5,6 +5,7 @@
 #include "make_const_nonconst.h"
 
 #include "common1.h"
+#include "game/vr_hand_interaction.h"
 
 #include "mist/geo.inc.c"
 #include "explosion/geo.inc.c"

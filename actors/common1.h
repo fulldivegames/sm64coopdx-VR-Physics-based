@@ -165,6 +165,7 @@ extern const Gfx mist_seg3_dl_03000920[];
 extern const GeoLayout mushroom_1up_geo[];
 extern const GeoLayout vr_fire_flower_geo[];
 extern const Gfx vr_fire_flower_dl[];
+extern const GeoLayout vr_fireball_geo[];
 extern const Gfx mushroom_1up_seg3_dl_0302A628[];
 extern const Gfx mushroom_1up_seg3_dl_0302A660[];
 
