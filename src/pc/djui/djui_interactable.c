@@ -4,6 +4,7 @@
 #include "djui_panel_pause.h"
 #include "djui_panel_modlist.h"
 #include "djui_panel_playerlist.h"
+#include "djui_inputbox.h"
 
 #include "pc/controller/controller_sdl.h"
 #include "pc/controller/controller_mouse.h"
@@ -435,6 +436,17 @@ void djui_interactable_update(void) {
         }
     }
 
+    // While the optional on-screen keyboard owns the focused input box,
+    // route controller navigation and confirmation to it instead of treating
+    // A/B as a request to discard text focus. Native keyboard callbacks remain
+    // active on desktop, so physical typing continues to work normally.
+    if (djui_inputbox_onscreen_keyboard_is_active()) {
+        const u16 pressed = padButtons & ~sLastInteractablePad.button;
+        djui_inputbox_onscreen_keyboard_update(&gInteractablePad, pressed);
+        sLastInteractablePad = gInteractablePad;
+        sLastMouseButtons = mouseButtons;
+        return;
+    }
     // update focused
     if (gInteractableFocus) {
         u16 mainButtons = PAD_BUTTON_A | PAD_BUTTON_B;

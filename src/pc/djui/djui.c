@@ -16,6 +16,7 @@
 #include "pc/vr/vr.h"
 #include "djui_panel_playerlist.h"
 #include "djui_hud_utils.h"
+#include "djui_inputbox.h"
 #include "engine/math_util.h"
 #include "pc/utils/misc.h"
 
@@ -270,6 +271,8 @@ void djui_render(void) {
     if (gDjuiRoot != NULL) {
         djui_base_render(&gDjuiRoot->base);
     }
+
+    djui_inputbox_onscreen_keyboard_render();
 
     djui_fps_display_render();
     djui_ctx_display_render();

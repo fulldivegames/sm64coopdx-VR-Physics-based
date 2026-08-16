@@ -5,6 +5,7 @@
 #include "djui_panel_options.h"
 #include "djui_panel_menu.h"
 #include "djui_panel_confirm.h"
+#include "djui_hud_utils.h"
 #include "pc/controller/controller_sdl.h"
 #include "pc/pc_main.h"
 #include "pc/network/version.h"
@@ -67,8 +68,9 @@ static void djui_panel_main_create_vr_version_status(
     );
     djui_text_set_font_scale(
         version,
-        version->fontScale * 0.62f
+        version->fontScale * 0.72f
     );
+    djui_text_set_font(version, gDjuiFonts[FONT_ALIASED]);
     djui_text_set_drop_shadow(version, 0, 0, 0, 180);
 
     const enum VrUpdateStatus status = vr_update_get_status();
@@ -148,8 +150,9 @@ static void djui_panel_main_create_vr_version_status(
     );
     djui_text_set_font_scale(
         statusLabel,
-        statusLabel->fontScale * 0.55f
+        statusLabel->fontScale * 0.70f
     );
+    djui_text_set_font(statusLabel, gDjuiFonts[FONT_ALIASED]);
     djui_text_set_drop_shadow(statusLabel, 0, 0, 0, 180);
 }
 
@@ -160,6 +163,7 @@ void djui_panel_main_create(struct DjuiBase* caller) {
         {
             if (!configExCoopTheme) {
                 struct DjuiImage* logo = djui_image_create(body, texture_coopdx_logo, 2048, 1024, G_IM_FMT_RGBA, G_IM_SIZ_32b);
+                djui_image_set_linear_filter(logo, true);
                 if (configDjuiThemeCenter) {
                     djui_base_set_size(&logo->base, 550, 275);
                 } else {

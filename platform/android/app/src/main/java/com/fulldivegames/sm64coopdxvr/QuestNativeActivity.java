@@ -1,30 +1,13 @@
 package com.fulldivegames.sm64coopdxvr;
 
 import android.app.NativeActivity;
-import android.app.AlertDialog;
-import android.content.ClipData;
-import android.content.ClipboardManager;
-import android.content.Context;
 import android.content.Intent;
-import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.Settings;
 import android.util.Log;
-import android.text.Editable;
-import android.text.InputFilter;
-import android.text.InputType;
-import android.text.TextWatcher;
-import android.view.Gravity;
-import android.view.KeyEvent;
-import android.view.ViewGroup;
-import android.view.WindowManager;
-import android.view.inputmethod.EditorInfo;
-import android.view.inputmethod.InputMethodManager;
-import android.widget.EditText;
-import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import java.io.File;
@@ -56,15 +39,10 @@ public final class QuestNativeActivity extends NativeActivity {
     private static final String SHADER_WARMUP_PENDING_FILE =
             "first-boot-after-rom.pending";
     private boolean requestedSharedStorageAccess;
-    private EditText questKeyboardInput;
-    private AlertDialog questKeyboardDialog;
-    private boolean suppressQuestKeyboardCallback;
     private static final String US_ROM_SHA1 =
             "9bef1128717f958171a4afac3ed78ee2bb4e86ce";
     private static final String RELEASES_API =
             "https://api.github.com/repos/fulldivegames/sm64coopdx-VR-Standalone/releases?per_page=20";
-    private static native void nativeOnQuestTextChanged(String text);
-    private static native void nativeOnQuestKeyboardDone();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -101,135 +79,6 @@ public final class QuestNativeActivity extends NativeActivity {
             createSharedDirectory(SHARED_DYNOS_PACK_DIRECTORY, "DynOS pack");
             createSharedDirectory(SHARED_PALETTE_DIRECTORY, "palette");
             createSharedDirectory(SHARED_SHADER_CACHE_DIRECTORY, "shader cache");
-        }
-    }
-
-    public void showQuestKeyboard(String initialText, int maxLength) {
-        runOnUiThread(() -> {
-            if (questKeyboardDialog != null) questKeyboardDialog.dismiss();
-
-            final EditText inputView = new EditText(this);
-            questKeyboardInput = inputView;
-            inputView.setSingleLine(true);
-            inputView.setInputType(InputType.TYPE_CLASS_TEXT |
-                    InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-            inputView.setImeOptions(EditorInfo.IME_ACTION_DONE);
-            inputView.setBackgroundColor(Color.WHITE);
-            inputView.setTextColor(Color.BLACK);
-            inputView.setCursorVisible(true);
-            inputView.setFilters(new InputFilter[] {
-                    new InputFilter.LengthFilter(Math.max(1, maxLength))
-            });
-            suppressQuestKeyboardCallback = true;
-            inputView.setText(initialText != null ? initialText : "");
-            inputView.setSelection(inputView.length());
-            suppressQuestKeyboardCallback = false;
-            inputView.setFocusableInTouchMode(true);
-
-            inputView.addTextChangedListener(new TextWatcher() {
-                @Override public void beforeTextChanged(CharSequence value, int start,
-                        int count, int after) {}
-                @Override public void onTextChanged(CharSequence value, int start,
-                        int before, int count) {
-                    if (!suppressQuestKeyboardCallback) {
-                        nativeOnQuestTextChanged(value.toString());
-                    }
-                }
-                @Override public void afterTextChanged(Editable value) {}
-            });
-
-            final AlertDialog dialog = new AlertDialog.Builder(this)
-                    .setTitle("Enter text")
-                    .setView(inputView)
-                    .setPositiveButton("Done", (window, which) -> {
-                        nativeOnQuestTextChanged(inputView.getText().toString());
-                        nativeOnQuestKeyboardDone();
-                    })
-                    .setNegativeButton("Cancel", (window, which) ->
-                            nativeOnQuestKeyboardDone())
-                    .create();
-            questKeyboardDialog = dialog;
-            inputView.setOnEditorActionListener((view, actionId, event) -> {
-                boolean done = actionId == EditorInfo.IME_ACTION_DONE ||
-                        (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER &&
-                         event.getAction() == KeyEvent.ACTION_DOWN);
-                if (!done) return false;
-                nativeOnQuestTextChanged(view.getText().toString());
-                nativeOnQuestKeyboardDone();
-                dialog.dismiss();
-                return true;
-            });
-            dialog.setOnDismissListener(window -> {
-                InputMethodManager input =
-                        (InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
-                input.hideSoftInputFromWindow(inputView.getWindowToken(), 0);
-                if (questKeyboardDialog == dialog) {
-                    questKeyboardDialog = null;
-                    questKeyboardInput = null;
-                }
-            });
-            dialog.show();
-            if (dialog.getWindow() != null) {
-                dialog.getWindow().clearFlags(
-                        WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
-                dialog.getWindow().setSoftInputMode(
-                        WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE |
-                        WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
-            }
-            InputMethodManager input =
-                    (InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
-            inputView.postDelayed(() -> {
-                if (questKeyboardInput != inputView || !dialog.isShowing()) return;
-                inputView.requestFocus();
-                input.restartInput(inputView);
-                boolean shown = input.showSoftInput(
-                        inputView,
-                        InputMethodManager.SHOW_FORCED);
-                Log.i(TAG, "Quest keyboard request: " +
-                        (shown ? "accepted" : "retrying"));
-                if (!shown) {
-                    inputView.postDelayed(() -> {
-                        if (questKeyboardInput != inputView || !dialog.isShowing()) return;
-                        inputView.requestFocus();
-                        input.restartInput(inputView);
-                        input.showSoftInput(
-                                inputView,
-                                InputMethodManager.SHOW_FORCED);
-                    }, 250);
-                }
-            }, 100);
-        });
-    }
-
-    public void hideQuestKeyboard() {
-        runOnUiThread(() -> {
-            if (questKeyboardDialog != null) {
-                questKeyboardDialog.dismiss();
-                return;
-            }
-            if (questKeyboardInput == null) return;
-            InputMethodManager input =
-                    (InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
-            input.hideSoftInputFromWindow(questKeyboardInput.getWindowToken(), 0);
-            questKeyboardInput.clearFocus();
-        });
-    }
-
-    public String getQuestClipboardText() {
-        ClipboardManager clipboard =
-                (ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);
-        if (clipboard == null || !clipboard.hasPrimaryClip()) return "";
-        ClipData clip = clipboard.getPrimaryClip();
-        if (clip == null || clip.getItemCount() == 0) return "";
-        CharSequence value = clip.getItemAt(0).coerceToText(this);
-        return value != null ? value.toString() : "";
-    }
-
-    public void setQuestClipboardText(String text) {
-        ClipboardManager clipboard =
-                (ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);
-        if (clipboard != null) {
-            clipboard.setPrimaryClip(ClipData.newPlainText("SM64 VR", text != null ? text : ""));
         }
     }
 

@@ -226,6 +226,15 @@ void patch_djui_hud_before(void) {
 }
 
 void patch_djui_hud(f32 delta) {
+    if (vr_is_active()) {
+        // Lua HUD interpolation rewrites matrices inside the game-tick
+        // display list. Repatching those matrices at the headset refresh
+        // rate can make large layered mod-menu backgrounds alternate between
+        // two transforms while their non-interpolated selectors stay stable.
+        // VR already holds one HUD list steady for both eyes, so resolve all
+        // interpolated Lua HUD elements to the current tick as well.
+        delta = 1.0f;
+    }
     f32 savedZ = gDjuiHudUtilsZ;
     Gfx* savedHeadPos = gDisplayListHead;
     struct HudUtilsState savedState = sHudUtilsState;

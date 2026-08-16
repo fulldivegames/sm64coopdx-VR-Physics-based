@@ -16,7 +16,6 @@
 #include "quest_rom.h"
 #include "quest_game_runtime.h"
 #include "quest_openxr_input.h"
-#include "quest_text_input.h"
 /* Keep this bootstrap translation unit independent of the game's ultra64
  * include order. The display function's u32 parameter is unsigned int on
  * every supported target. */
@@ -76,8 +75,8 @@ typedef struct QuestApp {
     bool performance_settings_supported;
     bool display_refresh_rate_supported;
     char system_name[XR_MAX_SYSTEM_NAME_SIZE];
-    XrFoveationProfileFB foveation_profiles[2];
-    bool active_ultra_foveation;
+    XrFoveationProfileFB foveation_profiles[3];
+    unsigned int active_foveation_profile;
     unsigned int active_refresh_rate_index;
     PFN_xrCreateFoveationProfileFB create_foveation_profile;
     PFN_xrDestroyFoveationProfileFB destroy_foveation_profile;
@@ -681,17 +680,20 @@ static bool create_openxr_session(QuestApp *app) {
     }
     if (app->foveation_supported) {
         app->foveation_profiles[0] = create_foveation_level_profile(
-            app, XR_FOVEATION_LEVEL_MEDIUM_FB);
+            app, XR_FOVEATION_LEVEL_NONE_FB);
         app->foveation_profiles[1] = create_foveation_level_profile(
+            app, XR_FOVEATION_LEVEL_MEDIUM_FB);
+        app->foveation_profiles[2] = create_foveation_level_profile(
             app, XR_FOVEATION_LEVEL_HIGH_FB);
-        if (app->foveation_profiles[0] == XR_NULL_HANDLE) {
+        if (app->foveation_profiles[1] == XR_NULL_HANDLE) {
             app->foveation_supported = false;
             LOGI("Quest fixed foveated rendering is unavailable.");
         } else {
-            LOGI("Quest dynamic fixed foveated rendering profiles are ready%s.",
-                 app->foveation_profiles[1] != XR_NULL_HANDLE
-                     ? " (medium/high)"
-                     : " (medium only)");
+            LOGI("Quest fixed foveated rendering profiles are ready%s%s.",
+                 app->foveation_profiles[0] != XR_NULL_HANDLE
+                     ? " (off/medium" : " (medium",
+                 app->foveation_profiles[2] != XR_NULL_HANDLE
+                     ? "/high)" : ")");
         }
     }
 
@@ -824,13 +826,19 @@ static bool create_swapchains(QuestApp *app) {
         return false;
     }
 
+    const bool ui_full_quality = quest_game_ui_requires_full_quality();
     const bool ultra_foveation = quest_game_ultra_performance_enabled();
-    XrFoveationProfileFB active_foveation =
-        ultra_foveation &&
-        app->foveation_profiles[1] != XR_NULL_HANDLE
-            ? app->foveation_profiles[1]
-            : app->foveation_profiles[0];
-    app->active_ultra_foveation = ultra_foveation;
+    const unsigned int foveation_index =
+        ui_full_quality && app->foveation_profiles[0] != XR_NULL_HANDLE
+            ? 0U
+            : ultra_foveation && app->foveation_profiles[2] != XR_NULL_HANDLE
+                ? 2U : 1U;
+    const XrFoveationProfileFB active_foveation =
+        app->foveation_profiles[foveation_index];
+    app->active_foveation_profile = foveation_index;
+    LOGI("Quest initial foveation profile: %s.",
+         foveation_index == 0U ? "off (full-quality UI)"
+             : foveation_index == 2U ? "high" : "medium");
 
     for (uint32_t eye = 0; eye < QUEST_VIEW_COUNT; ++eye) {
         QuestSwapchain *swapchain = &app->swapchains[eye];
@@ -995,13 +1003,16 @@ static bool update_render_scale_if_needed(QuestApp *app) {
 
 static void update_foveation_if_needed(QuestApp *app) {
     if (!app->foveation_supported) return;
+    const bool ui_full_quality = quest_game_ui_requires_full_quality();
     const bool ultra = quest_game_ultra_performance_enabled();
-    if (ultra == app->active_ultra_foveation) return;
+    const unsigned int desired =
+        ui_full_quality && app->foveation_profiles[0] != XR_NULL_HANDLE
+            ? 0U
+            : ultra && app->foveation_profiles[2] != XR_NULL_HANDLE
+                ? 2U : 1U;
+    if (desired == app->active_foveation_profile) return;
 
-    const XrFoveationProfileFB profile =
-        ultra && app->foveation_profiles[1] != XR_NULL_HANDLE
-            ? app->foveation_profiles[1]
-            : app->foveation_profiles[0];
+    const XrFoveationProfileFB profile = app->foveation_profiles[desired];
     if (profile == XR_NULL_HANDLE) return;
 
     for (uint32_t eye = 0; eye < QUEST_VIEW_COUNT; ++eye) {
@@ -1018,11 +1029,10 @@ static void update_foveation_if_needed(QuestApp *app) {
             return;
         }
     }
-    app->active_ultra_foveation = ultra;
-    LOGI("Quest foveation changed to %s dynamic profile.",
-         ultra && app->foveation_profiles[1] != XR_NULL_HANDLE
-             ? "high"
-             : "medium");
+    app->active_foveation_profile = desired;
+    LOGI("Quest foveation changed to %s profile.",
+         desired == 0U ? "off (full-quality UI)"
+             : desired == 2U ? "high" : "medium");
 }
 
 static void update_display_refresh_rate_if_needed(QuestApp *app) {
@@ -1296,7 +1306,7 @@ static void destroy_quest_app(QuestApp *app) {
     if (app->mario_program != 0) glDeleteProgram(app->mario_program);
     destroy_swapchain_render_targets(app);
     if (app->destroy_foveation_profile != NULL) {
-        for (size_t i = 0; i < 2; ++i) {
+        for (size_t i = 0; i < 3; ++i) {
             if (app->foveation_profiles[i] != XR_NULL_HANDLE) {
                 app->destroy_foveation_profile(app->foveation_profiles[i]);
                 app->foveation_profiles[i] = XR_NULL_HANDLE;
@@ -1342,7 +1352,6 @@ void android_main(struct android_app *android_app) {
     android_app->userData = &app;
     android_app->onAppCmd = handle_app_command;
     sActiveQuestApp = &app;
-    quest_text_input_initialize(android_app->activity);
 
     extern void quest_android_set_user_path(const char *path);
     quest_android_set_user_path(android_app->activity->externalDataPath);
@@ -1413,7 +1422,6 @@ void android_main(struct android_app *android_app) {
     }
 
     destroy_quest_app(&app);
-    quest_text_input_shutdown();
     if (sActiveQuestApp == &app) sActiveQuestApp = NULL;
     LOGI("Android/Quest OpenXR smoke test stopped.");
 

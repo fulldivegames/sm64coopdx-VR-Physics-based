@@ -15,6 +15,7 @@
 #include "pc/chat_commands.h"
 #include "pc/audio/audio_api.h"
 #include "pc/djui/djui.h"
+#include "pc/djui/djui_inputbox.h"
 #include "pc/djui/djui_panel_pause.h"
 #include "pc/djui/djui_unicode.h"
 #include "pc/fs/fs.h"
@@ -286,14 +287,23 @@ unsigned int quest_game_render_scale_percent(void) {
     }
     // Keep text and controls crisp regardless of gameplay resolution. The
     // OpenXR bootstrap changes swapchains after the menu transition settles.
-    if ((gDjuiInMainMenu || gDjuiPanelPauseCreated)
-        && !configVrUltraPerformanceMode) return 100U;
+    if (quest_game_ui_requires_full_quality()) return 100U;
     return configVrRenderScale;
 }
 
 bool quest_game_ultra_performance_enabled(void) {
     quest_game_load_early_config();
     return configVrUltraPerformanceMode;
+}
+
+bool quest_game_ui_requires_full_quality(void) {
+    // The menu, pause panels, and on-screen keyboard contain small text that
+    // fixed foveated rendering makes unreadable away from the exact eye
+    // center. Start at full quality too, before the main-menu flags settle.
+    return !sReady
+        || gDjuiInMainMenu
+        || gDjuiPanelPauseCreated
+        || djui_inputbox_onscreen_keyboard_is_active();
 }
 
 unsigned int quest_game_refresh_rate_index(void) {

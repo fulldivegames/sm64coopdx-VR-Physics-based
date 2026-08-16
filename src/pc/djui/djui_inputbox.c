@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 #include "djui.h"
 #include "djui_unicode.h"
 #include "djui_hud_utils.h"
@@ -17,6 +18,319 @@ u8 gDjuiInputHeldShift   = 0;
 u8 gDjuiInputHeldControl = 0;
 u8 gDjuiInputHeldAlt     = 0;
 static u8 sCursorBlink = 0;
+
+enum DjuiKeyboardAction {
+    DJUI_KEY_CHAR,
+    DJUI_KEY_ESCAPE,
+    DJUI_KEY_BACKSPACE,
+    DJUI_KEY_TAB,
+    DJUI_KEY_CAPS,
+    DJUI_KEY_ENTER,
+    DJUI_KEY_SHIFT,
+    DJUI_KEY_SPACE,
+    DJUI_KEY_LEFT,
+    DJUI_KEY_RIGHT,
+    DJUI_KEY_DELETE,
+};
+
+struct DjuiKeyboardKey {
+    const char* label;
+    const char* normal;
+    const char* shifted;
+    f32 width;
+    enum DjuiKeyboardAction action;
+};
+
+#define KEY_CHAR(label, normal, shifted) { label, normal, shifted, 1.0f, DJUI_KEY_CHAR }
+#define KEY_WIDE(label, width, action) { label, NULL, NULL, width, action }
+
+static const struct DjuiKeyboardKey sKeyboardRow0[] = {
+    KEY_WIDE("Esc", 1.4f, DJUI_KEY_ESCAPE),
+    KEY_CHAR("1", "1", "!"), KEY_CHAR("2", "2", "@"),
+    KEY_CHAR("3", "3", "#"), KEY_CHAR("4", "4", "$"),
+    KEY_CHAR("5", "5", "%"), KEY_CHAR("6", "6", "^"),
+    KEY_CHAR("7", "7", "&"), KEY_CHAR("8", "8", "*"),
+    KEY_CHAR("9", "9", "("), KEY_CHAR("0", "0", ")"),
+    KEY_CHAR("-", "-", "_"), KEY_CHAR("=", "=", "+"),
+    KEY_WIDE("Backspace", 2.4f, DJUI_KEY_BACKSPACE),
+};
+
+static const struct DjuiKeyboardKey sKeyboardRow1[] = {
+    KEY_WIDE("Tab", 1.5f, DJUI_KEY_TAB),
+    KEY_CHAR("Q", "q", "Q"), KEY_CHAR("W", "w", "W"),
+    KEY_CHAR("E", "e", "E"), KEY_CHAR("R", "r", "R"),
+    KEY_CHAR("T", "t", "T"), KEY_CHAR("Y", "y", "Y"),
+    KEY_CHAR("U", "u", "U"), KEY_CHAR("I", "i", "I"),
+    KEY_CHAR("O", "o", "O"), KEY_CHAR("P", "p", "P"),
+    KEY_CHAR("[", "[", "{"), KEY_CHAR("]", "]", "}"),
+    { "\\", "\\", "|", 1.5f, DJUI_KEY_CHAR },
+};
+
+static const struct DjuiKeyboardKey sKeyboardRow2[] = {
+    KEY_WIDE("Caps", 1.8f, DJUI_KEY_CAPS),
+    KEY_CHAR("A", "a", "A"), KEY_CHAR("S", "s", "S"),
+    KEY_CHAR("D", "d", "D"), KEY_CHAR("F", "f", "F"),
+    KEY_CHAR("G", "g", "G"), KEY_CHAR("H", "h", "H"),
+    KEY_CHAR("J", "j", "J"), KEY_CHAR("K", "k", "K"),
+    KEY_CHAR("L", "l", "L"), KEY_CHAR(";", ";", ":"),
+    { "'", "'", "\"", 1.0f, DJUI_KEY_CHAR },
+    KEY_WIDE("Enter", 2.2f, DJUI_KEY_ENTER),
+};
+
+static const struct DjuiKeyboardKey sKeyboardRow3[] = {
+    KEY_WIDE("Shift", 2.2f, DJUI_KEY_SHIFT),
+    KEY_CHAR("Z", "z", "Z"), KEY_CHAR("X", "x", "X"),
+    KEY_CHAR("C", "c", "C"), KEY_CHAR("V", "v", "V"),
+    KEY_CHAR("B", "b", "B"), KEY_CHAR("N", "n", "N"),
+    KEY_CHAR("M", "m", "M"), KEY_CHAR(",", ",", "<"),
+    KEY_CHAR(".", ".", ">"), KEY_CHAR("/", "/", "?"),
+    KEY_WIDE("Shift", 2.8f, DJUI_KEY_SHIFT),
+};
+
+static const struct DjuiKeyboardKey sKeyboardRow4[] = {
+    KEY_WIDE("Cancel", 2.0f, DJUI_KEY_ESCAPE),
+    KEY_WIDE("Space", 8.8f, DJUI_KEY_SPACE),
+    KEY_WIDE("Left", 1.3f, DJUI_KEY_LEFT),
+    KEY_WIDE("Right", 1.3f, DJUI_KEY_RIGHT),
+    KEY_WIDE("Delete", 1.6f, DJUI_KEY_DELETE),
+};
+
+#undef KEY_CHAR
+#undef KEY_WIDE
+
+struct DjuiKeyboardRow {
+    const struct DjuiKeyboardKey* keys;
+    u8 count;
+};
+
+static const struct DjuiKeyboardRow sKeyboardRows[] = {
+    { sKeyboardRow0, sizeof(sKeyboardRow0) / sizeof(sKeyboardRow0[0]) },
+    { sKeyboardRow1, sizeof(sKeyboardRow1) / sizeof(sKeyboardRow1[0]) },
+    { sKeyboardRow2, sizeof(sKeyboardRow2) / sizeof(sKeyboardRow2[0]) },
+    { sKeyboardRow3, sizeof(sKeyboardRow3) / sizeof(sKeyboardRow3[0]) },
+    { sKeyboardRow4, sizeof(sKeyboardRow4) / sizeof(sKeyboardRow4[0]) },
+};
+
+static struct DjuiInputbox* sKeyboardTarget;
+static u8 sKeyboardRow;
+static u8 sKeyboardColumn;
+static s8 sKeyboardLastAnalogDirection;
+static bool sKeyboardShift;
+static bool sKeyboardCaps;
+
+static const struct DjuiKeyboardKey* djui_keyboard_selected_key(void) {
+    const struct DjuiKeyboardRow* row = &sKeyboardRows[sKeyboardRow];
+    if (sKeyboardColumn >= row->count) sKeyboardColumn = row->count - 1;
+    return &row->keys[sKeyboardColumn];
+}
+
+static void djui_keyboard_move_horizontal(s8 direction) {
+    const u8 count = sKeyboardRows[sKeyboardRow].count;
+    sKeyboardColumn = (sKeyboardColumn + count + direction) % count;
+}
+
+static void djui_keyboard_move_vertical(s8 direction) {
+    const u8 previousCount = sKeyboardRows[sKeyboardRow].count;
+    const u8 previousColumn = sKeyboardColumn;
+    const u8 rowCount = sizeof(sKeyboardRows) / sizeof(sKeyboardRows[0]);
+    sKeyboardRow = (sKeyboardRow + rowCount + direction) % rowCount;
+    const u8 nextCount = sKeyboardRows[sKeyboardRow].count;
+    if (previousCount <= 1 || nextCount <= 1) {
+        sKeyboardColumn = 0;
+    } else {
+        sKeyboardColumn = (previousColumn * (nextCount - 1) +
+                           (previousCount - 1) / 2) / (previousCount - 1);
+    }
+}
+
+static void djui_keyboard_type_selected(void) {
+    if (sKeyboardTarget == NULL) return;
+    const struct DjuiKeyboardKey* key = djui_keyboard_selected_key();
+    char text[8] = { 0 };
+    switch (key->action) {
+        case DJUI_KEY_CHAR: {
+            const char* value = sKeyboardShift ? key->shifted : key->normal;
+            if (value == NULL) return;
+            snprintf(text, sizeof(text), "%s", value);
+            if (isalpha((unsigned char)text[0])) {
+                const bool uppercase = sKeyboardCaps != sKeyboardShift;
+                text[0] = uppercase ? toupper((unsigned char)text[0])
+                                    : tolower((unsigned char)text[0]);
+            }
+            djui_inputbox_on_text_input(&sKeyboardTarget->base, text);
+            sKeyboardShift = false;
+        } break;
+        case DJUI_KEY_ESCAPE:
+            djui_inputbox_on_key_down(&sKeyboardTarget->base, SCANCODE_ESCAPE);
+            break;
+        case DJUI_KEY_BACKSPACE:
+            djui_inputbox_on_key_down(&sKeyboardTarget->base, SCANCODE_BACKSPACE);
+            break;
+        case DJUI_KEY_TAB:
+            snprintf(text, sizeof(text), "    ");
+            djui_inputbox_on_text_input(&sKeyboardTarget->base, text);
+            break;
+        case DJUI_KEY_CAPS:
+            sKeyboardCaps = !sKeyboardCaps;
+            break;
+        case DJUI_KEY_ENTER:
+            djui_inputbox_on_key_down(&sKeyboardTarget->base, SCANCODE_ENTER);
+            break;
+        case DJUI_KEY_SHIFT:
+            sKeyboardShift = !sKeyboardShift;
+            break;
+        case DJUI_KEY_SPACE:
+            snprintf(text, sizeof(text), " ");
+            djui_inputbox_on_text_input(&sKeyboardTarget->base, text);
+            break;
+        case DJUI_KEY_LEFT:
+            djui_inputbox_on_key_down(&sKeyboardTarget->base, SCANCODE_LEFT);
+            break;
+        case DJUI_KEY_RIGHT:
+            djui_inputbox_on_key_down(&sKeyboardTarget->base, SCANCODE_RIGHT);
+            break;
+        case DJUI_KEY_DELETE:
+            djui_inputbox_on_key_down(&sKeyboardTarget->base, SCANCODE_DELETE);
+            break;
+    }
+}
+
+bool djui_inputbox_onscreen_keyboard_is_active(void) {
+    return sKeyboardTarget != NULL &&
+           gInteractableFocus == &sKeyboardTarget->base;
+}
+
+void djui_inputbox_onscreen_keyboard_update(OSContPad* pad, u16 pressed) {
+    if (!djui_inputbox_onscreen_keyboard_is_active() || pad == NULL) return;
+
+    if (pressed & PAD_BUTTON_B) {
+        djui_inputbox_on_key_down(&sKeyboardTarget->base, SCANCODE_ESCAPE);
+        return;
+    }
+
+    if (pressed & L_JPAD) djui_keyboard_move_horizontal(-1);
+    else if (pressed & R_JPAD) djui_keyboard_move_horizontal(1);
+    else if (pressed & U_JPAD) djui_keyboard_move_vertical(-1);
+    else if (pressed & D_JPAD) djui_keyboard_move_vertical(1);
+
+    s8 analogDirection = 0;
+    if (abs(pad->stick_x) > 45 && abs(pad->stick_x) > abs(pad->stick_y)) {
+        analogDirection = pad->stick_x < 0 ? -1 : 1;
+    } else if (abs(pad->stick_y) > 45) {
+        analogDirection = pad->stick_y > 0 ? -2 : 2;
+    }
+    if (analogDirection != 0 && analogDirection != sKeyboardLastAnalogDirection) {
+        if (analogDirection == -1) djui_keyboard_move_horizontal(-1);
+        else if (analogDirection == 1) djui_keyboard_move_horizontal(1);
+        else if (analogDirection == -2) djui_keyboard_move_vertical(-1);
+        else if (analogDirection == 2) djui_keyboard_move_vertical(1);
+    }
+    sKeyboardLastAnalogDirection = analogDirection;
+
+    if (pressed & PAD_BUTTON_A) djui_keyboard_type_selected();
+}
+
+static const char* djui_keyboard_display_label(
+        const struct DjuiKeyboardKey* key, char label[8]) {
+    if (key->action != DJUI_KEY_CHAR || key->normal == NULL) return key->label;
+    const char* value = sKeyboardShift ? key->shifted : key->normal;
+    snprintf(label, 8, "%s", value != NULL ? value : key->label);
+    if (isalpha((unsigned char)label[0])) {
+        const bool uppercase = sKeyboardCaps != sKeyboardShift;
+        label[0] = uppercase ? toupper((unsigned char)label[0])
+                             : tolower((unsigned char)label[0]);
+    }
+    return label;
+}
+
+void djui_inputbox_onscreen_keyboard_render(void) {
+    if (!djui_inputbox_onscreen_keyboard_is_active()) return;
+
+    // Isolate the keyboard's many alternating rectangle/font draws from the
+    // surrounding menu display list without changing its original depth,
+    // font, scale, or layout.
+    gDPPipeSync(gDisplayListHead++);
+    djui_reset_hud_params();
+    djui_hud_set_resolution(RESOLUTION_DJUI);
+    // The standalone keyboard is viewed at a fixed distance in the headset.
+    // Use the 2x aliased atlas so its labels remain crisp after projection.
+    djui_hud_set_font(FONT_ALIASED);
+    const f32 screenWidth = djui_hud_get_screen_width();
+    const f32 screenHeight = djui_hud_get_screen_height();
+    const f32 panelWidth = fminf(760.0f, screenWidth - 32.0f);
+    const f32 panelHeight = 286.0f;
+    const f32 panelX = (screenWidth - panelWidth) * 0.5f;
+    const f32 panelY = screenHeight - panelHeight - 18.0f;
+    const f32 padding = 12.0f;
+    const f32 keyGap = 4.0f;
+    const f32 keyHeight = 39.0f;
+    const f32 firstRowY = panelY + 58.0f;
+    djui_hud_set_color(4, 8, 14, 225);
+    djui_hud_render_rect(panelX - 3.0f, panelY - 3.0f,
+                         panelWidth + 6.0f, panelHeight + 6.0f);
+    djui_hud_set_color(17, 25, 38, 248);
+    djui_hud_render_rect(panelX, panelY, panelWidth, panelHeight);
+    djui_hud_set_color(31, 46, 67, 255);
+    djui_hud_render_rect(panelX + padding, panelY + 10.0f,
+                         panelWidth - padding * 2.0f, 38.0f);
+
+    const char* visibleText = sKeyboardTarget->buffer;
+    const size_t textLength = strlen(visibleText);
+    if (textLength > 54) visibleText += textLength - 54;
+    djui_hud_set_color(224, 234, 246, 255);
+    djui_hud_print_text(visibleText, panelX + 22.0f, panelY + 18.0f,
+                        0.55f, 0.55f);
+
+    for (u8 rowIndex = 0;
+         rowIndex < sizeof(sKeyboardRows) / sizeof(sKeyboardRows[0]);
+         ++rowIndex) {
+        const struct DjuiKeyboardRow* row = &sKeyboardRows[rowIndex];
+        f32 totalUnits = 0.0f;
+        for (u8 i = 0; i < row->count; ++i) totalUnits += row->keys[i].width;
+        const f32 usableWidth = panelWidth - padding * 2.0f -
+                                keyGap * (row->count - 1);
+        const f32 unitWidth = usableWidth / totalUnits;
+        f32 keyX = panelX + padding;
+        const f32 keyY = firstRowY + rowIndex * (keyHeight + keyGap);
+        for (u8 column = 0; column < row->count; ++column) {
+            const struct DjuiKeyboardKey* key = &row->keys[column];
+            const f32 keyWidth = key->width * unitWidth;
+            const bool selected = rowIndex == sKeyboardRow &&
+                                  column == sKeyboardColumn;
+            const bool activeModifier =
+                (key->action == DJUI_KEY_SHIFT && sKeyboardShift) ||
+                (key->action == DJUI_KEY_CAPS && sKeyboardCaps);
+
+            djui_hud_set_color(3, 7, 12, 255);
+            djui_hud_render_rect(keyX, keyY, keyWidth, keyHeight);
+            if (selected) djui_hud_set_color(0, 126, 214, 255);
+            else if (activeModifier) djui_hud_set_color(24, 145, 117, 255);
+            else djui_hud_set_color(49, 62, 79, 255);
+            djui_hud_render_rect(keyX + 2.0f, keyY + 2.0f,
+                                 keyWidth - 4.0f, keyHeight - 4.0f);
+
+            char labelBuffer[8] = { 0 };
+            const char* label = djui_keyboard_display_label(key, labelBuffer);
+            f32 textWidth = 0.0f;
+            f32 textHeight = 0.0f;
+            djui_hud_measure_text(label, &textWidth, &textHeight);
+            const f32 textScale = strlen(label) > 5 ? 0.43f : 0.60f;
+            djui_hud_set_color(246, 249, 252, 255);
+            djui_hud_print_text(label,
+                                keyX + (keyWidth - textWidth * textScale) * 0.5f,
+                                keyY + 9.0f,
+                                textScale, textScale);
+            keyX += keyWidth + keyGap;
+        }
+    }
+
+    djui_hud_set_color(154, 177, 204, 255);
+    djui_hud_print_text("Stick/D-pad: Select   A: Type   B: Cancel",
+                        panelX + 16.0f, panelY + panelHeight - 16.0f,
+                        0.38f, 0.38f);
+    gDPPipeSync(gDisplayListHead++);
+    djui_reset_hud_params();
+}
 
 static void djui_inputbox_update_style(struct DjuiBase* base) {
     struct DjuiInputbox* inputbox = (struct DjuiInputbox*)base;
@@ -337,14 +651,22 @@ void djui_inputbox_on_key_up(UNUSED struct DjuiBase *base, int scancode) {
     }
 }
 
-void djui_inputbox_on_focus_begin(UNUSED struct DjuiBase* base) {
+void djui_inputbox_on_focus_begin(struct DjuiBase* base) {
     gDjuiInputHeldShift   = 0;
     gDjuiInputHeldControl = 0;
     gDjuiInputHeldAlt     = 0;
+    sKeyboardTarget = (struct DjuiInputbox*)base;
+    sKeyboardRow = 0;
+    sKeyboardColumn = 1;
+    sKeyboardLastAnalogDirection = 0;
+    sKeyboardShift = false;
+    sKeyboardCaps = false;
     gWindowApi->start_text_input();
 }
 
 void djui_inputbox_on_focus_end(UNUSED struct DjuiBase* base) {
+    sKeyboardTarget = NULL;
+    sKeyboardLastAnalogDirection = 0;
     gWindowApi->stop_text_input();
 }
 
@@ -433,39 +755,6 @@ void djui_inputbox_on_text_editing(struct DjuiBase *base, char* text, int cursor
         inputbox->imeBuffer = copy;
     }
 
-    djui_inputbox_on_change(inputbox);
-}
-
-static struct DjuiInputbox* djui_inputbox_get_focused(void) {
-    if (gInteractableFocus == NULL || gInteractableFocus->interactable == NULL ||
-        gInteractableFocus->interactable->on_text_input != djui_inputbox_on_text_input) {
-        return NULL;
-    }
-    return (struct DjuiInputbox*)gInteractableFocus;
-}
-
-bool djui_inputbox_has_focused(void) {
-    return djui_inputbox_get_focused() != NULL;
-}
-
-const char* djui_inputbox_get_focused_text(void) {
-    struct DjuiInputbox* inputbox = djui_inputbox_get_focused();
-    return inputbox != NULL ? inputbox->buffer : "";
-}
-
-u16 djui_inputbox_get_focused_capacity(void) {
-    struct DjuiInputbox* inputbox = djui_inputbox_get_focused();
-    return inputbox != NULL ? inputbox->bufferSize : 1;
-}
-
-void djui_inputbox_replace_focused_text(const char* text) {
-    struct DjuiInputbox* inputbox = djui_inputbox_get_focused();
-    if (inputbox == NULL || text == NULL) return;
-    snprintf(inputbox->buffer, inputbox->bufferSize, "%s", text);
-    djui_unicode_cleanup_end(inputbox->buffer);
-    inputbox->selection[0] = djui_unicode_len(inputbox->buffer);
-    inputbox->selection[1] = inputbox->selection[0];
-    sCursorBlink = 0;
     djui_inputbox_on_change(inputbox);
 }
 

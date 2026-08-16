@@ -8,6 +8,7 @@ void quest_game_load_early_config(void);
 void quest_game_flush_persistent_state(void);
 unsigned int quest_game_render_scale_percent(void);
 bool quest_game_ultra_performance_enabled(void);
+bool quest_game_ui_requires_full_quality(void);
 unsigned int quest_game_refresh_rate_index(void);
 void quest_game_tick(void);
 bool quest_game_render_eye(uint32_t eye, uint32_t width, uint32_t height);

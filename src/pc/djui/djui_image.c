@@ -26,7 +26,7 @@ static bool djui_image_render(struct DjuiBase* base) {
     if (!djui_gfx_add_clipping(base)) {
         const struct TextureInfo *info = &image->textureInfo;
         gDPSetEnvColor(gDisplayListHead++, base->color.r, base->color.g, base->color.b, base->color.a);
-        djui_gfx_render_texture(info->texture, info->width, info->height, info->format, info->size, false);
+        djui_gfx_render_texture(info->texture, info->width, info->height, info->format, info->size, image->linearFilter);
     }
 
     gSPPopMatrix(gDisplayListHead++, G_MTX_MODELVIEW);
@@ -36,6 +36,11 @@ static bool djui_image_render(struct DjuiBase* base) {
 static void djui_image_destroy(struct DjuiBase* base) {
     struct DjuiImage* image = (struct DjuiImage*)base;
     free(image);
+}
+
+void djui_image_set_linear_filter(struct DjuiImage* image, bool enabled) {
+    if (image == NULL) return;
+    image->linearFilter = enabled;
 }
 
 struct DjuiImage* djui_image_create(struct DjuiBase* parent, const Texture* texture, u16 width, u16 height, u8 fmt, u8 siz) {
