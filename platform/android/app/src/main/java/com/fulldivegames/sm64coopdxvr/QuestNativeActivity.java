@@ -230,6 +230,12 @@ public final class QuestNativeActivity extends NativeActivity {
             copyMissingAssetDirectory("palettes", new File(root, "palettes"));
             Log.i(TAG, "Bundled character palettes installed.");
             copyMissingAssetDirectory("mods", new File(root, "mods"));
+            // User mods remain untouched, but our bundled protocol manifest
+            // must follow the native test build instead of leaving an older
+            // copy behind after an in-place APK update.
+            copyAssetDirectory(
+                    "mods/vr-special-moves",
+                    new File(root, "mods/vr-special-moves"));
             Log.i(TAG, "Bundled session mods installed.");
         } catch (IOException exception) {
             Log.e(TAG, "Could not install bundled resources.", exception);
