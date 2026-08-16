@@ -4518,6 +4518,25 @@ static void vr_special_moves_update_projectile(struct MarioState* mario) {
     projectile->oPosY += sVrFireballVelocity[1];
     projectile->oPosZ += sVrFireballVelocity[2];
     sVrFireballVelocity[1] -= 2.0f;
+    projectile->oAnimState = (s32)((gGlobalTimer >> 1) & 7U);
+
+    struct WallCollisionData wall = {
+        .x = projectile->oPosX,
+        .y = projectile->oPosY,
+        .z = projectile->oPosZ,
+        .offsetY = 0.0f,
+        .radius = 20.0f,
+    };
+    if (find_wall_collisions(&wall) > 0 && wall.walls[0] != NULL) {
+        const f32 nx = wall.walls[0]->normal.x;
+        const f32 nz = wall.walls[0]->normal.z;
+        const f32 dot = sVrFireballVelocity[0] * nx +
+            sVrFireballVelocity[2] * nz;
+        sVrFireballVelocity[0] -= 2.0f * dot * nx;
+        sVrFireballVelocity[2] -= 2.0f * dot * nz;
+        projectile->oPosX = wall.x;
+        projectile->oPosZ = wall.z;
+    }
 
     struct Surface* floor = NULL;
     const f32 floorHeight = find_floor(
@@ -4573,7 +4592,11 @@ static bool vr_special_moves_update_fireball_hand(
         );
         const f32 progress = (f32)sVrFireballChargeFrames /
             (f32)VR_FIREBALL_CHARGE_FRAMES;
-        vec3f_copy(&sVrFireballObject->oPosX, position);
+        for (u32 axis = 0; axis < 3; axis++) {
+            (&sVrFireballObject->oPosX)[axis] = position[axis];
+        }
+        sVrFireballObject->oAnimState =
+            (s32)((gGlobalTimer >> 1) & 7U);
         sVrFireballObject->oOpacity = (s32)(51.0f + progress * 204.0f);
         obj_scale(sVrFireballObject, 0.05f + progress * 0.55f);
         obj_update_gfx_pos_and_angle(sVrFireballObject);
@@ -4586,7 +4609,9 @@ static bool vr_special_moves_update_fireball_hand(
             sVrFireballRememberedVelocity[2] * sVrFireballRememberedVelocity[2];
         if (speedSq >= rememberedSq * VR_THROW_VELOCITY_MEMORY *
             VR_THROW_VELOCITY_MEMORY) {
-            vec3f_copy(sVrFireballRememberedVelocity, velocity);
+            for (u32 axis = 0; axis < 3; axis++) {
+                sVrFireballRememberedVelocity[axis] = velocity[axis];
+            }
         } else {
             vec3f_mul(sVrFireballRememberedVelocity, VR_THROW_VELOCITY_MEMORY);
         }
