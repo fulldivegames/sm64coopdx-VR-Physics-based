@@ -56,7 +56,8 @@ const Gfx vr_fireball_base_dl[] = {
     const Gfx name[] = { \
         gsDPPipeSync(), \
         gsDPSetTextureImage(G_IM_FMT_IA, G_IM_SIZ_16b, 1, texture), \
-        gsSPBranchList(vr_fireball_base_dl), \
+        gsSPDisplayList(vr_fireball_base_dl), \
+        gsSPEndDisplayList(), \
     }
 
 VR_FIREBALL_FRAME(vr_fireball_frame_0_dl, flame_seg3_texture_03017320);
