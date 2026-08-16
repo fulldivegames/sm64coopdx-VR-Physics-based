@@ -215,6 +215,7 @@ static void djui_panel_vr_cheat_defaults(struct DjuiBase* caller) {
     configVrCheatSurfaceClimbing = false;
     configVrCheatShakingHatWingCap = false;
     configVrCheatUnderwaterBoxPunching = false;
+    configVrCheatFreeFly = false;
     configVrFlyingSpeed = VR_FLYING_SPEED_DEFAULT;
     configVrSwimmingSpeed = VR_SWIMMING_SPEED_DEFAULT;
     configVrRunningSpeed = VR_RUNNING_SPEED_DEFAULT;
@@ -1252,6 +1253,12 @@ static void djui_panel_vr_cheats_create(struct DjuiBase* caller) {
             body,
             "Punch Boxes While Underwater",
             &configVrCheatUnderwaterBoxPunching,
+            NULL
+        );
+        djui_checkbox_create(
+            body,
+            "Free Fly",
+            &configVrCheatFreeFly,
             NULL
         );
 

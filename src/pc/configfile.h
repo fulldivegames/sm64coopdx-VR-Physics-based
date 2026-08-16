@@ -186,6 +186,7 @@ extern bool         configVrSwingClimbRelease;
 extern bool         configVrCheatSurfaceClimbing;
 extern bool         configVrCheatShakingHatWingCap;
 extern bool         configVrCheatUnderwaterBoxPunching;
+extern bool         configVrCheatFreeFly;
 extern unsigned int configVrFlyingSpeed;
 extern unsigned int configVrSwimmingSpeed;
 extern unsigned int configVrRunningSpeed;
