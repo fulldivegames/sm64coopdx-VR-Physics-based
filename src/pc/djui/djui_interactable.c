@@ -4,6 +4,7 @@
 #include "djui_panel_pause.h"
 #include "djui_panel_modlist.h"
 #include "djui_panel_playerlist.h"
+#include "djui_inputbox.h"
 
 #include "pc/controller/controller_sdl.h"
 #include "pc/controller/controller_mouse.h"
@@ -433,6 +434,16 @@ void djui_interactable_update(void) {
                 sIgnoreInteractableUntilCursorReleased = false;
             }
         }
+    }
+
+    // Route gamepad navigation to the on-screen keyboard while preserving
+    // the desktop window's independent physical-keyboard callbacks.
+    if (djui_inputbox_onscreen_keyboard_is_active()) {
+        const u16 pressed = padButtons & ~sLastInteractablePad.button;
+        djui_inputbox_onscreen_keyboard_update(&gInteractablePad, pressed);
+        sLastInteractablePad = gInteractablePad;
+        sLastMouseButtons = mouseButtons;
+        return;
     }
 
     // update focused

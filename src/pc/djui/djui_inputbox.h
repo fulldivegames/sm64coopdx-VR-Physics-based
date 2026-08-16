@@ -33,5 +33,8 @@ bool djui_inputbox_on_key_down(struct DjuiBase* base, int scancode);
 void djui_inputbox_on_key_up(struct DjuiBase* base, int scancode);
 void djui_inputbox_on_text_input(struct DjuiBase *base, char* text);
 void djui_inputbox_on_text_editing(struct DjuiBase *base, char* text, int cursorPos);
+bool djui_inputbox_onscreen_keyboard_is_active(void);
+void djui_inputbox_onscreen_keyboard_update(OSContPad* pad, u16 pressed);
+void djui_inputbox_onscreen_keyboard_render(void);
 
 struct DjuiInputbox* djui_inputbox_create(struct DjuiBase* parent, u16 bufferSize);

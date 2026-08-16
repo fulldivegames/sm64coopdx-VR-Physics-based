@@ -14,7 +14,7 @@
 </p>
 
 > [!IMPORTANT]
-> The current public release is **v0.6.0**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination.
+> The current public release is **v0.6.27**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination.
 
 SM64 Co-Op DX VR currently targets 64-bit Windows, OpenGL, and OpenXR. It keeps the original game's flat-screen mode and multiplayer foundation while adding native stereoscopic rendering, 6DoF tracking, VR-aware cameras, remappable motion-controller input, physical interactions, comfort options, and extensive calibration settings.
 
@@ -82,7 +82,7 @@ The lower-left corner of the main menu shows the installed VR version and checks
 The Windows release keeps the normal SM64 Co-Op DX mod layout inside the extracted game folder:
 
 ```text
-SM64-Co-Op-DX-VR-Windows-v0.6.0/
+SM64-Co-Op-DX-VR-Windows-v0.6.27/
 ├── mods/
 ├── dynos/
 │   └── packs/
@@ -265,11 +265,20 @@ This project keeps Super Mario 64's original 30 Hz gameplay simulation and rende
 
 ## Mod compatibility
 
-v0.6.0 expands compatibility around mod discovery, Lua HUD/menu presentation, character models, DynOS packs, palettes, controller profiles, and renderer state changes. Character Selector was specifically tested with multiple character packs, including its in-game selection overlay. Standard extracted mods, multiple DynOS packs, and custom palette files use the paths documented above.
+v0.6.27 expands compatibility around mod discovery, Lua HUD/menu presentation, character models, DynOS packs, palettes, controller profiles, and renderer state changes. Character Selector was specifically tested with multiple character packs, including its in-game selection overlay. Standard extracted mods, multiple DynOS packs, and custom palette files use the paths documented above.
 
 Compatibility is not universal. Mods that replace camera, player action, input, HUD, rendering, collision, or character geometry can conflict with VR behavior. Install one at a time when troubleshooting and report the exact mod name/version, headset/runtime, and reproduction steps. A mod working in normal SM64 Co-Op DX does not guarantee that every first-person physical interaction will behave correctly.
 
-## v0.6.0 — optimization and mod compatibility update
+## v0.6.27 — Co-op and Keyboards Update
+
+- Added the shared controller-operated on-screen keyboard to editable SM64 Co-Op DX fields while preserving normal desktop keyboard input
+- Improved high-resolution presentation for the keyboard, main-menu logo, and version/update status text
+- Kept the PC public CoopNet directory and normal direct/private multiplayer behavior unchanged
+- Maintained network-version parity with the standalone build for compatible Direct Connection play
+
+## Previous Release Notes
+
+### v0.6.0 — Optimization and Mod Compatibility Update
 
 - Major renderer batching and texture-state reductions, including the distant Chain Chomp/BOB performance path
 - General actor, flame, lava, snow/effect, menu, shader-preparation, and startup optimizations
