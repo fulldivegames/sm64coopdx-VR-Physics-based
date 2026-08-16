@@ -74,6 +74,7 @@ bool vr_get_controller_climb_fist(
     Vec3f climbPosition
 );
 bool vr_is_controller_holding_cap(u32 handIndex);
+bool vr_is_controller_holding_fire_flower(u32 handIndex);
 bool vr_get_stabilized_headset_world_position(
     Vec3f worldPosition,
     bool previousFrame

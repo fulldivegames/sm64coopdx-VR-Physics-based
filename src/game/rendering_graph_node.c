@@ -263,6 +263,9 @@ static bool sVrControllerHandClosed[VR_CONTROLLER_COUNT] = { false };
 #define VR_HAT_SHAKE_MIN_SPEED 220.0f
 #define VR_HAT_SHAKE_REVERSALS_REQUIRED 8
 #define VR_HAT_SHAKE_WINDOW_FRAMES 45U
+#define VR_BACK_FIRE_FLOWER_DISTANCE 110.0f
+#define VR_BACK_FIRE_FLOWER_DROP 42.0f
+#define VR_BACK_FIRE_FLOWER_RADIUS 40.0f
 
 static u32 sVrPaintingExitHatHand = VR_CONTROLLER_COUNT;
 static u32 sVrPaintingExitHatStartFrame = 0;
@@ -275,7 +278,14 @@ static Vec3f sVrPaintingExitHatShakeVelocity = { 0.0f, 0.0f, 0.0f };
 static u32 sVrPaintingExitHatShakeWindowStart = 0;
 static u32 sVrPaintingExitHatShakeSampleFrame = 0;
 static u8 sVrPaintingExitHatShakeReversals = 0;
+static u32 sVrBackFireFlowerHand = VR_CONTROLLER_COUNT;
+static bool sVrBackFireFlowerPickupLatched = false;
 extern struct Object* gVrPaintingExitHatObject;
+
+bool vr_is_controller_holding_fire_flower(u32 handIndex) {
+    return handIndex < VR_CONTROLLER_COUNT &&
+        sVrBackFireFlowerHand == handIndex;
+}
 
 static bool vr_victory_hand_gesture_available(void) {
     switch (gMarioStates[0].action) {
@@ -597,6 +607,7 @@ static void vr_update_painting_exit_hat_gesture(void) {
                 VR_PAINTING_EXIT_HAT_HORIZONTAL_REACH;
             for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
                 if (!tracked[hand] ||
+                    vr_is_controller_holding_fire_flower(hand) ||
                     states[hand].squeeze < 0.55f ||
                     states[hand].trigger < 0.55f ||
                     vr_painting_exit_hat_distance_squared(
@@ -634,6 +645,7 @@ static void vr_update_painting_exit_hat_gesture(void) {
     u32 nearestHand = VR_CONTROLLER_COUNT;
     for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
         if (!tracked[hand] ||
+            vr_is_controller_holding_fire_flower(hand) ||
             states[hand].squeeze < 0.55f ||
             states[hand].trigger < 0.55f) {
             continue;
@@ -661,6 +673,128 @@ static void vr_update_painting_exit_hat_gesture(void) {
         sVrPaintingExitHatPickupLatched = true;
         vec3f_copy(sVrPaintingExitHatLastPosition, hands[nearestHand]);
         vec3f_copy(sVrPaintingExitHatVelocity, velocities[nearestHand]);
+        vr_apply_haptic(nearestHand, 0.35f, 0.08f, -1.0f);
+    }
+}
+
+static void vr_clear_back_fire_flower_hold(void) {
+    sVrBackFireFlowerHand = VR_CONTROLLER_COUNT;
+}
+
+static void vr_update_back_fire_flower_gesture(void) {
+    struct VrControllerState states[VR_CONTROLLER_COUNT] = { 0 };
+    Vec3f hands[VR_CONTROLLER_COUNT];
+    bool tracked[VR_CONTROLLER_COUNT] = { false, false };
+
+    const bool gestureAvailable =
+        vr_is_active() &&
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
+        configVrMotionControllerInput &&
+        configVrCheatBackFireFlower &&
+        configVrSpecialFireFlower &&
+        gMarioStates[0].marioObj != NULL;
+    if (!gestureAvailable) {
+        vr_clear_back_fire_flower_hold();
+        sVrBackFireFlowerPickupLatched = false;
+        return;
+    }
+
+    bool pickupInputDown = false;
+    for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
+        if (!vr_get_controller_state(hand, &states[hand])) {
+            continue;
+        }
+        Vec3f velocity;
+        tracked[hand] = vr_get_controller_world_fist_from_state(
+            hand,
+            &states[hand],
+            hands[hand],
+            velocity
+        );
+        pickupInputDown = pickupInputDown ||
+            (tracked[hand] &&
+             states[hand].squeeze >= 0.55f &&
+             states[hand].trigger >= 0.55f);
+    }
+    if (!pickupInputDown) {
+        sVrBackFireFlowerPickupLatched = false;
+    }
+
+    if (sVrBackFireFlowerHand < VR_CONTROLLER_COUNT) {
+        const u32 hand = sVrBackFireFlowerHand;
+        if (!tracked[hand]) {
+            return;
+        }
+        const bool released = states[hand].squeeze < 0.35f ||
+            states[hand].trigger < 0.35f;
+        if (!released) {
+            return;
+        }
+
+        Vec3f head;
+        bool releasedAtHead = false;
+        if (vr_get_painting_exit_hat_head_position(head)) {
+            const f32 dx = hands[hand][0] - head[0];
+            const f32 dy = hands[hand][1] - head[1];
+            const f32 dz = hands[hand][2] - head[2];
+            releasedAtHead =
+                dx * dx + dz * dz <=
+                    VR_PAINTING_EXIT_HAT_REATTACH_HORIZONTAL_RADIUS *
+                    VR_PAINTING_EXIT_HAT_REATTACH_HORIZONTAL_RADIUS &&
+                dy >= -VR_PAINTING_EXIT_HAT_REATTACH_BELOW &&
+                dy <= VR_PAINTING_EXIT_HAT_REATTACH_ABOVE;
+        }
+        if (releasedAtHead && vr_special_moves_grant_fire_flower()) {
+            vr_apply_haptic(hand, 0.55f, 0.10f, -1.0f);
+            play_sound(
+                SOUND_MENU_STAR_SOUND,
+                gMarioStates[0].marioObj->header.gfx.cameraToObject
+            );
+        }
+        vr_clear_back_fire_flower_hold();
+        return;
+    }
+
+    if (sVrBackFireFlowerPickupLatched ||
+        sVrPaintingExitHatHand < VR_CONTROLLER_COUNT) {
+        return;
+    }
+
+    Vec3f head;
+    if (!vr_get_stabilized_headset_world_position(head, false)) {
+        return;
+    }
+    const s16 viewYaw = vr_get_first_person_view_yaw();
+    Vec3f backCenter = {
+        head[0] - sins(viewYaw) * VR_BACK_FIRE_FLOWER_DISTANCE,
+        head[1] - VR_BACK_FIRE_FLOWER_DROP,
+        head[2] - coss(viewYaw) * VR_BACK_FIRE_FLOWER_DISTANCE
+    };
+    const f32 radiusSquared =
+        VR_BACK_FIRE_FLOWER_RADIUS * VR_BACK_FIRE_FLOWER_RADIUS;
+    f32 nearestDistanceSquared = FLT_MAX;
+    u32 nearestHand = VR_CONTROLLER_COUNT;
+    for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
+        if (!tracked[hand] ||
+            vr_is_controller_holding_cap(hand) ||
+            states[hand].squeeze < 0.55f ||
+            states[hand].trigger < 0.55f) {
+            continue;
+        }
+        const f32 distanceSquared =
+            vr_painting_exit_hat_distance_squared(
+                hands[hand],
+                backCenter
+            );
+        if (distanceSquared <= radiusSquared &&
+            distanceSquared < nearestDistanceSquared) {
+            nearestDistanceSquared = distanceSquared;
+            nearestHand = hand;
+        }
+    }
+    if (nearestHand < VR_CONTROLLER_COUNT) {
+        sVrBackFireFlowerHand = nearestHand;
+        sVrBackFireFlowerPickupLatched = true;
         vr_apply_haptic(nearestHand, 0.35f, 0.08f, -1.0f);
     }
 }
@@ -3672,6 +3806,7 @@ static void vr_append_controller_hands(
     }
 
     vr_update_painting_exit_hat_gesture();
+    vr_update_back_fire_flower_gesture();
     const bool victoryGestureAvailable =
         vr_victory_hand_gesture_available();
     const u8 paintingExitHatAlpha =
@@ -3705,6 +3840,8 @@ static void vr_append_controller_hands(
         const bool paintingExitHatGesture =
             hand == sVrPaintingExitHatHand &&
             paintingExitHatAlpha > 0;
+        const bool backFireFlowerGesture =
+            hand == sVrBackFireFlowerHand;
 
         const Gfx* handDisplayList;
         // A successful exit is also part of the normal victory action set.
@@ -3712,7 +3849,7 @@ static void vr_append_controller_hands(
         // input renders a peace sign instead of the cap.
         if (paintingExitHatGesture) {
             handDisplayList = mario_right_hand_cap;
-        } else if (peaceGesture) {
+        } else if (peaceGesture && !backFireFlowerGesture) {
             handDisplayList = mario_right_hand_peace;
         } else if (hand == VR_CONTROLLER_LEFT) {
             handDisplayList = sVrControllerHandClosed[hand]
@@ -3775,6 +3912,24 @@ static void vr_append_controller_hands(
             gDisplayListHead++,
             handDisplayList
         );
+        if (backFireFlowerGesture) {
+            gDPPipeSync(gDisplayListHead++);
+            gDPSetRenderMode(
+                gDisplayListHead++,
+                modeList->modes[LAYER_ALPHA],
+                mode2List->modes[LAYER_ALPHA]
+            );
+            gSPDisplayList(
+                gDisplayListHead++,
+                vr_fire_flower_held_dl
+            );
+            gDPPipeSync(gDisplayListHead++);
+            gDPSetRenderMode(
+                gDisplayListHead++,
+                modeList->modes[LAYER_OPAQUE],
+                mode2List->modes[LAYER_OPAQUE]
+            );
+        }
         if (paintingExitHatGesture) {
             gSPDisplayList(
                 gDisplayListHead++,

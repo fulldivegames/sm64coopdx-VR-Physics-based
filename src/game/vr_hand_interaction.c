@@ -4393,6 +4393,17 @@ bool vr_special_moves_fire_flower_active(void) {
     return configVrSpecialFireFlower && sVrFireFlowerPowered;
 }
 
+bool vr_special_moves_grant_fire_flower(void) {
+    if (!configVrSpecialFireFlower || !vr_is_active() ||
+        gMarioStates[0].marioObj == NULL) {
+        return false;
+    }
+    sVrFireFlowerPowered = true;
+    sVrFireFlowerLevel = gCurrLevelNum;
+    sVrFireFlowerArea = gCurrAreaIndex;
+    return true;
+}
+
 Gfx* geo_vr_fireball_color(
     s32 callContext,
     UNUSED struct GraphNode* node,
@@ -4467,9 +4478,7 @@ static void vr_special_moves_update_pickups(struct MarioState* mario) {
         obj_update_gfx_pos_and_angle(pickup);
         if (dist_between_objects(pickup, mario->marioObj) <=
             VR_FIRE_FLOWER_PICKUP_RADIUS) {
-            sVrFireFlowerPowered = true;
-            sVrFireFlowerLevel = gCurrLevelNum;
-            sVrFireFlowerArea = gCurrAreaIndex;
+            vr_special_moves_grant_fire_flower();
             vr_apply_haptic(VR_CONTROLLER_LEFT, 0.45f, 0.10f, -1.0f);
             vr_apply_haptic(VR_CONTROLLER_RIGHT, 0.45f, 0.10f, -1.0f);
             vr_special_moves_delete_object(&sVrFireFlowerPickups[i]);
@@ -4913,8 +4922,12 @@ void vr_hand_interaction_update(struct MarioState* mario) {
             );
         const bool handIsHoldingCap =
             vr_is_controller_holding_cap(hand);
+        const bool handIsHoldingFireFlower =
+            vr_is_controller_holding_fire_flower(hand);
+        const bool handIsHoldingVrItem =
+            handIsHoldingCap || handIsHoldingFireFlower;
         const bool fireballHandBusy =
-            handIsHoldingCap ||
+            handIsHoldingVrItem ||
             sVrTrackedHeldObject != NULL ||
             sVrPhysicalClimbHands[hand] ||
             sVrTrackedHootHand == hand ||
@@ -4929,11 +4942,12 @@ void vr_hand_interaction_update(struct MarioState* mario) {
                 velocity,
                 fireballHandBusy
             );
-        if (handIsHoldingCap) {
+        if (handIsHoldingVrItem) {
             sVrMotionDivePairFrames[hand] = 0;
         }
 
-        if (positionValid && canStartInteraction) {
+        if (positionValid && canStartInteraction &&
+            !handIsHoldingVrItem) {
             vr_hand_interaction_try_collect_cap(
                 mario,
                 hand,
@@ -5015,7 +5029,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
                 );
             }
         } else if (canStartInteraction &&
-                   !handIsHoldingCap &&
+                   !handIsHoldingVrItem &&
                    !handIsChargingFireball &&
                    sVrGripPressed[hand] &&
                    positionValid &&
