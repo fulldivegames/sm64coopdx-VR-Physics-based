@@ -443,13 +443,22 @@ static bool update_vr_headset_flying(struct MarioState* m) {
 
     // The headset itself supplies the complete flight direction. Native
     // stick angular velocity would fight that target and was the source of
-    // takeoff turns in the wrong direction. Keep the normal Wing Cap speed
-    // gain/loss so diving accelerates and climbing still costs momentum.
+    // takeoff turns in the wrong direction.
     m->angleVel[0] = 0;
     m->angleVel[1] = 0;
     m->faceAngle[2] = 0;
-    m->forwardVel -=
-        2.0f * ((f32)m->faceAngle[0] / 0x4000) + 0.1f;
+    if (configVrCheatFreeFly) {
+        // Free Fly keeps a useful boosted speed without accumulating an
+        // unbounded velocity. Looking up or down directly controls altitude,
+        // so gravity never pulls the player away from the headset direction.
+        if (m->forwardVel < 48.0f) {
+            m->forwardVel = 48.0f;
+        }
+    } else {
+        // Normal Wing Cap flight retains its original gain/loss behavior.
+        m->forwardVel -=
+            2.0f * ((f32)m->faceAngle[0] / 0x4000) + 0.1f;
+    }
     if (m->forwardVel < 4.0f) {
         // Vanilla flight automatically noses down at this speed. A small
         // floor keeps direct head steering from producing a permanent hover
@@ -2037,7 +2046,8 @@ s32 act_flying(struct MarioState *m) {
         return set_mario_action(m, ACT_GROUND_POUND, 1);
     }
 
-    if (!(m->flags & MARIO_WING_CAP)) {
+    if (!(m->flags & MARIO_WING_CAP) &&
+        !(vr_is_active() && configVrCheatFreeFly)) {
         if (m->area->camera->mode == CAMERA_MODE_BEHIND_MARIO) {
             if (m->playerIndex == 0) {
                 if (!gNewCamera.isActive) {
@@ -2447,6 +2457,21 @@ Dispatches to the appropriate action function, such as jump, double jump, freefa
 s32 mario_execute_airborne_action(struct MarioState *m) {
     if (!m) { return FALSE; }
     s32 cancel;
+
+    // Free Fly starts from ordinary player-controlled airborne movement, but
+    // never overrides knockback, hazards, cannon launches, carried-object
+    // actions, or other scripted states. Jump once to enter free flight.
+    if (m->playerIndex == 0 && vr_is_active() && configVrCheatFreeFly &&
+        m->action != ACT_FLYING &&
+        (m->action == ACT_JUMP ||
+         m->action == ACT_DOUBLE_JUMP ||
+         m->action == ACT_TRIPLE_JUMP ||
+         m->action == ACT_BACKFLIP ||
+         m->action == ACT_SIDE_FLIP ||
+         m->action == ACT_LONG_JUMP ||
+         m->action == ACT_FREEFALL)) {
+        set_mario_action(m, ACT_FLYING, 1);
+    }
 
     if (check_common_airborne_cancels(m)) {
         return TRUE;

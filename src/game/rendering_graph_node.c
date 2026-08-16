@@ -2425,7 +2425,7 @@ static s16 vr_get_stabilized_body_yaw(bool previousFrame) {
         : sVrBodyYawSample;
 }
 
-bool vr_get_controller_world_fist_from_state(
+bool vr_get_controller_world_fist_raw_from_state(
     u32 handIndex,
     const struct VrControllerState* state,
     Vec3f worldPosition,
@@ -2539,6 +2539,27 @@ bool vr_get_controller_world_fist_from_state(
         }
     }
 
+    return true;
+}
+
+bool vr_get_controller_world_fist_from_state(
+    u32 handIndex,
+    const struct VrControllerState* state,
+    Vec3f worldPosition,
+    Vec3f worldVelocity
+) {
+    if (!vr_get_controller_world_fist_raw_from_state(
+            handIndex,
+            state,
+            worldPosition,
+            worldVelocity
+        )) {
+        return false;
+    }
+    vr_hand_interaction_apply_hand_collision_position(
+        handIndex,
+        worldPosition
+    );
     return true;
 }
 

@@ -1,5 +1,6 @@
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "audio/external.h"
 #include "behavior_data.h"
@@ -33,6 +34,9 @@
 #define VR_FIST_ACTIVE_FRAMES 33
 #define VR_FIST_SWEEP_SAMPLES 4
 #define VR_FIST_BASE_RADIUS 12.0f
+#define VR_HAND_COLLISION_RADIUS_MAX 24.0f
+#define VR_HAND_COLLISION_RELEASE_MARGIN 3.0f
+#define VR_HAND_COLLISION_MAX_SWEEP 300.0f
 #define VR_FIST_MAX_SWEEP_DISTANCE 150.0f
 #define VR_PUNCH_SOUND_COMBO_RESET_FRAMES 18
 #define VR_MOTION_DIVE_PAIR_WINDOW_FRAMES 5
@@ -213,6 +217,16 @@ static f32 sVrHeadsetColliderSavedRadius = 50.0f;
 static f32 sVrHeadsetColliderSavedHeight = 160.0f;
 static f32 sVrHeadsetColliderSavedDownOffset = 0.0f;
 
+struct VrHandCollisionState {
+    bool rawPositionValid;
+    bool constraintActive;
+    Vec3f previousRawPosition;
+    Vec3f constraintNormal;
+    f32 constraintOriginOffset;
+};
+static struct VrHandCollisionState
+    sVrHandCollision[VR_CONTROLLER_COUNT] = { 0 };
+
 extern u8 gRenderingInterpolated;
 extern f32 gRenderingDelta;
 
@@ -222,6 +236,212 @@ struct VrFistSweep {
     f32 minimum[3];
     f32 maximum[3];
 };
+
+static f32 vr_hand_interaction_fist_radius(void);
+
+static f32 vr_hand_interaction_surface_distance(
+    const struct Surface* surface,
+    const Vec3f position
+) {
+    return surface->normal.x * position[0] +
+        surface->normal.y * position[1] +
+        surface->normal.z * position[2] +
+        surface->originOffset;
+}
+
+static bool vr_hand_interaction_surface_is_climbable_exception(
+    const struct Surface* surface
+) {
+    if (surface == NULL || configVrExperimentalClimbableColliders) {
+        return false;
+    }
+    if (surface->type == SURFACE_HANGABLE) {
+        return true;
+    }
+    return surface->object != NULL &&
+        (surface->object->oInteractType & INTERACT_POLE) != 0;
+}
+
+void vr_hand_interaction_apply_hand_collision_position(
+    u32 hand,
+    Vec3f position
+) {
+    if (hand >= VR_CONTROLLER_COUNT || position == NULL ||
+        !sVrHandCollision[hand].constraintActive) {
+        return;
+    }
+    const f32 radius = fminf(
+        vr_hand_interaction_fist_radius(),
+        VR_HAND_COLLISION_RADIUS_MAX
+    );
+    const f32 distance =
+        sVrHandCollision[hand].constraintNormal[0] * position[0] +
+        sVrHandCollision[hand].constraintNormal[1] * position[1] +
+        sVrHandCollision[hand].constraintNormal[2] * position[2] +
+        sVrHandCollision[hand].constraintOriginOffset;
+    if (distance >= radius) {
+        return;
+    }
+    const f32 correction = radius - distance;
+    for (u32 axis = 0; axis < 3; axis++) {
+        position[axis] +=
+            sVrHandCollision[hand].constraintNormal[axis] * correction;
+    }
+}
+
+static void vr_hand_interaction_set_hand_constraint(
+    u32 hand,
+    const struct Surface* surface
+) {
+    sVrHandCollision[hand].constraintActive = true;
+    sVrHandCollision[hand].constraintNormal[0] = surface->normal.x;
+    sVrHandCollision[hand].constraintNormal[1] = surface->normal.y;
+    sVrHandCollision[hand].constraintNormal[2] = surface->normal.z;
+    sVrHandCollision[hand].constraintOriginOffset = surface->originOffset;
+}
+
+static bool vr_hand_interaction_resolve_hand_collision(
+    struct MarioState* mario,
+    u32 hand,
+    Vec3f position
+) {
+    struct VrHandCollisionState* state = &sVrHandCollision[hand];
+    const f32 radius = fminf(
+        vr_hand_interaction_fist_radius(),
+        VR_HAND_COLLISION_RADIUS_MAX
+    );
+    Vec3f rawPosition;
+    vec3f_copy(rawPosition, position);
+    bool collided = false;
+    struct Surface* collisionSurface = NULL;
+
+    if (state->constraintActive) {
+        const f32 distance =
+            state->constraintNormal[0] * rawPosition[0] +
+            state->constraintNormal[1] * rawPosition[1] +
+            state->constraintNormal[2] * rawPosition[2] +
+            state->constraintOriginOffset;
+        if (distance < radius + VR_HAND_COLLISION_RELEASE_MARGIN) {
+            vr_hand_interaction_apply_hand_collision_position(hand, position);
+            collided = distance < radius;
+        } else {
+            state->constraintActive = false;
+        }
+    }
+
+    if (state->rawPositionValid) {
+        Vec3f sweep = {
+            rawPosition[0] - state->previousRawPosition[0],
+            rawPosition[1] - state->previousRawPosition[1],
+            rawPosition[2] - state->previousRawPosition[2]
+        };
+        const f32 sweepLength = vec3f_length(sweep);
+        if (sweepLength > 0.01f &&
+            sweepLength <= VR_HAND_COLLISION_MAX_SWEEP) {
+            Vec3f hitPosition;
+            struct Surface* hitSurface = NULL;
+            find_surface_on_ray(
+                state->previousRawPosition,
+                sweep,
+                &hitSurface,
+                hitPosition,
+                2.0f
+            );
+            if (hitSurface != NULL &&
+                !vr_hand_interaction_surface_is_climbable_exception(
+                    hitSurface
+                )) {
+                const f32 previousDistance =
+                    vr_hand_interaction_surface_distance(
+                        hitSurface,
+                        state->previousRawPosition
+                    );
+                if (previousDistance >= -radius) {
+                    position[0] = hitPosition[0] +
+                        hitSurface->normal.x * radius;
+                    position[1] = hitPosition[1] +
+                        hitSurface->normal.y * radius;
+                    position[2] = hitPosition[2] +
+                        hitSurface->normal.z * radius;
+                    collisionSurface = hitSurface;
+                    collided = true;
+                }
+            }
+        } else if (sweepLength > VR_HAND_COLLISION_MAX_SWEEP) {
+            state->constraintActive = false;
+        }
+    }
+
+    if (!collided) {
+        Vec3f wallPosition;
+        vec3f_copy(wallPosition, rawPosition);
+        struct WallCollisionData wallData = { 0 };
+        resolve_and_return_wall_collisions_data(
+            wallPosition,
+            0.0f,
+            radius,
+            &wallData
+        );
+        for (s32 wall = 0; wall < wallData.numWalls; wall++) {
+            if (!vr_hand_interaction_surface_is_climbable_exception(
+                    wallData.walls[wall]
+                )) {
+                vec3f_copy(position, wallPosition);
+                collisionSurface = wallData.walls[wall];
+                collided = true;
+                break;
+            }
+        }
+    }
+
+    struct Surface* floor = NULL;
+    const f32 floorHeight = find_floor(
+        rawPosition[0],
+        rawPosition[1] + radius,
+        rawPosition[2],
+        &floor
+    );
+    if (floor != NULL &&
+        !vr_hand_interaction_surface_is_climbable_exception(floor) &&
+        rawPosition[1] < floorHeight + radius &&
+        rawPosition[1] > floorHeight - radius * 2.0f) {
+        position[1] = floorHeight + radius;
+        collisionSurface = floor;
+        collided = true;
+    }
+
+    struct Surface* ceiling = NULL;
+    const f32 ceilingHeight = find_ceil(
+        rawPosition[0],
+        rawPosition[1] - radius,
+        rawPosition[2],
+        &ceiling
+    );
+    if (ceiling != NULL &&
+        !vr_hand_interaction_surface_is_climbable_exception(ceiling) &&
+        rawPosition[1] > ceilingHeight - radius &&
+        rawPosition[1] < ceilingHeight + radius * 2.0f) {
+        position[1] = ceilingHeight - radius;
+        collisionSurface = ceiling;
+        collided = true;
+    }
+
+    if (collisionSurface != NULL) {
+        vr_hand_interaction_set_hand_constraint(hand, collisionSurface);
+        if (mario != NULL &&
+            collisionSurface->normal.y < -0.5f &&
+            state->rawPositionValid &&
+            rawPosition[1] > state->previousRawPosition[1] &&
+            mario->vel[1] > 0.0f &&
+            (mario->action & ACT_FLAG_AIR) != 0) {
+            mario->vel[1] = 0.0f;
+        }
+    }
+
+    vec3f_copy(state->previousRawPosition, rawPosition);
+    state->rawPositionValid = true;
+    return collided;
+}
 
 static void vr_hand_interaction_sync_climb_collider_to_headset(
     struct MarioState* mario
@@ -504,6 +724,7 @@ static void vr_hand_interaction_reset(void) {
     sVrPhysicalClimbRegrabFrames = 0;
     vr_hand_interaction_clear_physical_climb();
     vr_hand_interaction_clear_bowser_motion();
+    memset(sVrHandCollision, 0, sizeof(sVrHandCollision));
 }
 
 static void vr_hand_interaction_update_punch_sound(
@@ -4323,12 +4544,22 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         vec3f_set(velocity, 0.0f, 0.0f, 0.0f);
         const bool positionValid =
             controllerAvailable &&
-            vr_get_controller_world_fist_from_state(
+            vr_get_controller_world_fist_raw_from_state(
                 hand,
                 &state,
                 position,
                 velocity
             );
+        if (positionValid) {
+            vr_hand_interaction_resolve_hand_collision(
+                mario,
+                hand,
+                position
+            );
+        } else {
+            sVrHandCollision[hand].rawPositionValid = false;
+            sVrHandCollision[hand].constraintActive = false;
+        }
         if (positionValid) {
             vec3f_copy(
                 collectibleHandPositions[hand],
