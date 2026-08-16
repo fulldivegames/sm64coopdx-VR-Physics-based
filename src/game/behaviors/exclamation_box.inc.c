@@ -114,6 +114,14 @@ void exclamation_box_spawn_contents(struct ExclamationBoxContent *content, u8 it
         return;
     }
 
+    // Fire Flowers may replace only the stock coin/1-Up box classes. Keep
+    // caps, shells, stars, and mod-added contents completely untouched.
+    if ((itemId == 4 || itemId == 5 || itemId == 6 ||
+         itemId == 7 || itemId == 9) &&
+        vr_special_moves_spawn_fire_flower(o, marioState)) {
+        return;
+    }
+
     for (u8 i = 0; i < gExclamationBoxSize; i++) {
         if (itemId == content->id) {
             s32 model = exclamation_replace_model(marioState, smlua_model_util_load(content->model));

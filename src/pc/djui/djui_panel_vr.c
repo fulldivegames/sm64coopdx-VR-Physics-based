@@ -246,6 +246,13 @@ static void djui_panel_vr_cheat_defaults(struct DjuiBase* caller) {
     configVrRunningSpeed = VR_RUNNING_SPEED_DEFAULT;
 }
 
+static void djui_panel_vr_special_moves_defaults(
+    struct DjuiBase* caller
+) {
+    (void)caller;
+    configVrSpecialFireFlower = true;
+}
+
 static void djui_panel_vr_immersion_defaults(struct DjuiBase* caller) {
     (void)caller;
     configVrImmersiveCameraMotion = true;
@@ -1269,6 +1276,36 @@ static void djui_panel_vr_model_settings_create(struct DjuiBase* caller) {
     djui_panel_add(caller, panel, NULL);
 }
 
+static void djui_panel_vr_special_moves_create(
+    struct DjuiBase* caller
+) {
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create("Special Moves", false);
+    struct DjuiBase* body = djui_three_panel_get_body(panel);
+
+    {
+        djui_checkbox_create(
+            body,
+            "Fire Flower (50% in Coin / 1-Up Boxes)",
+            &configVrSpecialFireFlower,
+            NULL
+        );
+        djui_button_create(
+            body,
+            "Set to Defaults",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_vr_special_moves_defaults
+        );
+        djui_button_create(
+            body,
+            DLANG(MENU, BACK),
+            DJUI_BUTTON_STYLE_BACK,
+            djui_panel_menu_back
+        );
+    }
+    djui_panel_add(caller, panel, NULL);
+}
+
 static void djui_panel_vr_immersion_create(struct DjuiBase* caller) {
     struct DjuiThreePanel* panel = djui_panel_menu_create("Immersion", false);
     struct DjuiBase* body = djui_three_panel_get_body(panel);
@@ -1403,6 +1440,13 @@ void djui_panel_vr_create(struct DjuiBase* caller) {
             "Experimental",
             DJUI_BUTTON_STYLE_NORMAL,
             djui_panel_vr_experimental_create
+        );
+
+        djui_button_create(
+            body,
+            "Special Moves",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_vr_special_moves_create
         );
 
         djui_button_create(
