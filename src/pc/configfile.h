@@ -208,6 +208,7 @@ extern bool         configVrImmersiveLedgeCamera;
 extern bool         configVrImmersiveUnderwaterFilter;
 extern bool         configVrImmersiveRemovableCap;
 extern bool         configVrImmersiveLookDownTransparency;
+extern bool         configVrImmersiveCarrySpeed;
 extern bool         configVrMovementOverhaul;
 extern bool         configVrMarioPunchSound;
 extern bool         configVrMotionControlledDive;

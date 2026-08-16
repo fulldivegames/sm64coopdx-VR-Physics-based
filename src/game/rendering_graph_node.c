@@ -264,9 +264,13 @@ static bool sVrControllerHandClosed[VR_CONTROLLER_COUNT] = { false };
 #define VR_HAT_SHAKE_MIN_SPEED 220.0f
 #define VR_HAT_SHAKE_REVERSALS_REQUIRED 8
 #define VR_HAT_SHAKE_WINDOW_FRAMES 45U
-#define VR_BACK_FIRE_FLOWER_DISTANCE 110.0f
-#define VR_BACK_FIRE_FLOWER_DROP 42.0f
-#define VR_BACK_FIRE_FLOWER_RADIUS 40.0f
+#define VR_BACK_FIRE_FLOWER_MIN_DEPTH 55.0f
+#define VR_BACK_FIRE_FLOWER_MAX_DEPTH 165.0f
+#define VR_BACK_FIRE_FLOWER_HALF_WIDTH 62.0f
+#define VR_BACK_FIRE_FLOWER_ABOVE_HEAD 8.0f
+#define VR_BACK_FIRE_FLOWER_BELOW_HEAD 115.0f
+#define VR_BACK_FIRE_FLOWER_IDEAL_DEPTH 105.0f
+#define VR_BACK_FIRE_FLOWER_IDEAL_DROP 45.0f
 
 static u32 sVrPaintingExitHatHand = VR_CONTROLLER_COUNT;
 static u32 sVrPaintingExitHatStartFrame = 0;
@@ -706,7 +710,10 @@ static void vr_update_back_fire_flower_gesture(void) {
             continue;
         }
         Vec3f velocity;
-        tracked[hand] = vr_get_controller_world_fist_from_state(
+        // Use the physical controller pose here, not the wall-constrained
+        // glove pose. Reaching behind the torso commonly crosses the body's
+        // collision shell, which made the old small pickup sphere unreachable.
+        tracked[hand] = vr_get_controller_world_fist_raw_from_state(
             hand,
             &states[hand],
             hands[hand],
@@ -766,13 +773,10 @@ static void vr_update_back_fire_flower_gesture(void) {
         return;
     }
     const s16 viewYaw = vr_get_first_person_view_yaw();
-    Vec3f backCenter = {
-        head[0] - sins(viewYaw) * VR_BACK_FIRE_FLOWER_DISTANCE,
-        head[1] - VR_BACK_FIRE_FLOWER_DROP,
-        head[2] - coss(viewYaw) * VR_BACK_FIRE_FLOWER_DISTANCE
-    };
-    const f32 radiusSquared =
-        VR_BACK_FIRE_FLOWER_RADIUS * VR_BACK_FIRE_FLOWER_RADIUS;
+    const f32 forwardX = sins(viewYaw);
+    const f32 forwardZ = coss(viewYaw);
+    const f32 rightX = coss(viewYaw);
+    const f32 rightZ = -sins(viewYaw);
     f32 nearestDistanceSquared = FLT_MAX;
     u32 nearestHand = VR_CONTROLLER_COUNT;
     for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
@@ -782,13 +786,26 @@ static void vr_update_back_fire_flower_gesture(void) {
             states[hand].trigger < 0.55f) {
             continue;
         }
+        const f32 dx = hands[hand][0] - head[0];
+        const f32 dy = hands[hand][1] - head[1];
+        const f32 dz = hands[hand][2] - head[2];
+        const f32 behindDepth =
+            -(dx * forwardX + dz * forwardZ);
+        const f32 lateral = dx * rightX + dz * rightZ;
+        if (behindDepth < VR_BACK_FIRE_FLOWER_MIN_DEPTH ||
+            behindDepth > VR_BACK_FIRE_FLOWER_MAX_DEPTH ||
+            fabsf(lateral) > VR_BACK_FIRE_FLOWER_HALF_WIDTH ||
+            dy > VR_BACK_FIRE_FLOWER_ABOVE_HEAD ||
+            dy < -VR_BACK_FIRE_FLOWER_BELOW_HEAD) {
+            continue;
+        }
+        const f32 depthError =
+            behindDepth - VR_BACK_FIRE_FLOWER_IDEAL_DEPTH;
+        const f32 verticalError = dy + VR_BACK_FIRE_FLOWER_IDEAL_DROP;
         const f32 distanceSquared =
-            vr_painting_exit_hat_distance_squared(
-                hands[hand],
-                backCenter
-            );
-        if (distanceSquared <= radiusSquared &&
-            distanceSquared < nearestDistanceSquared) {
+            depthError * depthError + lateral * lateral +
+            verticalError * verticalError;
+        if (distanceSquared < nearestDistanceSquared) {
             nearestDistanceSquared = distanceSquared;
             nearestHand = hand;
         }
@@ -1540,6 +1557,40 @@ static void vr_patch_controller_hand_matrices(uint32_t eyeIndex) {
             up[2] * positionOffsetY +
             backward[2] * (wristToGripOffset + positionOffsetZ);
         matrix[3][3] = 1.0f;
+
+        // The gameplay collision solver constrains the fist in world space.
+        // Apply that same correction to the late-latched render pose so the
+        // visible glove stops at the wall/floor/ceiling too. Previously only
+        // the invisible interaction point was constrained, which made hand
+        // collision appear to do nothing even though contacts were detected.
+        Vec3f rawWorldPosition;
+        if (vr_get_controller_world_fist_raw_from_state(
+                hand,
+                &state,
+                rawWorldPosition,
+                NULL
+            ) && sVrControllerCameraInverseValid) {
+            Vec3f constrainedWorldPosition;
+            vec3f_copy(constrainedWorldPosition, rawWorldPosition);
+            vr_hand_interaction_apply_hand_collision_position(
+                hand,
+                constrainedWorldPosition
+            );
+            Vec3f worldCorrection = {
+                constrainedWorldPosition[0] - rawWorldPosition[0],
+                constrainedWorldPosition[1] - rawWorldPosition[1],
+                constrainedWorldPosition[2] - rawWorldPosition[2]
+            };
+            for (u32 localAxis = 0; localAxis < 3; localAxis++) {
+                matrix[3][localAxis] +=
+                    worldCorrection[0] *
+                        sVrControllerCameraInverse[localAxis][0] +
+                    worldCorrection[1] *
+                        sVrControllerCameraInverse[localAxis][1] +
+                    worldCorrection[2] *
+                        sVrControllerCameraInverse[localAxis][2];
+            }
+        }
         mtxf_to_mtx(fixedMatrix, matrix);
     }
 }

@@ -264,6 +264,7 @@ static void djui_panel_vr_immersion_defaults(struct DjuiBase* caller) {
     configVrImmersiveUnderwaterFilter = true;
     configVrImmersiveRemovableCap = false;
     configVrImmersiveLookDownTransparency = true;
+    configVrImmersiveCarrySpeed = false;
     configVrExperimentalSideFlipFollow = true;
     configVrExperimentalWallJumpTurn = true;
     configVrPhysicalCrouching = true;
@@ -1332,6 +1333,8 @@ static void djui_panel_vr_immersion_create(struct DjuiBase* caller) {
         &configVrImmersiveRemovableCap, NULL);
     djui_checkbox_create(body, "Mario Transparency While Looking Down",
         &configVrImmersiveLookDownTransparency, NULL);
+    djui_checkbox_create(body, "Carrying-Speed Movement While Holding",
+        &configVrImmersiveCarrySpeed, NULL);
     djui_checkbox_create(body, "Side-Flip Camera Follow",
         &configVrExperimentalSideFlipFollow, NULL);
     djui_checkbox_create(body, "180 Degree Wall-Jump Camera Turn",
