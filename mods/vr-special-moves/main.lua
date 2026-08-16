@@ -3,7 +3,7 @@
 -- category: misc
 -- pausable: true
 
-local SPECIAL_MOVES_PROTOCOL = 1
+local SPECIAL_MOVES_PROTOCOL = 2
 
 if network_is_server() then
     gGlobalSyncTable.sm64VrSpecialMovesProtocol = SPECIAL_MOVES_PROTOCOL

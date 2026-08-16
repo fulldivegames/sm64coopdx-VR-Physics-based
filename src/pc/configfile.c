@@ -141,7 +141,6 @@ bool         configVrCheatSurfaceClimbing          = false;
 bool         configVrCheatShakingHatWingCap        = false;
 bool         configVrCheatUnderwaterBoxPunching    = false;
 bool         configVrCheatFreeFly                  = false;
-bool         configVrCheatBackFireFlower           = false;
 unsigned int configVrFlyingSpeed                   = VR_FLYING_SPEED_DEFAULT;
 unsigned int configVrSwimmingSpeed                 = VR_SWIMMING_SPEED_DEFAULT;
 unsigned int configVrRunningSpeed                  = VR_RUNNING_SPEED_DEFAULT;
@@ -485,7 +484,6 @@ static const struct ConfigOption options[] = {
     {.name = "vr_cheat_shaking_hat_wing_cap",  .type = CONFIG_TYPE_BOOL, .boolValue = &configVrCheatShakingHatWingCap},
     {.name = "vr_cheat_underwater_box_punching", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrCheatUnderwaterBoxPunching},
     {.name = "vr_cheat_free_fly",               .type = CONFIG_TYPE_BOOL, .boolValue = &configVrCheatFreeFly},
-    {.name = "vr_cheat_back_fire_flower",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrCheatBackFireFlower},
     {.name = "vr_flying_speed",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrFlyingSpeed},
     {.name = "vr_swimming_speed",              .type = CONFIG_TYPE_UINT, .uintValue = &configVrSwimmingSpeed},
     {.name = "vr_running_speed",               .type = CONFIG_TYPE_UINT, .uintValue = &configVrRunningSpeed},

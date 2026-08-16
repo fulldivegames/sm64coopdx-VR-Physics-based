@@ -448,12 +448,10 @@ static bool update_vr_headset_flying(struct MarioState* m) {
     m->angleVel[1] = 0;
     m->faceAngle[2] = 0;
     if (configVrCheatFreeFly) {
-        // Free Fly keeps a useful boosted speed without accumulating an
-        // unbounded velocity. Looking up or down directly controls altitude,
-        // so gravity never pulls the player away from the headset direction.
-        if (m->forwardVel < 48.0f) {
-            m->forwardVel = 48.0f;
-        }
+        // Free Fly only modifies an already-active Wing Cap flight. Hold the
+        // configured maximum base speed and point the complete velocity at
+        // the headset, with no gravity or dive-to-build-speed requirement.
+        m->forwardVel = 48.0f;
     } else {
         // Normal Wing Cap flight retains its original gain/loss behavior.
         m->forwardVel -=
@@ -2046,8 +2044,7 @@ s32 act_flying(struct MarioState *m) {
         return set_mario_action(m, ACT_GROUND_POUND, 1);
     }
 
-    if (!(m->flags & MARIO_WING_CAP) &&
-        !(vr_is_active() && configVrCheatFreeFly)) {
+    if (!(m->flags & MARIO_WING_CAP)) {
         if (m->area->camera->mode == CAMERA_MODE_BEHIND_MARIO) {
             if (m->playerIndex == 0) {
                 if (!gNewCamera.isActive) {
@@ -2457,21 +2454,6 @@ Dispatches to the appropriate action function, such as jump, double jump, freefa
 s32 mario_execute_airborne_action(struct MarioState *m) {
     if (!m) { return FALSE; }
     s32 cancel;
-
-    // Free Fly starts from ordinary player-controlled airborne movement, but
-    // never overrides knockback, hazards, cannon launches, carried-object
-    // actions, or other scripted states. Jump once to enter free flight.
-    if (m->playerIndex == 0 && vr_is_active() && configVrCheatFreeFly &&
-        m->action != ACT_FLYING &&
-        (m->action == ACT_JUMP ||
-         m->action == ACT_DOUBLE_JUMP ||
-         m->action == ACT_TRIPLE_JUMP ||
-         m->action == ACT_BACKFLIP ||
-         m->action == ACT_SIDE_FLIP ||
-         m->action == ACT_LONG_JUMP ||
-         m->action == ACT_FREEFALL)) {
-        set_mario_action(m, ACT_FLYING, 1);
-    }
 
     if (check_common_airborne_cancels(m)) {
         return TRUE;
