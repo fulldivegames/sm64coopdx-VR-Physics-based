@@ -7,6 +7,16 @@ find_package(OpenXR REQUIRED CONFIG)
 set(SM64_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../../../..")
 set(SM64_GENERATED_ROOT "C:/vr-dev/sm64coopdx/build/us_pc")
 set(LUA_SOURCE_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/lua-5.3.5/src")
+set(COOPNET_ANDROID_ROOT "${SM64_ROOT}/lib/coopnet/android/arm64-v8a")
+
+# Link only the Android transport from the reference port. This deliberately
+# avoids importing its unrelated renderer, activity, or game-loop changes.
+add_library(coopnet_android STATIC IMPORTED)
+set_target_properties(coopnet_android PROPERTIES
+    IMPORTED_LOCATION "${COOPNET_ANDROID_ROOT}/libcoopnet.a")
+add_library(juice_android STATIC IMPORTED)
+set_target_properties(juice_android PROPERTIES
+    IMPORTED_LOCATION "${COOPNET_ANDROID_ROOT}/libjuice.a")
 
 # Compile the existing SM64 display-list/OpenGL renderer against Android's
 # native OpenGL ES headers. This object target is intentionally kept separate
@@ -168,7 +178,7 @@ target_compile_definitions(
     sm64_game_support PRIVATE
     __ANDROID__ NON_MATCHING AVOID_UB TARGET_LINUX ENABLE_OPENGL F3DEX_GBI_2E
     _LANGUAGE_C NO_SEGMENTED_MEMORY VERSION_US STDC_HEADERS USE_GLES RAPI_GL
-    NO_BZERO_BCOPY
+    NO_BZERO_BCOPY COOPNET
 )
 target_compile_features(sm64_game_support PRIVATE cxx_std_17)
 target_compile_options(sm64_game_support PRIVATE -Wno-error=format-security)
@@ -250,6 +260,8 @@ target_link_libraries(
     dl
     log
     z
+    coopnet_android
+    juice_android
 )
 
 target_link_options(sm64coopdxvr PRIVATE "-uANativeActivity_onCreate")

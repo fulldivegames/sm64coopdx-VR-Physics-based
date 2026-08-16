@@ -18,13 +18,38 @@ static struct DjuiInputbox* sInputboxPort = NULL;
 #ifdef COOPNET
 static struct DjuiRect* sRectPassword = NULL;
 static struct DjuiInputbox* sInputboxPassword = NULL;
+#ifdef __ANDROID__
+static struct DjuiSelectionbox* sSelectionboxLobbyPrivacy = NULL;
+#endif
+
+static void djui_panel_host_update_coopnet_fields(void) {
+    const bool coopNet = (configNetworkSystem == NS_COOPNET);
+#ifdef __ANDROID__
+    const bool privateLobby = (configCoopNetLobbyPrivacy == 1);
+    djui_base_set_visible(&sSelectionboxLobbyPrivacy->base, coopNet);
+    djui_base_set_enabled(&sSelectionboxLobbyPrivacy->base,
+                          coopNet && gNetworkType != NT_SERVER);
+    djui_base_set_visible(&sRectPassword->base, coopNet && privateLobby);
+    djui_base_set_enabled(&sInputboxPassword->base,
+                          coopNet && privateLobby && gNetworkType != NT_SERVER);
+#else
+    djui_base_set_visible(&sRectPassword->base, coopNet);
+    djui_base_set_enabled(&sInputboxPassword->base, coopNet);
+#endif
+}
 
 static void djui_panel_host_network_system_change(UNUSED struct DjuiBase* base) {
     djui_base_set_visible(&sRectPort->base, (configNetworkSystem == NS_SOCKET));
-    djui_base_set_visible(&sRectPassword->base, (configNetworkSystem == NS_COOPNET));
     djui_base_set_enabled(&sInputboxPort->base, (configNetworkSystem == NS_SOCKET));
-    djui_base_set_enabled(&sInputboxPassword->base, (configNetworkSystem == NS_COOPNET));
+    djui_panel_host_update_coopnet_fields();
 }
+
+#ifdef __ANDROID__
+static void djui_panel_host_lobby_privacy_change(UNUSED struct DjuiBase* base) {
+    configCoopNetLobbyPrivacy = MIN(configCoopNetLobbyPrivacy, 1U);
+    djui_panel_host_update_coopnet_fields();
+}
+#endif
 #endif
 
 static bool djui_panel_host_port_valid(void) {
@@ -101,6 +126,14 @@ void djui_panel_host_create(struct DjuiBase* caller) {
         if (gNetworkType == NT_SERVER) {
             djui_base_set_enabled(&selectionbox1->base, false);
         }
+#ifdef __ANDROID__
+        char* privacyChoices[] = { "Public", "Private" };
+        configCoopNetLobbyPrivacy = MIN(configCoopNetLobbyPrivacy, 1U);
+        sSelectionboxLobbyPrivacy = djui_selectionbox_create(
+            body, "Lobby Visibility", privacyChoices, 2,
+            &configCoopNetLobbyPrivacy,
+            djui_panel_host_lobby_privacy_change);
+#endif
         #endif
 
         struct DjuiRect* rect1 = djui_rect_container_create(body, 32);
@@ -136,7 +169,7 @@ void djui_panel_host_create(struct DjuiBase* caller) {
 #ifdef COOPNET
             sRectPassword = djui_rect_container_create(&rect1->base, 32);
             djui_base_set_location(&sRectPassword->base, 0, 0);
-            djui_base_set_visible(&sRectPassword->base, (configNetworkSystem == NS_COOPNET));
+            djui_base_set_visible(&sRectPassword->base, false);
             {
                 struct DjuiText* text1 = djui_text_create(&sRectPassword->base, DLANG(HOST, PASSWORD));
                 djui_base_set_size_type(&text1->base, DJUI_SVT_RELATIVE, DJUI_SVT_ABSOLUTE);
@@ -159,7 +192,7 @@ void djui_panel_host_create(struct DjuiBase* caller) {
                 if (gNetworkType == NT_SERVER) {
                     djui_base_set_enabled(&sInputboxPassword->base, false);
                 } else {
-                    djui_base_set_enabled(&sInputboxPassword->base, (configNetworkSystem == NS_COOPNET));
+                    djui_base_set_enabled(&sInputboxPassword->base, false);
                 }
             }
 #endif
@@ -207,5 +240,8 @@ void djui_panel_host_create(struct DjuiBase* caller) {
         }
     }
 
+#ifdef COOPNET
+    djui_panel_host_update_coopnet_fields();
+#endif
     djui_panel_add(caller, panel, defaultBase);
 }

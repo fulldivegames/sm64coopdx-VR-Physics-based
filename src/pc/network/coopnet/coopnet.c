@@ -32,7 +32,14 @@ bool ns_coopnet_query(QueryCallbackPtr callback, QueryFinishCallbackPtr finishCa
     gCoopNetCallbacks.OnLobbyListGot = callback;
     gCoopNetCallbacks.OnLobbyListFinish = finishCallback;
     if (coopnet_initialize() != COOPNET_OK) { return false; }
+#ifdef __ANDROID__
+    // Public Quest rooms use GAME_NAME; password-protected rooms share the
+    // desktop namespace for version-matched private cross-play.
+    const char* gameName = password[0] != '\0' ? "sm64coopdx" : GAME_NAME;
+    if (coopnet_lobby_list_get(gameName, password) != COOPNET_OK) { return false; }
+#else
     if (coopnet_lobby_list_get(GAME_NAME, password) != COOPNET_OK) { return false; }
+#endif
     return true;
 }
 
@@ -209,15 +216,41 @@ void ns_coopnet_update(void) {
         if (sNetworkType == NT_SERVER) {
             char mode[64] = "";
             mods_get_main_mod_name(mode, 64);
+#ifdef __ANDROID__
+            const char* gameName = gCoopNetPassword[0] != '\0'
+                ? "sm64coopdx" : GAME_NAME;
+#endif
             if (sReconnecting) {
                 LOG_INFO("Update lobby");
                 coopnet_populate_description();
+#ifdef __ANDROID__
+                coopnet_lobby_update(sLocalLobbyId, gameName, get_version(),
+                                     configPlayerName, mode,
+                                     sCoopNetDescription);
+#else
                 coopnet_lobby_update(sLocalLobbyId, GAME_NAME, get_version(), configPlayerName, mode, sCoopNetDescription);
+#endif
             } else {
                 LOG_INFO("Create lobby");
+#ifdef __ANDROID__
+                // Public/private is explicit on standalone. Preserve the
+                // saved private password while ensuring a public host always
+                // enters the Android public directory with an empty password.
+                snprintf(gCoopNetPassword, 64, "%s",
+                         configCoopNetLobbyPrivacy == 0 ? "" : configPassword);
+#else
                 snprintf(gCoopNetPassword, 64, "%s", configPassword);
+#endif
                 coopnet_populate_description();
+#ifdef __ANDROID__
+                gameName = gCoopNetPassword[0] != '\0'
+                    ? "sm64coopdx" : GAME_NAME;
+                coopnet_lobby_create(gameName, get_version(), configPlayerName, mode,
+                                     (uint16_t)configAmountOfPlayers,
+                                     gCoopNetPassword, sCoopNetDescription);
+#else
                 coopnet_lobby_create(GAME_NAME, get_version(), configPlayerName, mode, (uint16_t)configAmountOfPlayers, gCoopNetPassword, sCoopNetDescription);
+#endif
             }
         } else if (sNetworkType == NT_CLIENT) {
             LOG_INFO("Join lobby");

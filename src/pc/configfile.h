@@ -363,6 +363,10 @@ extern char         configCoopNetIp[MAX_CONFIG_STRING];
 extern unsigned int configCoopNetPort;
 extern char         configPassword[MAX_CONFIG_STRING];
 extern char         configDestId[MAX_CONFIG_STRING];
+#ifdef __ANDROID__
+// 0 = public Android lobby, 1 = password-protected private/cross-play lobby.
+extern unsigned int configCoopNetLobbyPrivacy;
+#endif
 // DJUI settings
 extern unsigned int configDjuiTheme;
 extern bool         configDjuiThemeCenter;

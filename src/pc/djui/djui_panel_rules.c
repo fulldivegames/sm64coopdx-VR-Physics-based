@@ -14,13 +14,33 @@ static void djui_panel_rules_deny(struct DjuiBase* caller) {
 
 static void djui_panel_rules_accept(struct DjuiBase* caller) {
     configRulesVersion = RULES_VERSION;
+    // Persist acceptance immediately. On standalone, closing the app from a
+    // menu does not always pass through the normal panel-shutdown save path.
+    configfile_save(configfile_name());
     djui_panel_join_lobbies_create(caller, "");
 }
 
 void djui_panel_rules_create(struct DjuiBase* caller) {
     struct DjuiThreePanel* panel = djui_panel_menu_create(DLANG(RULES, RULES_TITLE), false);
     struct DjuiBase* body = djui_three_panel_get_body(panel);
+    struct DjuiBase* defaultBase = NULL;
     {
+#ifdef __ANDROID__
+        if (configRulesVersion != RULES_VERSION) {
+            // Keep the actual confirmation inside the initially visible
+            // portion of the Quest panel. The desktop layout puts its split
+            // buttons after a tall rules block; their calculated cursor
+            // coordinates can fall outside the root clip, leaving B as the
+            // only controller input that works.
+            struct DjuiButton* accept = djui_button_create(
+                body, "Accept Rules and Continue",
+                DJUI_BUTTON_STYLE_NORMAL, djui_panel_rules_accept);
+            defaultBase = &accept->base;
+            djui_button_create(body, DLANG(MENU, BACK),
+                               DJUI_BUTTON_STYLE_BACK,
+                               djui_panel_rules_deny);
+        }
+#endif
         snprintf(
             sRules,
             1024,
@@ -55,11 +75,15 @@ void djui_panel_rules_create(struct DjuiBase* caller) {
             djui_text_set_drop_shadow(text3, 64, 64, 64, 100);
             djui_text_set_alignment(text3, DJUI_HALIGN_CENTER, DJUI_VALIGN_CENTER);
 
+#ifndef __ANDROID__
             struct DjuiRect* rect = djui_rect_container_create(body, 64);
-            {
-                djui_button_left_create(&rect->base, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK, djui_panel_rules_deny);
-                djui_button_right_create(&rect->base, DLANG(MENU, YES), DJUI_BUTTON_STYLE_NORMAL, djui_panel_rules_accept);
-            }
+            djui_button_left_create(&rect->base, DLANG(MENU, BACK),
+                                    DJUI_BUTTON_STYLE_BACK,
+                                    djui_panel_rules_deny);
+            djui_button_right_create(&rect->base, DLANG(MENU, YES),
+                                     DJUI_BUTTON_STYLE_NORMAL,
+                                     djui_panel_rules_accept);
+#endif
         } else {
             djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK, djui_panel_menu_back);
         }
@@ -67,6 +91,6 @@ void djui_panel_rules_create(struct DjuiBase* caller) {
     }
 
     panel->temporary = true;
-    djui_panel_add(caller, panel, NULL);
+    djui_panel_add(caller, panel, defaultBase);
 }
 #endif
