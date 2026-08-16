@@ -7,6 +7,7 @@
 #include "pc/configfile.h"
 #include "pc/vr/vr.h"
 #include "game/rendering_graph_node.h"
+#include "game/vr_hand_interaction.h"
 
 static bool sVrMode = false;
 
@@ -48,6 +49,11 @@ static unsigned int djui_panel_vr_clamp_uint(
         return maximum;
     }
     return value;
+}
+
+static void djui_panel_vr_spawn_fire_flower(struct DjuiBase* caller) {
+    (void)caller;
+    vr_special_moves_spawn_cheat_fire_flower();
 }
 
 static void djui_panel_vr_mode_changed(struct DjuiBase* caller) {
@@ -216,7 +222,6 @@ static void djui_panel_vr_cheat_defaults(struct DjuiBase* caller) {
     configVrCheatShakingHatWingCap = false;
     configVrCheatUnderwaterBoxPunching = false;
     configVrCheatFreeFly = false;
-    configVrCheatBackFireFlower = false;
     configVrFlyingSpeed = VR_FLYING_SPEED_DEFAULT;
     configVrSwimmingSpeed = VR_SWIMMING_SPEED_DEFAULT;
     configVrRunningSpeed = VR_RUNNING_SPEED_DEFAULT;
@@ -1270,11 +1275,11 @@ static void djui_panel_vr_cheats_create(struct DjuiBase* caller) {
             &configVrCheatFreeFly,
             NULL
         );
-        djui_checkbox_create(
+        djui_button_create(
             body,
-            "Grab Fire Flower Behind Back",
-            &configVrCheatBackFireFlower,
-            NULL
+            "Spawn Fire Flower",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_vr_spawn_fire_flower
         );
 
         if (configVrFlyingSpeed < VR_FLYING_SPEED_MIN) {

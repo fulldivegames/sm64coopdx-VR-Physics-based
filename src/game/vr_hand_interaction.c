@@ -77,7 +77,10 @@
 #define VR_FIRE_FLOWER_SPAWN_VELOCITY 6.0f
 #define VR_FIRE_FLOWER_GRAVITY 0.65f
 #define VR_FIRE_FLOWER_FALL_SPEED 7.0f
-#define VR_FIREBALL_CHARGE_FRAMES 75U
+#define VR_FIREBALL_FORM_DELAY_FRAMES 15U
+#define VR_FIREBALL_FORM_FRAMES 75U
+#define VR_FIREBALL_READY_FRAMES \
+    (VR_FIREBALL_FORM_DELAY_FRAMES + VR_FIREBALL_FORM_FRAMES)
 #define VR_FIREBALL_TRIGGER_THRESHOLD 0.55f
 #define VR_FIREBALL_MIN_THROW_SPEED 60.0f
 #define VR_FIREBALL_MAX_LIFETIME 300U
@@ -225,7 +228,6 @@ static u8 sVrBowserFrameVelocitySamples = 0;
 static bool sVrInteractionTrackingActive = false;
 static bool sVrHeadsetColliderActive = false;
 static bool sVrFireFlowerPowered = false;
-static bool sVrFireballTriggerPressed = false;
 static u16 sVrFireballChargeFrames = 0;
 static s16 sVrFireFlowerLevel = -1;
 static s16 sVrFireFlowerArea = -1;
@@ -4418,7 +4420,6 @@ static void vr_special_moves_clear_fireball(void) {
 
 static void vr_special_moves_reset_power(void) {
     sVrFireFlowerPowered = false;
-    sVrFireballTriggerPressed = false;
     vr_special_moves_clear_fireball();
 }
 
@@ -4462,6 +4463,41 @@ Gfx* geo_vr_fireball_color(
     return displayList;
 }
 
+static bool vr_special_moves_spawn_pickup(
+    struct Object* parent,
+    f32 x,
+    f32 y,
+    f32 z,
+    f32 velocityY
+) {
+    if (parent == NULL) {
+        return false;
+    }
+    for (u32 i = 0; i < VR_FIRE_FLOWER_PICKUP_COUNT; i++) {
+        struct Object* pickup = sVrFireFlowerPickups[i];
+        if (pickup != NULL &&
+            (pickup->activeFlags & ACTIVE_FLAG_ACTIVE) != 0) {
+            continue;
+        }
+
+        pickup = spawn_object(parent, MODEL_VR_FIRE_FLOWER, bhvStaticObject);
+        if (pickup == NULL) {
+            return false;
+        }
+        pickup->oPosX = x;
+        pickup->oPosY = y;
+        pickup->oPosZ = z;
+        pickup->oOpacity = 255;
+        obj_scale(pickup, 0.75f);
+        obj_update_gfx_pos_and_angle(pickup);
+        sVrFireFlowerPickups[i] = pickup;
+        sVrFireFlowerPickupVelocityY[i] = velocityY;
+        sVrFireFlowerPickupLanded[i] = false;
+        return true;
+    }
+    return false;
+}
+
 bool vr_special_moves_spawn_fire_flower(
     struct Object* box,
     struct MarioState* owner
@@ -4470,27 +4506,33 @@ bool vr_special_moves_spawn_fire_flower(
         owner == NULL || owner->playerIndex != 0 || random_float() >= 0.5f) {
         return false;
     }
+    return vr_special_moves_spawn_pickup(
+        box,
+        box->oPosX,
+        box->oPosY + 65.0f,
+        box->oPosZ,
+        VR_FIRE_FLOWER_SPAWN_VELOCITY
+    );
+}
 
-    for (u32 i = 0; i < VR_FIRE_FLOWER_PICKUP_COUNT; i++) {
-        struct Object* pickup = sVrFireFlowerPickups[i];
-        if (pickup != NULL &&
-            (pickup->activeFlags & ACTIVE_FLAG_ACTIVE) != 0) {
-            continue;
-        }
-
-        pickup = spawn_object(box, MODEL_VR_FIRE_FLOWER, bhvStaticObject);
-        if (pickup == NULL) {
-            return false;
-        }
-        pickup->oPosY += 65.0f;
-        pickup->oOpacity = 255;
-        obj_scale(pickup, 0.75f);
-        sVrFireFlowerPickups[i] = pickup;
-        sVrFireFlowerPickupVelocityY[i] = VR_FIRE_FLOWER_SPAWN_VELOCITY;
-        sVrFireFlowerPickupLanded[i] = false;
-        return true;
+bool vr_special_moves_spawn_cheat_fire_flower(void) {
+    struct MarioState* mario = &gMarioStates[0];
+    if (!vr_is_active() || mario->marioObj == NULL) {
+        return false;
     }
-    return false;
+
+    // A cheat-menu spawn should never silently fail because the Special
+    // Moves master switch was off. It creates a normal collectible pickup;
+    // because gameplay is paused behind the menu, gravity begins only after
+    // the player closes the menu.
+    configVrSpecialFireFlower = true;
+    return vr_special_moves_spawn_pickup(
+        mario->marioObj,
+        mario->pos[0],
+        mario->pos[1] + 480.0f,
+        mario->pos[2],
+        0.0f
+    );
 }
 
 static void vr_special_moves_update_pickups(struct MarioState* mario) {
@@ -4735,9 +4777,7 @@ static bool vr_special_moves_try_quick_fireball(
         sVrFireballObject != NULL ||
         sVrPhysicalClimbType != VR_PHYSICAL_CLIMB_NONE ||
         vr_is_controller_holding_cap(VR_CONTROLLER_LEFT) ||
-        vr_is_controller_holding_cap(VR_CONTROLLER_RIGHT) ||
-        vr_is_controller_holding_fire_flower(VR_CONTROLLER_LEFT) ||
-        vr_is_controller_holding_fire_flower(VR_CONTROLLER_RIGHT)) {
+        vr_is_controller_holding_cap(VR_CONTROLLER_RIGHT)) {
         return false;
     }
 
@@ -4821,62 +4861,106 @@ static bool vr_special_moves_update_fireball_hand(
 ) {
     const bool triggerPressed = state != NULL &&
         state->trigger >= VR_FIREBALL_TRIGGER_THRESHOLD;
+    const bool gripPressed = state != NULL &&
+        state->squeeze >= VR_GRIP_CLOSE_THRESHOLD &&
+        sVrGripPressed[VR_CONTROLLER_RIGHT];
     const bool canCharge = vr_special_moves_fire_flower_active() &&
-        !handBusy && sVrGripPressed[VR_CONTROLLER_RIGHT] &&
+        !handBusy && gripPressed &&
         mario != NULL && mario->heldObj == NULL &&
         sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_NONE;
+    const bool chargingInput = triggerPressed && canCharge;
+    const bool wasCharging = sVrFireballChargeFrames > 0 ||
+        (sVrFireballObject != NULL && !sVrFireballProjectile);
 
-    if (triggerPressed && !sVrFireballTriggerPressed && canCharge &&
-        !sVrFireballProjectile) {
-        sVrFireballObject = spawn_object(
-            mario->marioObj,
-            MODEL_VR_FIREBALL,
-            bhvStaticObject
-        );
-        sVrFireballChargeFrames = 0;
-        vec3f_set(sVrFireballRememberedVelocity, 0.0f, 0.0f, 0.0f);
-    }
-
-    if (triggerPressed && canCharge && sVrFireballObject != NULL &&
-        !sVrFireballProjectile) {
+    if (chargingInput && !sVrFireballProjectile) {
+        const u16 previousFrames = sVrFireballChargeFrames;
         sVrFireballChargeFrames = (u16)min(
             sVrFireballChargeFrames + 1U,
-            VR_FIREBALL_CHARGE_FRAMES
+            VR_FIREBALL_READY_FRAMES
         );
-        const f32 progress = (f32)sVrFireballChargeFrames /
-            (f32)VR_FIREBALL_CHARGE_FRAMES;
-        for (u32 axis = 0; axis < 3; axis++) {
-            (&sVrFireballObject->oPosX)[axis] = position[axis];
-        }
-        sVrFireballObject->oAnimState =
-            (s32)((gGlobalTimer >> 1) & 7U);
-        sVrFireballObject->oOpacity = (s32)(51.0f + progress * 204.0f);
-        obj_scale(sVrFireballObject, 0.05f + progress * 0.55f);
-        obj_update_gfx_pos_and_angle(sVrFireballObject);
 
-        const f32 speedSq = velocity[0] * velocity[0] +
-            velocity[1] * velocity[1] + velocity[2] * velocity[2];
-        const f32 rememberedSq =
-            sVrFireballRememberedVelocity[0] * sVrFireballRememberedVelocity[0] +
-            sVrFireballRememberedVelocity[1] * sVrFireballRememberedVelocity[1] +
-            sVrFireballRememberedVelocity[2] * sVrFireballRememberedVelocity[2];
-        if (speedSq >= rememberedSq * VR_THROW_VELOCITY_MEMORY *
-            VR_THROW_VELOCITY_MEMORY) {
-            for (u32 axis = 0; axis < 3; axis++) {
-                sVrFireballRememberedVelocity[axis] = velocity[axis];
+        // Grip may be held before or after the trigger. The charge is driven
+        // by the combined held state, so no single input-edge frame can be
+        // missed. Wait half a second, then visibly form for 2.5 seconds.
+        if (sVrFireballObject == NULL &&
+            sVrFireballChargeFrames >= VR_FIREBALL_FORM_DELAY_FRAMES) {
+            sVrFireballObject = spawn_object(
+                mario->marioObj,
+                MODEL_VR_FIREBALL,
+                bhvStaticObject
+            );
+            vec3f_set(
+                sVrFireballRememberedVelocity,
+                0.0f,
+                0.0f,
+                0.0f
+            );
+            if (sVrFireballObject != NULL) {
+                vr_apply_haptic(
+                    VR_CONTROLLER_RIGHT,
+                    0.18f,
+                    0.04f,
+                    -1.0f
+                );
             }
-        } else {
-            vec3f_mul(sVrFireballRememberedVelocity, VR_THROW_VELOCITY_MEMORY);
+        }
+        if (sVrFireballObject != NULL) {
+            const f32 progress = clamp(
+                (f32)(sVrFireballChargeFrames -
+                    VR_FIREBALL_FORM_DELAY_FRAMES) /
+                    (f32)VR_FIREBALL_FORM_FRAMES,
+                0.0f,
+                1.0f
+            );
+            for (u32 axis = 0; axis < 3; axis++) {
+                (&sVrFireballObject->oPosX)[axis] = position[axis];
+            }
+            sVrFireballObject->oAnimState =
+                (s32)((gGlobalTimer >> 1) & 7U);
+            sVrFireballObject->oOpacity =
+                (s32)(51.0f + progress * 204.0f);
+            obj_scale(sVrFireballObject, 0.05f + progress * 0.55f);
+            obj_update_gfx_pos_and_angle(sVrFireballObject);
+
+            const f32 speedSq = velocity[0] * velocity[0] +
+                velocity[1] * velocity[1] + velocity[2] * velocity[2];
+            const f32 rememberedSq =
+                sVrFireballRememberedVelocity[0] *
+                    sVrFireballRememberedVelocity[0] +
+                sVrFireballRememberedVelocity[1] *
+                    sVrFireballRememberedVelocity[1] +
+                sVrFireballRememberedVelocity[2] *
+                    sVrFireballRememberedVelocity[2];
+            if (speedSq >= rememberedSq * VR_THROW_VELOCITY_MEMORY *
+                VR_THROW_VELOCITY_MEMORY) {
+                for (u32 axis = 0; axis < 3; axis++) {
+                    sVrFireballRememberedVelocity[axis] = velocity[axis];
+                }
+            } else {
+                vec3f_mul(
+                    sVrFireballRememberedVelocity,
+                    VR_THROW_VELOCITY_MEMORY
+                );
+            }
+        }
+        if (previousFrames < VR_FIREBALL_READY_FRAMES &&
+            sVrFireballChargeFrames >= VR_FIREBALL_READY_FRAMES) {
+            vr_apply_haptic(
+                VR_CONTROLLER_RIGHT,
+                0.42f,
+                0.08f,
+                -1.0f
+            );
         }
     }
 
-    if (!triggerPressed && sVrFireballTriggerPressed &&
-        sVrFireballObject != NULL && !sVrFireballProjectile) {
+    if (!chargingInput && wasCharging && !sVrFireballProjectile) {
         const f32 speedSq =
             sVrFireballRememberedVelocity[0] * sVrFireballRememberedVelocity[0] +
             sVrFireballRememberedVelocity[1] * sVrFireballRememberedVelocity[1] +
             sVrFireballRememberedVelocity[2] * sVrFireballRememberedVelocity[2];
-        if (sVrFireballChargeFrames >= VR_FIREBALL_CHARGE_FRAMES &&
+        if (sVrFireballObject != NULL &&
+            sVrFireballChargeFrames >= VR_FIREBALL_READY_FRAMES &&
             speedSq >= VR_FIREBALL_MIN_THROW_SPEED * VR_FIREBALL_MIN_THROW_SPEED) {
             for (u32 axis = 0; axis < 3; axis++) {
                 sVrFireballVelocity[axis] =
@@ -4887,6 +4971,10 @@ static bool vr_special_moves_update_fireball_hand(
             obj_scale(sVrFireballObject, 0.6f);
             sVrFireballProjectile = true;
             sVrFireballLifetime = 0;
+            play_sound(
+                SOUND_OBJ_FLAME_BLOWN,
+                sVrFireballObject->header.gfx.cameraToObject
+            );
         } else {
             vr_special_moves_clear_fireball();
         }
@@ -4895,7 +4983,6 @@ static bool vr_special_moves_update_fireball_hand(
         !sVrFireballProjectile && sVrFireballObject != NULL) {
         vr_special_moves_clear_fireball();
     }
-    sVrFireballTriggerPressed = triggerPressed;
     return sVrFireballObject != NULL && !sVrFireballProjectile;
 }
 
@@ -4948,7 +5035,6 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         if (sVrFireballObject != NULL && !sVrFireballProjectile) {
             vr_special_moves_clear_fireball();
         }
-        sVrFireballTriggerPressed = false;
         if (sVrInteractionTrackingActive ||
             sVrTrackedHeldObject != NULL ||
             sVrTrackedAnchorObject != NULL ||
@@ -5143,10 +5229,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
             );
         const bool handIsHoldingCap =
             vr_is_controller_holding_cap(hand);
-        const bool handIsHoldingFireFlower =
-            vr_is_controller_holding_fire_flower(hand);
-        const bool handIsHoldingVrItem =
-            handIsHoldingCap || handIsHoldingFireFlower;
+        const bool handIsHoldingVrItem = handIsHoldingCap;
         const bool fireballHandBusy =
             handIsHoldingVrItem ||
             sVrTrackedHeldObject != NULL ||

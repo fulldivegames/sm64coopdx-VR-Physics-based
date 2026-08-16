@@ -11,13 +11,6 @@ static const Vtx vr_fire_flower_billboard_vtx[] = {
     {{{-64, 128, 0}, 0, {   0,   0}, {255, 255, 255, 255}}},
 };
 
-static const Vtx vr_fire_flower_held_vtx[] = {
-    {{{-28,  8, 0}, 0, {   0, 992}, {255, 255, 255, 255}}},
-    {{{ 28,  8, 0}, 0, { 992, 992}, {255, 255, 255, 255}}},
-    {{{ 28, 64, 0}, 0, { 992,   0}, {255, 255, 255, 255}}},
-    {{{-28, 64, 0}, 0, {   0,   0}, {255, 255, 255, 255}}},
-};
-
 const Gfx vr_fire_flower_dl[] = {
     gsDPPipeSync(),
     gsDPSetCombineMode(G_CC_DECALRGBA, G_CC_DECALRGBA),
@@ -27,22 +20,6 @@ const Gfx vr_fire_flower_dl[] = {
         G_IM_SIZ_16b, 32, 32, 0, G_TX_CLAMP, G_TX_CLAMP, 5, 5,
         G_TX_NOLOD, G_TX_NOLOD),
     gsSPVertex(vr_fire_flower_billboard_vtx, 4, 0),
-    gsSP2Triangles(0, 1, 2, 0, 0, 2, 3, 0),
-    gsSPTexture(0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, G_OFF),
-    gsSPSetGeometryMode(G_LIGHTING | G_CULL_BACK),
-    gsDPSetCombineMode(G_CC_SHADE, G_CC_SHADE),
-    gsSPEndDisplayList(),
-};
-
-const Gfx vr_fire_flower_held_dl[] = {
-    gsDPPipeSync(),
-    gsDPSetCombineMode(G_CC_DECALRGBA, G_CC_DECALRGBA),
-    gsSPClearGeometryMode(G_LIGHTING | G_CULL_BACK),
-    gsSPTexture(0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, G_ON),
-    gsDPLoadTextureBlock(vr_fire_flower_texture, G_IM_FMT_RGBA,
-        G_IM_SIZ_16b, 32, 32, 0, G_TX_CLAMP, G_TX_CLAMP, 5, 5,
-        G_TX_NOLOD, G_TX_NOLOD),
-    gsSPVertex(vr_fire_flower_held_vtx, 4, 0),
     gsSP2Triangles(0, 1, 2, 0, 0, 2, 3, 0),
     gsSPTexture(0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, G_OFF),
     gsSPSetGeometryMode(G_LIGHTING | G_CULL_BACK),
