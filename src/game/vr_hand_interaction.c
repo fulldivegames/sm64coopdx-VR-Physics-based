@@ -4432,8 +4432,9 @@ Gfx* geo_vr_fireball_color(
     if (displayList == NULL) {
         return NULL;
     }
+    struct Object* object = (struct Object*)gCurGraphNodeObject;
     const u8 alpha = (u8)clamp(
-        gCurGraphNodeObject->oOpacity,
+        object->oOpacity,
         0,
         255
     );
