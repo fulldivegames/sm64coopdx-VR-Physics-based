@@ -4704,7 +4704,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         return;
     }
 
-    if (!configVrSpecialFireFlower ||
+    if (!configVrSpecialFireFlower || !vr_is_active() ||
         (sVrFireFlowerPowered &&
          (sVrFireFlowerLevel != gCurrLevelNum ||
           sVrFireFlowerArea != gCurrAreaIndex))) {
@@ -4741,6 +4741,10 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         trackingAvailable &&
         (mario->action & ACT_FLAG_INTANGIBLE) == 0;
     if (!trackingAvailable) {
+        if (sVrFireballObject != NULL && !sVrFireballProjectile) {
+            vr_special_moves_clear_fireball();
+        }
+        sVrFireballTriggerPressed = false;
         if (sVrInteractionTrackingActive ||
             sVrTrackedHeldObject != NULL ||
             sVrTrackedAnchorObject != NULL ||
