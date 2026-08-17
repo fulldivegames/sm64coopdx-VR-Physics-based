@@ -285,6 +285,26 @@ static void mr_blizzard_act_death(void) {
                 }
             }
             // Reset Mr. Blizzard if Mario leaves its radius.
+        } else if (o->oMrBlizzardTimer > 0) {
+            // Fire Flower defeats reserve this timer to keep the snowman out
+            // for 30 seconds, independent of Mario's distance.
+            if (--o->oMrBlizzardTimer == 0) {
+                cur_obj_init_animation_with_sound(1);
+                o->oAction =
+                    o->oBehParams2ndByte == MR_BLIZZARD_STYPE_JUMPING
+                        ? MR_BLIZZARD_ACT_JUMP
+                        : MR_BLIZZARD_ACT_SPAWN_SNOWBALL;
+                o->oMrBlizzardScale = 1.0f;
+                o->oMrBlizzardGraphYOffset =
+                    o->oBehParams2ndByte == MR_BLIZZARD_STYPE_JUMPING
+                        ? 24.0f
+                        : -200.0f;
+                o->oFaceAngleRoll = 0;
+                o->oMrBlizzardDizziness =
+                    o->oMrBlizzardChangeInDizziness = 0.0f;
+                cur_obj_become_tangible();
+                network_send_object(o);
+            }
         } else if (distanceToPlayer > 1000.0f) {
             cur_obj_init_animation_with_sound(1);
 

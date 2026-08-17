@@ -1,6 +1,7 @@
 #include <string.h>
 
 #include "djui.h"
+#include "djui_panel.h"
 #include "djui_panel_menu.h"
 #include "djui_panel_playerlist.h"
 #include "djui_panel_modlist.h"
@@ -177,4 +178,64 @@ void djui_panel_playerlist_create(UNUSED struct DjuiBase* caller) {
         djui_text_set_alignment(t5, DJUI_HALIGN_RIGHT, DJUI_VALIGN_TOP);
         djuiTextAct[i] = t5;
     }
+}
+
+void djui_panel_playerlist_menu_create(struct DjuiBase* caller) {
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create(DLANG(PLAYER_LIST, PLAYERS), false);
+    struct DjuiBase* body = djui_three_panel_get_body(panel);
+    u32 connected = 0;
+
+    for (u32 i = 0; i < MAX_PLAYERS; i++) {
+        struct NetworkPlayer* np = &gNetworkPlayers[i];
+        if (!np->connected ||
+            (np == gNetworkPlayerServer &&
+             gServerSettings.headlessServer)) {
+            continue;
+        }
+        char row[256];
+        const char* location = np->overrideLocation[0] == '\0'
+            ? get_level_name(
+                np->currCourseNum,
+                np->currLevelNum,
+                np->currAreaIndex
+            )
+            : np->overrideLocation;
+        snprintf(
+            row,
+            sizeof(row),
+            "%s  |  %s  |  %d ms",
+            np->name,
+            location,
+            np->ping
+        );
+        struct DjuiText* text = djui_text_create(body, row);
+        djui_base_set_size_type(
+            &text->base,
+            DJUI_SVT_RELATIVE,
+            DJUI_SVT_ABSOLUTE
+        );
+        djui_base_set_size(&text->base, 1.0f, 32.0f);
+        djui_text_set_alignment(
+            text,
+            DJUI_HALIGN_LEFT,
+            DJUI_VALIGN_CENTER
+        );
+        connected++;
+    }
+    if (connected == 0) {
+        struct DjuiText* text = djui_text_create(body, "No players connected");
+        djui_base_set_size_type(
+            &text->base,
+            DJUI_SVT_RELATIVE,
+            DJUI_SVT_ABSOLUTE
+        );
+        djui_base_set_size(&text->base, 1.0f, 32.0f);
+        djui_text_set_alignment(
+            text,
+            DJUI_HALIGN_CENTER,
+            DJUI_VALIGN_CENTER
+        );
+    }
+    djui_panel_add(caller, panel, NULL);
 }
