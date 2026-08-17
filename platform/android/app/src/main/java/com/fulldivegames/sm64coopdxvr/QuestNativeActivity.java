@@ -229,6 +229,12 @@ public final class QuestNativeActivity extends NativeActivity {
             Log.i(TAG, "Bundled language resources installed.");
             copyMissingAssetDirectory("palettes", new File(root, "palettes"));
             Log.i(TAG, "Bundled character palettes installed.");
+            // Remove only our obsolete synchronized test mod. Leaving it in
+            // shared storage would override the restored native Fire Flower
+            // behavior after an in-place APK update.
+            deleteBundledDirectory(
+                    new File(SHARED_MOD_DIRECTORY, "Fire Flowers"));
+            deleteBundledDirectory(new File(root, "mods/Fire Flowers"));
             copyMissingAssetDirectory("mods", new File(root, "mods"));
             // User mods remain untouched, but our bundled protocol manifest
             // must follow the native test build instead of leaving an older
@@ -239,6 +245,19 @@ public final class QuestNativeActivity extends NativeActivity {
             Log.i(TAG, "Bundled session mods installed.");
         } catch (IOException exception) {
             Log.e(TAG, "Could not install bundled resources.", exception);
+        }
+    }
+
+    private void deleteBundledDirectory(File file) throws IOException {
+        if (!file.exists()) return;
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) deleteBundledDirectory(child);
+            }
+        }
+        if (!file.delete()) {
+            throw new IOException("Could not remove obsolete bundled resource " + file);
         }
     }
 
