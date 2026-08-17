@@ -83,7 +83,7 @@
 #define VR_FIRE_FLOWER_DURATION_FRAMES 1800U
 #define VR_FIRE_FLOWER_PICKUP_GRACE_FRAMES 12U
 #define VR_FIREBALL_FORM_DELAY_FRAMES 6U
-#define VR_FIREBALL_FORM_FRAMES 60U
+#define VR_FIREBALL_FORM_FRAMES 45U
 #define VR_FIREBALL_READY_FRAMES \
     (VR_FIREBALL_FORM_DELAY_FRAMES + VR_FIREBALL_FORM_FRAMES)
 #define VR_FIREBALL_TRIGGER_THRESHOLD 0.55f
@@ -242,6 +242,9 @@ static struct Object* sVrFireFlowerPickups[VR_FIRE_FLOWER_PICKUP_COUNT] = { NULL
 static f32 sVrFireFlowerPickupVelocityY[VR_FIRE_FLOWER_PICKUP_COUNT] = { 0.0f };
 static bool sVrFireFlowerPickupLanded[VR_FIRE_FLOWER_PICKUP_COUNT] = { false };
 static u16 sVrFireFlowerPickupAge[VR_FIRE_FLOWER_PICKUP_COUNT] = { 0 };
+static struct Object* sVrFireFlowerRolledBox = NULL;
+static u32 sVrFireFlowerRolledBoxTimestamp = 0;
+static bool sVrFireFlowerRolledBoxResult = false;
 static struct Object* sVrFireballChargeObject = NULL;
 static struct Object*
     sVrFireballProjectiles[VR_FIREBALL_PROJECTILE_COUNT] = { NULL };
@@ -4094,6 +4097,19 @@ static bool vr_hand_interaction_attack_object(
         object->oForwardVel = 3392.0f / object->hitboxRadius;
     }
 
+    // Physical fists can synchronize a break before the box's own behavior
+    // gets a reliable local-attacker signal. Roll the reward at the actual
+    // local hit and let the behavior consume this cached result afterward.
+    if (obj_has_behavior(object, bhvBreakableBox) ||
+        obj_has_behavior(object, bhvBreakableBoxSmall) ||
+        obj_has_behavior(object, bhvJumpingBox)) {
+        vr_special_moves_spawn_fire_flower_chance(
+            object,
+            mario,
+            0.30f
+        );
+    }
+
     mario->interactObj = object;
     attack_object(mario, object, INT_PUNCH);
     smlua_call_event_hooks(
@@ -4618,19 +4634,28 @@ static bool vr_special_moves_spawn_fire_flower_with_chance(
     f32 chance,
     f32 velocityY
 ) {
+    if (box == sVrFireFlowerRolledBox &&
+        (u32)(gGlobalTimer - sVrFireFlowerRolledBoxTimestamp) <= 1U) {
+        return sVrFireFlowerRolledBoxResult;
+    }
+
+    sVrFireFlowerRolledBox = box;
+    sVrFireFlowerRolledBoxTimestamp = gGlobalTimer;
+    sVrFireFlowerRolledBoxResult = false;
     if (!configVrSpecialFireFlower || !vr_is_active() ||
         !vr_special_moves_fire_flower_online_allowed() || box == NULL ||
         owner == NULL || owner->playerIndex != 0 ||
         random_u16() >= (u16)(clamp(chance, 0.0f, 1.0f) * 65535.0f)) {
         return false;
     }
-    return vr_special_moves_spawn_pickup(
+    sVrFireFlowerRolledBoxResult = vr_special_moves_spawn_pickup(
         owner->marioObj,
         box->oPosX,
         box->oPosY + 65.0f,
         box->oPosZ,
         velocityY
     );
+    return sVrFireFlowerRolledBoxResult;
 }
 
 bool vr_special_moves_spawn_fire_flower_chance(
@@ -5057,7 +5082,7 @@ static bool vr_special_moves_update_fireball_hand(
 
         // Grip may be held before or after the trigger. The charge is driven
         // by the combined held state, so no single input-edge frame can be
-        // missed. Wait 0.2 seconds, then visibly form for 2.0 seconds.
+        // missed. Wait 0.2 seconds, then visibly form for 1.5 seconds.
         if (sVrFireballChargeObject == NULL &&
             sVrFireballChargeFrames >= VR_FIREBALL_FORM_DELAY_FRAMES) {
             sVrFireballChargeObject = spawn_object(
