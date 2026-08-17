@@ -1983,7 +1983,7 @@ static f32 vr_get_ledge_camera_drop(void) {
 }
 
 static void vr_apply_star_spawn_camera_focus(
-    const Vec3f cameraPosition,
+    Vec3f cameraPosition,
     Vec3f forward
 ) {
     const bool cutsceneActive =
