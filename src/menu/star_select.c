@@ -485,23 +485,40 @@ void print_act_selector_strings(void) {
             const bool selected = sSelectedActIndex == i;
             const s16 size = selected ? 28 : 22;
             const s16 iconX = centerX - size / 2;
-            const s16 iconY = 75;
+            // Use the same top-left coordinate system as the act numbers.
+            // Their 8px glyphs begin at y=38, so y=49 anchors the star row
+            // directly underneath with a small, consistent gap.
+            const s16 iconY = 49;
             if ((stars & (1 << i)) != 0) {
                 // The collected state uses SM64's real colored HUD star.
                 gDPSetEnvColor(gDisplayListHead++, 255, 255, 255, 255);
-                render_hud_icon(
-                    NULL, hudLut[44], G_IM_FMT_RGBA, G_IM_SIZ_16b,
-                    16, 16, iconX, iconY, size, size,
-                    0, 0, 16, 16
+                gDPPipeSync(gDisplayListHead++);
+                gDPSetTextureImage(
+                    gDisplayListHead++, G_IM_FMT_RGBA, G_IM_SIZ_16b,
+                    1, hudLut[44]
+                );
+                gSPDisplayList(gDisplayListHead++, dl_rgba16_load_tex_block);
+                render_screen_texture_rectangle(
+                    iconX, iconY, size, size, 16, 16
                 );
             } else {
                 // Only the single next unlocked star can reach this branch.
+                gSPDisplayList(gDisplayListHead++, dl_menu_ia8_text_begin);
                 gDPSetEnvColor(gDisplayListHead++, 64, 150, 255, 235);
-                render_hud_icon(
-                    NULL, sVrBlankStarTexture, G_IM_FMT_IA, G_IM_SIZ_8b,
-                    16, 16, iconX, iconY, size, size,
-                    0, 0, 16, 16
+                gDPSetTextureImage(
+                    gDisplayListHead++, G_IM_FMT_IA, G_IM_SIZ_8b,
+                    1, sVrBlankStarTexture
                 );
+                gDPLoadSync(gDisplayListHead++);
+                gDPLoadBlock(
+                    gDisplayListHead++, G_TX_LOADTILE,
+                    0, 0, 16 * 16 - 1,
+                    CALC_DXT(16, G_IM_SIZ_8b_BYTES)
+                );
+                render_screen_texture_rectangle(
+                    iconX, iconY, size, size, 16, 16
+                );
+                gSPDisplayList(gDisplayListHead++, dl_menu_ia8_text_end);
             }
         }
     }

@@ -79,21 +79,15 @@ foreach ($directory in $requiredDirectories) {
     Copy-Item -LiteralPath (Join-Path $buildPath $directory) -Destination $stagePath -Recurse
 }
 
-# Incremental test builds may leave the failed synchronized Fire Flowers mod
-# in the build output. The release candidate uses the proven native Fire
-# Flower implementation and its lightweight protocol manifest instead.
+# Incremental test builds may leave obsolete Fire Flower session mods in the
+# build output. Native Fire Flowers do not advertise or transfer a Lua mod.
 $stagedModsPath = Join-Path $stagePath "mods"
-$failedFireFlowersPath = Join-Path $stagedModsPath "Fire Flowers"
-if (Test-Path -LiteralPath $failedFireFlowersPath) {
-    Remove-Item -LiteralPath $failedFireFlowersPath -Recurse -Force
+foreach ($obsoleteMod in @("Fire Flowers", "vr-special-moves")) {
+    $obsoleteModPath = Join-Path $stagedModsPath $obsoleteMod
+    if (Test-Path -LiteralPath $obsoleteModPath) {
+        Remove-Item -LiteralPath $obsoleteModPath -Recurse -Force
+    }
 }
-$nativeManifestSource = Join-Path $repoRoot "mods/vr-special-moves"
-$nativeManifestDestination = Join-Path $stagedModsPath "vr-special-moves"
-if (Test-Path -LiteralPath $nativeManifestDestination) {
-    Remove-Item -LiteralPath $nativeManifestDestination -Recurse -Force
-}
-Copy-Item -LiteralPath $nativeManifestSource `
-    -Destination $nativeManifestDestination -Recurse
 
 $romExtensions = @(".z64", ".n64", ".v64")
 $romFiles = @(

@@ -4568,13 +4568,11 @@ static void vr_special_moves_reset_power(void) {
 
 static bool vr_special_moves_fire_flower_online_allowed(void) {
 #ifdef COOPNET
-    // Public CoopNet peers may be using an unmodified Android or desktop
-    // build. The native Fire Flower projectile has no cross-version protocol,
-    // so disable it for every public host and client. Direct connections and
-    // password-protected/private CoopNet sessions remain available to players
-    // deliberately using matching VR builds.
-    if (gNetworkSystem == &gNetworkSystemCoopNet &&
-        gCoopNetPassword[0] == '\0') {
+    // CoopNet can mix this native build with unmodified Android clients and
+    // does not expose a reliable public/private distinction here. Disable the
+    // native power-up for every CoopNet session; direct matching-build
+    // connections remain supported.
+    if (gNetworkSystem == &gNetworkSystemCoopNet) {
         return false;
     }
 #endif
