@@ -222,6 +222,7 @@ static void djui_panel_vr_cheat_defaults(struct DjuiBase* caller) {
     configVrCheatShakingHatWingCap = false;
     configVrCheatUnderwaterBoxPunching = false;
     configVrCheatFreeFly = false;
+    configVrCheatNoFireFlowerTimer = false;
     configVrFlyingSpeed = VR_FLYING_SPEED_DEFAULT;
     configVrSwimmingSpeed = VR_SWIMMING_SPEED_DEFAULT;
     configVrRunningSpeed = VR_RUNNING_SPEED_DEFAULT;
@@ -1281,6 +1282,12 @@ static void djui_panel_vr_cheats_create(struct DjuiBase* caller) {
             DJUI_BUTTON_STYLE_NORMAL,
             djui_panel_vr_spawn_fire_flower
         );
+        djui_checkbox_create(
+            body,
+            "No Fire Flower Timer",
+            &configVrCheatNoFireFlowerTimer,
+            NULL
+        );
 
         if (configVrFlyingSpeed < VR_FLYING_SPEED_MIN) {
             configVrFlyingSpeed = VR_FLYING_SPEED_MIN;
@@ -1353,7 +1360,7 @@ static void djui_panel_vr_special_moves_create(
     {
         djui_checkbox_create(
             body,
-            "Fire Flower (50% in Coin / 1-Up Boxes)",
+            "Fire Flower (50% Item Boxes / 25% Breakable Boxes)",
             &configVrSpecialFireFlower,
             NULL
         );
