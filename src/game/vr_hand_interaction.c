@@ -4109,7 +4109,7 @@ static bool vr_hand_interaction_attack_object(
         vr_special_moves_spawn_fire_flower_chance(
             object,
             mario,
-            0.30f
+            0.25f
         );
     }
 
@@ -5131,8 +5131,7 @@ static bool vr_special_moves_update_fireball_hand(
         sVrGripPressed[VR_CONTROLLER_RIGHT];
     const bool canCharge = vr_special_moves_fire_flower_active() &&
         !handBusy && gripPressed &&
-        mario != NULL && mario->heldObj == NULL &&
-        sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_NONE;
+        mario != NULL;
     const bool chargingInput = triggerPressed && canCharge;
     const bool wasCharging = sVrFireballChargeFrames > 0 ||
         sVrFireballChargeObject != NULL;
@@ -5536,7 +5535,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         const bool handIsHoldingVrItem = handIsHoldingCap;
         const bool fireballHandBusy =
             handIsHoldingVrItem ||
-            sVrTrackedHeldObject != NULL ||
+            (sVrTrackedHeldGripMask & (u8)(1U << hand)) != 0 ||
             sVrPhysicalClimbHands[hand] ||
             sVrTrackedHootHand == hand ||
             sVrTrackedAnchorHand == hand ||
