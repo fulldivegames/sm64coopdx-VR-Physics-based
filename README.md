@@ -14,7 +14,7 @@
 </p>
 
 > [!IMPORTANT]
-> The current public release is **v0.6.27**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur.
+> The current public release is **v0.7.0**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur.
 
 SM64 Co-Op DX VR currently targets 64-bit Windows, OpenGL, and OpenXR. It keeps the original game's flat-screen mode and multiplayer foundation while adding native stereoscopic rendering, 6DoF tracking, VR-aware cameras, remappable motion-controller input, physical interactions, comfort options, and extensive calibration settings.
 
@@ -82,7 +82,7 @@ The lower-left corner of the main menu shows the installed VR version and checks
 The Windows release keeps the normal SM64 Co-Op DX mod layout inside the extracted game folder:
 
 ```text
-SM64-Co-Op-DX-VR-Windows-v0.6.27/
+SM64-Co-Op-DX-VR-Windows-v0.7.0/
 ├── mods/
 ├── dynos/
 │   └── packs/
@@ -269,14 +269,26 @@ v0.6.27 expands compatibility around mod discovery, Lua HUD/menu presentation, c
 
 Compatibility is not universal. Mods that replace camera, player action, input, HUD, rendering, collision, or character geometry can conflict with VR behavior. Install one at a time when troubleshooting and report the exact mod name/version, headset/runtime, and reproduction steps. A mod working in normal SM64 Co-Op DX does not guarantee that every first-person physical interaction will behave correctly.
 
-## v0.6.27 — Co-op and Keyboards Update
+## v0.7.0 — Chat and Fireball Update
+
+- Added a controller-friendly in-game Chat HUD with retained recent messages, an anchored on-screen keyboard, Enter-to-send behavior, and reliable B/Back navigation
+- Added a **Players** HUD directly below Chat, showing connected player names, locations, and ping; press B to return
+- Improved controller keyboard navigation and repeat behavior while preserving normal physical-keyboard input on PC
+- Added a microphone button as a preview of future speech-to-text support; microphone transcription currently does not work and is still being developed
+- Added the native VR **Fire Flower** special move, including item-box and cork-box pickups, temporary Fire Mario colors and music, tracked right-hand charging, physical fireball throws, quick button shots, enemy impacts, and settings/cheats for music, spawning, and timer behavior
+- Fire Flowers are a VR-build-specific feature. They are not advertised or transferred as a public CoopNet mod and are disabled for CoopNet compatibility; use matching builds through Direct Connection for supported multiplayer testing
+- Expanded fireball collision coverage, including Chain Chomp and Mr. Blizzard. Mr. Blizzard explodes, disappears, and respawns after 30 seconds
+- Replaced the VR Act Select 3D stars with readable overlay stars, revealing completed missions and the next available mission in sequence
+- Continued high-resolution presentation fixes for the keyboard, main-menu logo, update text, Chat, and VR menu overlays
+
+## Previous Release Notes
+
+### v0.6.27 — Co-op and Keyboards Update
 
 - Added the shared controller-operated on-screen keyboard to editable SM64 Co-Op DX fields while preserving normal desktop keyboard input
 - Improved high-resolution presentation for the keyboard, main-menu logo, and version/update status text
 - Kept the PC public CoopNet directory and normal direct/private multiplayer behavior unchanged
 - Maintained network-version parity with the standalone build for compatible Direct Connection play
-
-## Previous Release Notes
 
 ### v0.6.0 — Optimization and Mod Compatibility Update
 
