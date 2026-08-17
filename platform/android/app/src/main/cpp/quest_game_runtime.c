@@ -16,6 +16,7 @@
 #include "pc/audio/audio_api.h"
 #include "pc/djui/djui.h"
 #include "pc/djui/djui_inputbox.h"
+#include "pc/djui/djui_panel.h"
 #include "pc/djui/djui_panel_pause.h"
 #include "pc/djui/djui_unicode.h"
 #include "pc/fs/fs.h"
@@ -302,6 +303,7 @@ bool quest_game_ui_requires_full_quality(void) {
     // center. Start at full quality too, before the main-menu flags settle.
     return !sReady
         || gDjuiInMainMenu
+        || djui_panel_is_active()
         || gDjuiPanelPauseCreated
         || djui_inputbox_onscreen_keyboard_is_active();
 }
