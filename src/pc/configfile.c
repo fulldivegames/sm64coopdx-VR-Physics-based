@@ -115,6 +115,7 @@ bool         configVrFlameOptimizations            = true;
 bool         configVrUltraPerformanceMode          = false;
 unsigned int configVrQuestRefreshRate              = 2;
 bool         configVrSpecialFireFlower             = true;
+bool         configVrSpecialFireFlowerMusic        = true;
 bool         configVrDisableFog                    = true;
 bool         configVrDesktopMirror                = true;
 unsigned int configVrDesktopMirrorFps             = 60;
@@ -154,6 +155,7 @@ bool         configVrImmersiveUnderwaterFilter      = true;
 bool         configVrImmersiveRemovableCap          = false;
 bool         configVrImmersiveLookDownTransparency = true;
 bool         configVrImmersiveCarrySpeed          = false;
+bool         configVrImmersiveStarSpawnFocus       = true;
 bool         configVrMovementOverhaul             = false;
 bool         configVrMarioPunchSound              = true;
 bool         configVrMotionControlledDive         = true;
@@ -459,6 +461,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_ultra_performance_mode",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrUltraPerformanceMode},
     {.name = "vr_quest_refresh_rate",           .type = CONFIG_TYPE_UINT, .uintValue = &configVrQuestRefreshRate},
     {.name = "vr_special_fire_flower",          .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialFireFlower},
+    {.name = "vr_special_fire_flower_music",    .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialFireFlowerMusic},
     {.name = "vr_disable_fog",                  .type = CONFIG_TYPE_BOOL, .boolValue = &configVrDisableFog},
     {.name = "vr_desktop_mirror",              .type = CONFIG_TYPE_BOOL, .boolValue = &configVrDesktopMirror},
     {.name = "vr_desktop_mirror_fps",          .type = CONFIG_TYPE_UINT, .uintValue = &configVrDesktopMirrorFps},
@@ -498,6 +501,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_immersive_removable_cap",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveRemovableCap},
     {.name = "vr_immersive_look_down_transparency", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveLookDownTransparency},
     {.name = "vr_immersive_carry_speed",         .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveCarrySpeed},
+    {.name = "vr_immersive_star_spawn_focus",    .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveStarSpawnFocus},
     {.name = "vr_mario_punch_sound",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMarioPunchSound},
     {.name = "vr_motion_controlled_dive",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControlledDive},
     {.name = "vr_motion_controlled_ground_dive",.type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControlledGroundDive},
