@@ -16,6 +16,7 @@
 #include "object_helpers.h"
 #include "object_list_processor.h"
 #include "rendering_graph_node.h"
+#include "sound_init.h"
 #include "sm64.h"
 #include "surface_terrains.h"
 #include "vr_hand_interaction.h"
@@ -235,6 +236,8 @@ static bool sVrInteractionTrackingActive = false;
 static bool sVrHeadsetColliderActive = false;
 static bool sVrFireFlowerPowered = false;
 static u16 sVrFireFlowerTimer = 0;
+// This remains finite when the no-timer cheat keeps the power active.
+static u16 sVrFireFlowerMusicTimer = 0;
 static u16 sVrFireballChargeFrames = 0;
 static s16 sVrFireFlowerLevel = -1;
 static s16 sVrFireFlowerArea = -1;
@@ -4545,8 +4548,13 @@ static u32 vr_special_moves_allocate_fireball_projectile(void) {
 }
 
 static void vr_special_moves_reset_power(void) {
+    if (sVrFireFlowerMusicTimer > 0 &&
+        (gMarioStates[0].flags & MARIO_SPECIAL_CAPS) == 0) {
+        stop_cap_music();
+    }
     sVrFireFlowerPowered = false;
     sVrFireFlowerTimer = 0;
+    sVrFireFlowerMusicTimer = 0;
     vr_special_moves_clear_fireball_charge();
     for (u32 slot = 0; slot < VR_FIREBALL_PROJECTILE_COUNT; slot++) {
         vr_special_moves_clear_fireball_projectile(slot);
@@ -4583,9 +4591,44 @@ bool vr_special_moves_grant_fire_flower(void) {
     }
     sVrFireFlowerPowered = true;
     sVrFireFlowerTimer = VR_FIRE_FLOWER_DURATION_FRAMES;
+    sVrFireFlowerMusicTimer = VR_FIRE_FLOWER_DURATION_FRAMES;
     sVrFireFlowerLevel = gCurrLevelNum;
     sVrFireFlowerArea = gCurrAreaIndex;
+    if ((gMarioStates[0].flags &
+         (MARIO_METAL_CAP | MARIO_VANISH_CAP)) == 0) {
+        play_cap_music(
+            SEQUENCE_ARGS(4, gLevelValues.wingCapSequence)
+        );
+    }
     return true;
+}
+
+static void vr_special_moves_update_fire_flower_music(
+    struct MarioState* mario
+) {
+    if (!sVrFireFlowerPowered || sVrFireFlowerMusicTimer == 0 ||
+        mario == NULL) {
+        return;
+    }
+
+    const u32 specialCaps = mario->flags & MARIO_SPECIAL_CAPS;
+    // Metal and Vanish Cap own the cap-music channel while active. Wing Cap
+    // shares Powerful Mario with the Fire Flower, so the de-duplicated call
+    // simply keeps the current track running without overlap or a restart.
+    if ((specialCaps & (MARIO_METAL_CAP | MARIO_VANISH_CAP)) == 0 &&
+        (sVrFireFlowerMusicTimer > 60 ||
+         (specialCaps & MARIO_WING_CAP) != 0)) {
+        play_cap_music(
+            SEQUENCE_ARGS(4, gLevelValues.wingCapSequence)
+        );
+    }
+
+    sVrFireFlowerMusicTimer--;
+    if (specialCaps == 0 && sVrFireFlowerMusicTimer == 60) {
+        fadeout_cap_music();
+    } else if (specialCaps == 0 && sVrFireFlowerMusicTimer == 0) {
+        stop_cap_music();
+    }
 }
 
 Gfx* geo_vr_fireball_color(
@@ -4774,6 +4817,24 @@ static void vr_special_moves_update_pickups(struct MarioState* mario) {
         }
 
         pickup->oFaceAngleYaw += 0x600;
+        if (sVrFireFlowerPickupLanded[i]) {
+            struct Surface* support = NULL;
+            const f32 supportHeight = find_floor(
+                pickup->oPosX,
+                pickup->oPosY + 80.0f,
+                pickup->oPosZ,
+                &support
+            );
+            if (support == NULL ||
+                fabsf(pickup->oPosY - supportHeight) > 2.0f) {
+                // The cork box can disappear after briefly being detected as
+                // support. Resume gravity instead of leaving the flower aloft.
+                sVrFireFlowerPickupLanded[i] = false;
+                sVrFireFlowerPickupVelocityY[i] = 0.0f;
+            } else {
+                pickup->oPosY = supportHeight;
+            }
+        }
         if (!sVrFireFlowerPickupLanded[i]) {
             pickup->oPosY += sVrFireFlowerPickupVelocityY[i];
             sVrFireFlowerPickupVelocityY[i] = fmaxf(
@@ -4789,7 +4850,10 @@ static void vr_special_moves_update_pickups(struct MarioState* mario) {
                 pickup->oPosZ,
                 &floor
             );
-            if (floor != NULL && pickup->oPosY <= floorHeight) {
+            // Never treat the top of the box as a landing surface while the
+            // flower is still rising out of it.
+            if (sVrFireFlowerPickupVelocityY[i] <= 0.0f &&
+                floor != NULL && pickup->oPosY <= floorHeight) {
                 pickup->oPosY = floorHeight;
                 sVrFireFlowerPickupVelocityY[i] = 0.0f;
                 sVrFireFlowerPickupLanded[i] = true;
@@ -5257,6 +5321,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
           sVrFireFlowerArea != gCurrAreaIndex))) {
         vr_special_moves_reset_power();
     }
+    vr_special_moves_update_fire_flower_music(mario);
     if (sVrFireFlowerPowered &&
         !configVrCheatNoFireFlowerTimer &&
         sVrFireFlowerTimer > 0 &&
