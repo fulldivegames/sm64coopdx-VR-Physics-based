@@ -81,6 +81,7 @@
 #define VR_FIRE_FLOWER_GRAVITY 0.65f
 #define VR_FIRE_FLOWER_FALL_SPEED 7.0f
 #define VR_FIRE_FLOWER_DURATION_FRAMES 1800U
+#define VR_FIRE_FLOWER_PICKUP_GRACE_FRAMES 12U
 #define VR_FIREBALL_FORM_DELAY_FRAMES 6U
 #define VR_FIREBALL_FORM_FRAMES 60U
 #define VR_FIREBALL_READY_FRAMES \
@@ -240,6 +241,7 @@ static s16 sVrFireFlowerArea = -1;
 static struct Object* sVrFireFlowerPickups[VR_FIRE_FLOWER_PICKUP_COUNT] = { NULL };
 static f32 sVrFireFlowerPickupVelocityY[VR_FIRE_FLOWER_PICKUP_COUNT] = { 0.0f };
 static bool sVrFireFlowerPickupLanded[VR_FIRE_FLOWER_PICKUP_COUNT] = { false };
+static u16 sVrFireFlowerPickupAge[VR_FIRE_FLOWER_PICKUP_COUNT] = { 0 };
 static struct Object* sVrFireballChargeObject = NULL;
 static struct Object*
     sVrFireballProjectiles[VR_FIREBALL_PROJECTILE_COUNT] = { NULL };
@@ -4630,6 +4632,7 @@ static bool vr_special_moves_spawn_pickup(
         sVrFireFlowerPickups[i] = pickup;
         sVrFireFlowerPickupVelocityY[i] = velocityY;
         sVrFireFlowerPickupLanded[i] = false;
+        sVrFireFlowerPickupAge[i] = 0;
         return true;
     }
     return false;
@@ -4644,7 +4647,7 @@ static bool vr_special_moves_spawn_fire_flower_with_chance(
     if (!configVrSpecialFireFlower || !vr_is_active() ||
         !vr_special_moves_fire_flower_online_allowed() || box == NULL ||
         owner == NULL || owner->playerIndex != 0 ||
-        random_float() >= clamp(chance, 0.0f, 1.0f)) {
+        random_u16() >= (u16)(clamp(chance, 0.0f, 1.0f) * 65535.0f)) {
         return false;
     }
     return vr_special_moves_spawn_pickup(
@@ -4737,7 +4740,12 @@ static void vr_special_moves_update_pickups(struct MarioState* mario) {
             sVrFireFlowerPickups[i] = NULL;
             sVrFireFlowerPickupVelocityY[i] = 0.0f;
             sVrFireFlowerPickupLanded[i] = false;
+            sVrFireFlowerPickupAge[i] = 0;
             continue;
+        }
+
+        if (sVrFireFlowerPickupAge[i] < 0xFFFFU) {
+            sVrFireFlowerPickupAge[i]++;
         }
 
         pickup->oFaceAngleYaw += 0x600;
@@ -4763,6 +4771,14 @@ static void vr_special_moves_update_pickups(struct MarioState* mario) {
             }
         }
         obj_update_gfx_pos_and_angle(pickup);
+
+        // A box can be broken while its center is already inside Mario's
+        // pickup radius. Let the reward visibly emerge before body, head, or
+        // hand collection becomes active.
+        if (sVrFireFlowerPickupAge[i] <
+            VR_FIRE_FLOWER_PICKUP_GRACE_FRAMES) {
+            continue;
+        }
 
         const f32 px = pickup->oPosX;
         const f32 py = pickup->oPosY + 28.0f;
@@ -4827,6 +4843,7 @@ static void vr_special_moves_update_pickups(struct MarioState* mario) {
             vr_special_moves_delete_object(&sVrFireFlowerPickups[i]);
             sVrFireFlowerPickupVelocityY[i] = 0.0f;
             sVrFireFlowerPickupLanded[i] = false;
+            sVrFireFlowerPickupAge[i] = 0;
         }
     }
 }
@@ -4991,6 +5008,10 @@ static bool vr_special_moves_try_quick_fireball(
     projectile->oPosY = origin[1] - 18.0f;
     projectile->oPosZ = origin[2] + forwardZ * 42.0f;
     projectile->oOpacity = 255;
+    // This projectile uses the explicit world/enemy tests below. Leaving its
+    // native interaction type empty guarantees the firing Mario's own body
+    // collider cannot consume or deflect it at the launch point.
+    projectile->oInteractType = 0;
     projectile->oAnimState =
         (s32)((gGlobalTimer >> 1) & 7U);
     obj_scale(projectile, 0.9f);
@@ -5170,6 +5191,7 @@ static bool vr_special_moves_update_fireball_hand(
                     VR_THROW_VELOCITY_SCALE;
             }
             sVrFireballChargeObject->oOpacity = 255;
+            sVrFireballChargeObject->oInteractType = 0;
             obj_scale(sVrFireballChargeObject, 1.2f);
             sVrFireballProjectiles[slot] = sVrFireballChargeObject;
             sVrFireballProjectileLifetime[slot] = 0;
