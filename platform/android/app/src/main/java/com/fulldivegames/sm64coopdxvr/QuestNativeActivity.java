@@ -229,19 +229,16 @@ public final class QuestNativeActivity extends NativeActivity {
             Log.i(TAG, "Bundled language resources installed.");
             copyMissingAssetDirectory("palettes", new File(root, "palettes"));
             Log.i(TAG, "Bundled character palettes installed.");
-            // Remove only our obsolete synchronized test mod. Leaving it in
-            // shared storage would override the restored native Fire Flower
-            // behavior after an in-place APK update.
-            deleteBundledDirectory(
-                    new File(SHARED_MOD_DIRECTORY, "Fire Flowers"));
-            deleteBundledDirectory(new File(root, "mods/Fire Flowers"));
+            // Remove obsolete synchronized/session manifests. Native Fire
+            // Flowers are deliberately not advertised to public clients.
+            for (String obsoleteMod :
+                    new String[] { "Fire Flowers", "vr-special-moves" }) {
+                deleteBundledDirectory(
+                        new File(SHARED_MOD_DIRECTORY, obsoleteMod));
+                deleteBundledDirectory(
+                        new File(root, "mods/" + obsoleteMod));
+            }
             copyMissingAssetDirectory("mods", new File(root, "mods"));
-            // User mods remain untouched, but our bundled protocol manifest
-            // must follow the native test build instead of leaving an older
-            // copy behind after an in-place APK update.
-            copyAssetDirectory(
-                    "mods/vr-special-moves",
-                    new File(root, "mods/vr-special-moves"));
             Log.i(TAG, "Bundled session mods installed.");
         } catch (IOException exception) {
             Log.e(TAG, "Could not install bundled resources.", exception);

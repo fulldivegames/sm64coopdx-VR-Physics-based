@@ -164,10 +164,6 @@ bool network_init(enum NetworkType inNetworkType, bool reconnecting) {
         extern s16 gCurrSaveFileNum;
         gCurrSaveFileNum = configHostSaveSlot;
 
-        // This small session mod is the network-visible manifest for the
-        // native Special Moves runtime. Enabling it here makes the standard
-        // mod-transfer path send it to clients before they finish joining.
-        mods_enable("vr-special-moves");
         mods_activate(&gLocalMods);
         smlua_init();
 
