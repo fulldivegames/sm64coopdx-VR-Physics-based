@@ -17,7 +17,7 @@
 > This is an active, experimental fan project. The standalone edition has been tested on **Meta Quest 3 only**. It has **not been tested on Quest 2 at all**, and neither edition has been tested across every level, multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur.
 
 > [!WARNING]
-> Standalone co-op and its VR keyboard are still experimental. Text or other menu elements may occasionally appear blurry or visually incorrect; restarting the app or headset usually clears these issues. Co-op can also produce minor visual bugs. Large lobbies may reduce performance, and gameplay-changing server mods can cause visual problems, broken behavior, or crashes. Disconnecting may recover the session; otherwise, fully restart the game. Standalone currently has no supported in-game text-chat input.
+> Standalone co-op, Chat, and its VR keyboard are still experimental. Text or other menu elements may occasionally appear blurry or visually incorrect; restarting the app or headset usually clears these issues. Co-op can also produce minor visual bugs. Large lobbies may reduce performance, and gameplay-changing server mods can cause visual problems, broken behavior, or crashes. Disconnecting may recover the session; otherwise, fully restart the game. Controller keyboard text chat is available; the microphone button currently does not provide working speech recognition and is still being developed.
 
 This repository contains the standalone Android/Quest port of [sm64coopdx-VR (Physics-based)](https://github.com/fulldivegames/sm64coopdx-VR), derived from [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx). It runs the game natively on the headset through OpenXR and OpenGL ES while retaining the original project's multiplayer foundation, Lua/mod support where compatible, first- and third-person cameras, tracked hands, and physical VR interactions.
 There are videos on my YouTube channel: https://www.youtube.com/@fulldivegames667 that show off the mod.
@@ -37,7 +37,7 @@ The release is a single APK. Players do not need Git, Android Studio, Gradle, AD
 ### Install the APK
 
 1. Open this repository's [latest release](https://github.com/fulldivegames/sm64coopdx-VR-Standalone/releases/latest).
-2. Download `SM64-Co-Op-DX-VR-Quest-v0.6.27.apk` under **Assets**.
+2. Download `SM64-Co-Op-DX-VR-Quest-v0.7.0.apk` under **Assets**.
 3. Connect the Quest to your computer and allow the USB debugging prompt inside the headset.
 4. Open SideQuest and confirm that the headset indicator is connected.
 5. Click **Install APK file from folder** in SideQuest, choose the downloaded APK, and wait for the install-success message.
@@ -49,7 +49,7 @@ The release is a single APK. Players do not need Git, Android Studio, Gradle, AD
 Updates can be installed over the existing app through SideQuest. Keep the same Android application installed if you want its private ROM/configuration data to remain available. Back up important saves before testing a new release.
 
 > [!IMPORTANT]
-> Install v0.6.27 directly over an existing installation so the private ROM, save, and settings remain available. Do not uninstall the app first.
+> Install v0.7.0 directly over an existing installation so the private ROM, save, and settings remain available. Do not uninstall the app first.
 
 > [!IMPORTANT]
 > The APK contains no ROM and no Nintendo game assets. Do not upload, bundle, or redistribute a ROM with this project. The app validates the unmodified US ROM before importing it into private application storage.
@@ -62,7 +62,7 @@ The standalone build loads compatible SM64 Co-Op DX mods from this easy-to-acces
 /sdcard/SM64VR/mods/
 ```
 
-1. Install or update to v0.6.27 and launch it once. Android opens the **Allow access to manage all files** page; enable access for **SM64 Co-Op DX VR Standalone**. This permission is used for the shared mod, DynOS, palette, and shader-cache folders.
+1. Install or update to v0.7.0 and launch it once. Android opens the **Allow access to manage all files** page; enable access for **SM64 Co-Op DX VR Standalone**. This permission is used for the shared mod, DynOS, palette, and shader-cache folders.
 2. Close and reopen the game once after granting access. The game creates `/sdcard/SM64VR/mods/` automatically.
 3. Download a mod compatible with SM64 Co-Op DX. The official community browser is [mods.sm64coopdx.com](https://mods.sm64coopdx.com/mods/).
 4. Extract the archive. Copy the **extracted mod folder**, not the `.zip`, into `SM64VR/mods` with SideQuest's file manager. The mod files must be directly inside their own folder rather than inside an extra duplicate folder.
@@ -81,7 +81,7 @@ The previous private `Android/data/com.fulldivegames.sm64coopdxvr/files/mods/` l
 
 ### Install DynOS packs
 
-Launch the game once after installing v0.6.27. The game automatically creates:
+Launch the game once after installing v0.7.0. The game automatically creates:
 
 ```text
 /sdcard/SM64VR/dynos/packs/
@@ -103,9 +103,9 @@ Custom palette files can be copied to:
 
 The persistent learned shader cache is stored in `/sdcard/SM64VR/shader-cache/`. It is managed by the game; do not install mods there.
 
-### Mod compatibility in v0.6.27
+### Mod compatibility in v0.7.0
 
-v0.6.27 includes expanded mod discovery, startup, menu, rendering, character-model, DynOS, and palette path compatibility. Character Selector was specifically tested with multiple character packs, including its in-game selection overlay. Multiple extracted DynOS packs are discovered from `dynos/packs`, and shared standalone paths now keep mods, packs, palettes, and shader-cache data accessible outside Android's restricted private-data folder.
+v0.7.0 includes expanded mod discovery, startup, menu, rendering, character-model, DynOS, and palette path compatibility. Character Selector was specifically tested with multiple character packs, including its in-game selection overlay. Multiple extracted DynOS packs are discovered from `dynos/packs`, and shared standalone paths now keep mods, packs, palettes, and shader-cache data accessible outside Android's restricted private-data folder.
 
 Compatibility is not universal. Mods that depend on desktop-native binaries, desktop-only graphics APIs, unsupported keyboard windows, extreme memory use, or assumptions about the original flat camera may still fail. Character packs can also define their own selection rules rather than appearing in the built-in Mario/Luigi/Toad/Wario/Waluigi list. Install one mod at a time when diagnosing a failure and report the exact mod name/version with a crash log when possible.
 
@@ -115,7 +115,7 @@ Known compatibility notes:
 
 - Loading many mods at once can increase startup time and memory use.
 - Render96 currently has known performance and crash issues on standalone.
-- Character Selector's in-game overlay was tested with multiple character packs for v0.6.27, but especially large or incompatible character packs can still cause instability.
+- Character Selector's in-game overlay was tested with multiple character packs for v0.7.0, but especially large or incompatible character packs can still cause instability.
 
 ## Tutorial: controls and how to play
 
@@ -227,7 +227,21 @@ Painting entries use a short white comfort fade. The optional True First Person 
 - Online co-op has not been comprehensively validated across every player count, mod combination, or network condition.
 - Large Lua mods, model packs, ROM hacks, and texture packs may exceed standalone memory/performance budgets or rely on desktop-only behavior.
 
-## v0.6.27 — Co-op and Keyboards Update
+## v0.7.0 — Chat and Fireball Update
+
+- Added a controller-friendly in-game Chat HUD with retained recent messages, an anchored on-screen keyboard, Enter-to-send behavior, and reliable B/Back navigation
+- Added a **Players** HUD directly below Chat, showing connected player names, locations, and ping; press B to return
+- Improved controller keyboard navigation and repeat behavior across addresses, ports, passwords, names, Chat, and other editable fields
+- Added a microphone button as a preview of future speech-to-text support; microphone transcription currently does not work and is still being developed
+- Added the native VR **Fire Flower** special move, including item-box and cork-box pickups, temporary Fire Mario colors and music, tracked right-hand charging, physical fireball throws, quick button shots, enemy impacts, and settings/cheats for music, spawning, and timer behavior
+- Fire Flowers are a VR-build-specific feature. They are not advertised or transferred as a public CoopNet mod and are disabled for CoopNet compatibility; use matching builds through Direct Connection for supported multiplayer testing
+- Expanded fireball collision coverage, including Chain Chomp and Mr. Blizzard. Mr. Blizzard explodes, disappears, and respawns after 30 seconds
+- Replaced the VR Act Select 3D stars with readable overlay stars, revealing completed missions and the next available mission in sequence
+- Continued high-resolution presentation fixes for the keyboard, main-menu logo, update text, Chat, and VR menu overlays
+
+## Previous Release Notes
+
+### v0.6.27 — Co-op and Keyboards Update
 
 - Added standalone public CoopNet lobby browsing and hosting for Quest and compatible Android players
 - Added an explicit **Public / Private** lobby visibility selector so an old private password cannot silently turn a public host private
@@ -236,8 +250,6 @@ Painting entries use a short white comfort fade. The optional True First Person 
 - Fixed the one-time CoopNet rules screen so **Accept Rules and Continue** is visible, controller-focused, and saved immediately
 - Improved high-resolution presentation for the VR keyboard, main-menu logo, and version/update text
 - Preserved private lobby, direct connection, ROM, save, settings, mod, DynOS, palette, and shader-cache behavior
-
-## Previous Release Notes
 
 ### v0.6.0 — Optimization and Mod Compatibility Update
 
@@ -261,7 +273,7 @@ Painting entries use a short white comfort fade. The optional True First Person 
 - **Co-op develops visual or gameplay problems:** disconnecting may restore normal behavior. If not, close and reopen the game.
 - **A gameplay mod breaks the server:** gameplay-changing mods can conflict with VR or multiplayer state and may require every affected player to disconnect or restart. Test without mods before reporting a base-game issue.
 - **Large lobby performance:** many connected players, actors, character packs, or synchronized gameplay mods can reduce standalone performance.
-- **Text chat:** standalone currently has no supported way to enter in-game text chat.
+- **Text chat:** open **Chat** from the pause menu and use the controller keyboard. The microphone button is visible but speech recognition currently does not work and is still being developed.
 - **Poor performance:** lower Render Scale, disable expensive mods, and restart the headset after long development/testing sessions.
 - **Controls feel wrong:** reset Controller Settings and Camera Settings, then recalibrate the selected facing source.
 - **Updating fails:** uninstalling removes private app data. Prefer installing the newer APK over the existing package and back up saves first.

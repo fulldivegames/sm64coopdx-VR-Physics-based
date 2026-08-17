@@ -505,15 +505,13 @@ void print_act_selector_strings(void) {
                 // Only the single next unlocked star can reach this branch.
                 gSPDisplayList(gDisplayListHead++, dl_menu_ia8_text_begin);
                 gDPSetEnvColor(gDisplayListHead++, 64, 150, 255, 235);
-                gDPSetTextureImage(
-                    gDisplayListHead++, G_IM_FMT_IA, G_IM_SIZ_8b,
-                    1, sVrBlankStarTexture
-                );
-                gDPLoadSync(gDisplayListHead++);
-                gDPLoadBlock(
-                    gDisplayListHead++, G_TX_LOADTILE,
-                    0, 0, 16 * 16 - 1,
-                    CALC_DXT(16, G_IM_SIZ_8b_BYTES)
+                gDPLoadTextureBlock(
+                    gDisplayListHead++, sVrBlankStarTexture,
+                    G_IM_FMT_IA, G_IM_SIZ_8b,
+                    16, 16, 0,
+                    G_TX_CLAMP, G_TX_CLAMP,
+                    4, 4,
+                    G_TX_NOLOD, G_TX_NOLOD
                 );
                 render_screen_texture_rectangle(
                     iconX, iconY, size, size, 16, 16
