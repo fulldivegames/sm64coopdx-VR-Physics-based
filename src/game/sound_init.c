@@ -31,6 +31,7 @@ static u8 sBackgroundMusicDisabled = FALSE;
 static u16 sCurrentMusic = MUSIC_NONE;
 static u16 sCurrentShellMusic = MUSIC_NONE;
 static u16 sCurrentCapMusic = MUSIC_NONE;
+static bool sCurrentCapMusicFading = false;
 static u8 sPlayingInfiniteStairs = FALSE;
 static s16 sSoundMenuModeToSoundMode[] = { SOUND_MODE_STEREO, SOUND_MODE_MONO, SOUND_MODE_HEADSET };
 // Only the 20th array element is used.
@@ -316,11 +317,17 @@ void stop_shell_music(void) {
  * Called from threads: thread5_game_loop
  */
 void play_cap_music(u16 seqArgs) {
+    // Collecting or extending two power-ups that share a sequence should
+    // continue the existing music rather than restarting the same track.
+    if (sCurrentCapMusic == seqArgs && !sCurrentCapMusicFading) {
+        return;
+    }
     play_music(SEQ_PLAYER_LEVEL, seqArgs, 0);
     if (sCurrentCapMusic != MUSIC_NONE && sCurrentCapMusic != seqArgs) {
         stop_background_music(sCurrentCapMusic);
     }
     sCurrentCapMusic = seqArgs;
+    sCurrentCapMusicFading = false;
 }
 
 /**
@@ -329,6 +336,7 @@ void play_cap_music(u16 seqArgs) {
 void fadeout_cap_music(void) {
     if (sCurrentCapMusic != MUSIC_NONE) {
         fadeout_background_music(sCurrentCapMusic, 600);
+        sCurrentCapMusicFading = true;
     }
 }
 
@@ -339,6 +347,7 @@ void stop_cap_music(void) {
     if (sCurrentCapMusic != MUSIC_NONE) {
         stop_background_music(sCurrentCapMusic);
         sCurrentCapMusic = MUSIC_NONE;
+        sCurrentCapMusicFading = false;
     }
 }
 
