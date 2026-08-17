@@ -7,11 +7,13 @@ void bhv_breakable_box_loop(void) {
 
     if (o->oTimer == 0)
         breakable_box_init();
-    if (cur_obj_was_attacked_or_ground_pounded() != 0 || o->oSyncDeath) {
-        const bool fireFlower = !o->oSyncDeath &&
+    const bool locallyBroken =
+        cur_obj_was_attacked_or_ground_pounded() != 0;
+    if (locallyBroken || o->oSyncDeath) {
+        const bool fireFlower = locallyBroken &&
             vr_special_moves_spawn_fire_flower_chance(
                 o,
-                nearest_mario_state_to_object(o),
+                &gMarioStates[0],
                 0.30f
             );
         obj_explode_and_spawn_coins(46.0f, fireFlower ? 0 : 1);

@@ -74,7 +74,7 @@ void bhv_jumping_box_loop(void) {
         const bool fireFlower =
             vr_special_moves_spawn_fire_flower_chance(
                 o,
-                nearest_mario_state_to_object(o),
+                &gMarioStates[0],
                 0.30f
             );
         create_sound_spawner(SOUND_GENERAL_BREAK_BOX);

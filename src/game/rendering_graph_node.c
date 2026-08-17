@@ -2635,8 +2635,10 @@ bool vr_get_controller_world_palm_from_state(
 
     const f32 gloveScale =
         (f32)clamp(configVrGloveSize, 25U, 250U) / 70.0f;
-    const f32 knuckleToPalm = 6.0f * gloveScale;
-    const f32 palmSurface = 12.0f * gloveScale;
+    // Move the center forward toward the fingertips and farther above the
+    // palm surface while preserving the controller's full orientation.
+    const f32 knuckleToPalm = -4.0f * gloveScale;
+    const f32 palmSurface = 16.0f * gloveScale;
     const f32 palmNormalSign =
         handIndex == VR_CONTROLLER_RIGHT ? -1.0f : 1.0f;
     Vec3f localOffset = {
