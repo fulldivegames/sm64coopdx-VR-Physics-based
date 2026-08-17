@@ -436,6 +436,31 @@ void djui_interactable_update(void) {
         }
     }
 
+    // Chat is modal. Handle B before either the virtual keyboard or a focused
+    // Back button can consume it, then remember the held state and return so
+    // this same press cannot leak into the newly recreated pause panel.
+    if (djui_chat_box_is_menu_mode() &&
+        (padButtons & PAD_BUTTON_B) &&
+        !(sLastInteractablePad.button & PAD_BUTTON_B)) {
+        djui_chat_box_close_menu();
+        sLastInteractablePad = gInteractablePad;
+        sLastMouseButtons = mouseButtons;
+        return;
+    }
+
+    // If another chat control ever takes focus, Down returns directly to the
+    // text field and restores the on-screen keyboard. This is also a recovery
+    // path for controller users after an interrupted menu/focus transition.
+    if (djui_chat_box_is_menu_mode() &&
+        !djui_inputbox_onscreen_keyboard_is_active() &&
+        (padButtons & D_JPAD) &&
+        !(sLastInteractablePad.button & D_JPAD)) {
+        djui_chat_box_focus_input();
+        sLastInteractablePad = gInteractablePad;
+        sLastMouseButtons = mouseButtons;
+        return;
+    }
+
     // Route gamepad navigation to the on-screen keyboard while preserving
     // the desktop window's independent physical-keyboard callbacks.
     if (djui_inputbox_onscreen_keyboard_is_active()) {

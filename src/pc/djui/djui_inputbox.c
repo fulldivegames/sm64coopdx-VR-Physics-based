@@ -114,7 +114,8 @@ static const struct DjuiKeyboardRow sKeyboardRows[] = {
 static struct DjuiInputbox* sKeyboardTarget;
 static u8 sKeyboardRow;
 static u8 sKeyboardColumn;
-static s8 sKeyboardLastAnalogDirection;
+static s8 sKeyboardHeldDirection;
+static u8 sKeyboardHeldFrames;
 static bool sKeyboardShift;
 static bool sKeyboardCaps;
 
@@ -130,17 +131,54 @@ static void djui_keyboard_move_horizontal(s8 direction) {
 }
 
 static void djui_keyboard_move_vertical(s8 direction) {
-    const u8 previousCount = sKeyboardRows[sKeyboardRow].count;
-    const u8 previousColumn = sKeyboardColumn;
+    const struct DjuiKeyboardRow* previousRow = &sKeyboardRows[sKeyboardRow];
+    f32 totalPreviousWidth = 0.0f;
+    f32 selectedStart = 0.0f;
+    for (u8 i = 0; i < previousRow->count; ++i) {
+        if (i == sKeyboardColumn) selectedStart = totalPreviousWidth;
+        totalPreviousWidth += previousRow->keys[i].width;
+    }
+    const f32 selectedCenter =
+        (selectedStart + previousRow->keys[sKeyboardColumn].width * 0.5f) /
+        totalPreviousWidth;
+
     const u8 rowCount = sizeof(sKeyboardRows) / sizeof(sKeyboardRows[0]);
     sKeyboardRow = (sKeyboardRow + rowCount + direction) % rowCount;
-    const u8 nextCount = sKeyboardRows[sKeyboardRow].count;
-    if (previousCount <= 1 || nextCount <= 1) {
-        sKeyboardColumn = 0;
-    } else {
-        sKeyboardColumn = (previousColumn * (nextCount - 1) +
-                           (previousCount - 1) / 2) / (previousCount - 1);
+
+    // Select the key whose physical horizontal span contains the prior key's
+    // center. This makes vertical navigation spatially predictable across
+    // unequal-width rows (for example B -> Space rather than B -> Left).
+    const struct DjuiKeyboardRow* nextRow = &sKeyboardRows[sKeyboardRow];
+    f32 totalNextWidth = 0.0f;
+    for (u8 i = 0; i < nextRow->count; ++i) {
+        totalNextWidth += nextRow->keys[i].width;
     }
+    f32 cursor = 0.0f;
+    u8 closest = 0;
+    f32 closestDistance = 1000.0f;
+    for (u8 i = 0; i < nextRow->count; ++i) {
+        const f32 start = cursor / totalNextWidth;
+        cursor += nextRow->keys[i].width;
+        const f32 end = cursor / totalNextWidth;
+        if (selectedCenter >= start && selectedCenter <= end) {
+            sKeyboardColumn = i;
+            return;
+        }
+        const f32 distance = selectedCenter < start
+            ? start - selectedCenter : selectedCenter - end;
+        if (distance < closestDistance) {
+            closestDistance = distance;
+            closest = i;
+        }
+    }
+    sKeyboardColumn = closest;
+}
+
+static void djui_keyboard_move_direction(s8 direction) {
+    if (direction == -1) djui_keyboard_move_horizontal(-1);
+    else if (direction == 1) djui_keyboard_move_horizontal(1);
+    else if (direction == -2) djui_keyboard_move_vertical(-1);
+    else if (direction == 2) djui_keyboard_move_vertical(1);
 }
 
 static void djui_keyboard_type_selected(void) {
@@ -157,40 +195,40 @@ static void djui_keyboard_type_selected(void) {
                 text[0] = uppercase ? toupper((unsigned char)text[0])
                                     : tolower((unsigned char)text[0]);
             }
-            djui_inputbox_on_text_input(&sKeyboardTarget->base, text);
+            djui_interactable_on_text_input(text);
             sKeyboardShift = false;
         } break;
         case DJUI_KEY_ESCAPE:
-            djui_inputbox_on_key_down(&sKeyboardTarget->base, SCANCODE_ESCAPE);
+            djui_interactable_on_key_down(SCANCODE_ESCAPE);
             break;
         case DJUI_KEY_BACKSPACE:
-            djui_inputbox_on_key_down(&sKeyboardTarget->base, SCANCODE_BACKSPACE);
+            djui_interactable_on_key_down(SCANCODE_BACKSPACE);
             break;
         case DJUI_KEY_TAB:
             snprintf(text, sizeof(text), "    ");
-            djui_inputbox_on_text_input(&sKeyboardTarget->base, text);
+            djui_interactable_on_text_input(text);
             break;
         case DJUI_KEY_CAPS:
             sKeyboardCaps = !sKeyboardCaps;
             break;
         case DJUI_KEY_ENTER:
-            djui_inputbox_on_key_down(&sKeyboardTarget->base, SCANCODE_ENTER);
+            djui_interactable_on_key_down(SCANCODE_ENTER);
             break;
         case DJUI_KEY_SHIFT:
             sKeyboardShift = !sKeyboardShift;
             break;
         case DJUI_KEY_SPACE:
             snprintf(text, sizeof(text), " ");
-            djui_inputbox_on_text_input(&sKeyboardTarget->base, text);
+            djui_interactable_on_text_input(text);
             break;
         case DJUI_KEY_LEFT:
-            djui_inputbox_on_key_down(&sKeyboardTarget->base, SCANCODE_LEFT);
+            djui_interactable_on_key_down(SCANCODE_LEFT);
             break;
         case DJUI_KEY_RIGHT:
-            djui_inputbox_on_key_down(&sKeyboardTarget->base, SCANCODE_RIGHT);
+            djui_interactable_on_key_down(SCANCODE_RIGHT);
             break;
         case DJUI_KEY_DELETE:
-            djui_inputbox_on_key_down(&sKeyboardTarget->base, SCANCODE_DELETE);
+            djui_interactable_on_key_down(SCANCODE_DELETE);
             break;
     }
 }
@@ -204,28 +242,42 @@ void djui_inputbox_onscreen_keyboard_update(OSContPad* pad, u16 pressed) {
     if (!djui_inputbox_onscreen_keyboard_is_active() || pad == NULL) return;
 
     if (pressed & PAD_BUTTON_B) {
-        djui_inputbox_on_key_down(&sKeyboardTarget->base, SCANCODE_ESCAPE);
+        djui_interactable_on_key_down(SCANCODE_ESCAPE);
         return;
     }
 
-    if (pressed & L_JPAD) djui_keyboard_move_horizontal(-1);
-    else if (pressed & R_JPAD) djui_keyboard_move_horizontal(1);
-    else if (pressed & U_JPAD) djui_keyboard_move_vertical(-1);
-    else if (pressed & D_JPAD) djui_keyboard_move_vertical(1);
-
-    s8 analogDirection = 0;
-    if (abs(pad->stick_x) > 45 && abs(pad->stick_x) > abs(pad->stick_y)) {
-        analogDirection = pad->stick_x < 0 ? -1 : 1;
+    s8 heldDirection = 0;
+    if ((pad->button & L_JPAD) != 0) heldDirection = -1;
+    else if ((pad->button & R_JPAD) != 0) heldDirection = 1;
+    else if ((pad->button & U_JPAD) != 0) heldDirection = -2;
+    else if ((pad->button & D_JPAD) != 0) heldDirection = 2;
+    else if (abs(pad->stick_x) > 45 &&
+             abs(pad->stick_x) > abs(pad->stick_y)) {
+        heldDirection = pad->stick_x < 0 ? -1 : 1;
     } else if (abs(pad->stick_y) > 45) {
-        analogDirection = pad->stick_y > 0 ? -2 : 2;
+        heldDirection = pad->stick_y > 0 ? -2 : 2;
     }
-    if (analogDirection != 0 && analogDirection != sKeyboardLastAnalogDirection) {
-        if (analogDirection == -1) djui_keyboard_move_horizontal(-1);
-        else if (analogDirection == 1) djui_keyboard_move_horizontal(1);
-        else if (analogDirection == -2) djui_keyboard_move_vertical(-1);
-        else if (analogDirection == 2) djui_keyboard_move_vertical(1);
+
+    if (heldDirection == 0) {
+        sKeyboardHeldDirection = 0;
+        sKeyboardHeldFrames = 0;
+    } else {
+        const bool changed = heldDirection != sKeyboardHeldDirection;
+        if (changed) {
+            sKeyboardHeldDirection = heldDirection;
+            sKeyboardHeldFrames = 0;
+        } else if (sKeyboardHeldFrames < 255) {
+            ++sKeyboardHeldFrames;
+        }
+        // Move immediately, then repeat after a short deliberate delay at a
+        // steady rate while the stick or D-pad remains held.
+        const bool repeat = changed ||
+            (sKeyboardHeldFrames >= 10 &&
+             ((sKeyboardHeldFrames - 10) % 3) == 0);
+        if (repeat) {
+            djui_keyboard_move_direction(heldDirection);
+        }
     }
-    sKeyboardLastAnalogDirection = analogDirection;
 
     if (pressed & PAD_BUTTON_A) djui_keyboard_type_selected();
 }
@@ -658,7 +710,8 @@ void djui_inputbox_on_focus_begin(struct DjuiBase* base) {
     sKeyboardTarget = (struct DjuiInputbox*)base;
     sKeyboardRow = 0;
     sKeyboardColumn = 1;
-    sKeyboardLastAnalogDirection = 0;
+    sKeyboardHeldDirection = 0;
+    sKeyboardHeldFrames = 0;
     sKeyboardShift = false;
     sKeyboardCaps = false;
     // Keep the native desktop text-input path active. Players can type on a
@@ -668,7 +721,8 @@ void djui_inputbox_on_focus_begin(struct DjuiBase* base) {
 
 void djui_inputbox_on_focus_end(UNUSED struct DjuiBase* base) {
     sKeyboardTarget = NULL;
-    sKeyboardLastAnalogDirection = 0;
+    sKeyboardHeldDirection = 0;
+    sKeyboardHeldFrames = 0;
     gWindowApi->stop_text_input();
 }
 
