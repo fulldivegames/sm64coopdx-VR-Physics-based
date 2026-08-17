@@ -114,7 +114,7 @@ Not every desktop mod is compatible with the standalone ARM64/OpenGL ES build. M
 Known compatibility notes:
 
 - Loading many mods at once can increase startup time and memory use.
-- Render96 currently has known performance and crash issues on standalone.
+- Render96 currently has known performance on standalone.
 - Character Selector's in-game overlay was tested with multiple character packs for v0.7.0, but especially large or incompatible character packs can still cause instability.
 
 ## Tutorial: controls and how to play
