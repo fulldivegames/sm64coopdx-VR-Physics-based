@@ -75,6 +75,10 @@ void djui_panel_pause_create(struct DjuiBase* caller) {
             djui_button_create(body, DLANG(PAUSE, SERVER_SETTINGS), DJUI_BUTTON_STYLE_NORMAL, djui_panel_client_server_settings_create);
         }
 
+        // Keep chat reachable on both desktop and standalone without relying
+        // on a physical keyboard or a platform-specific overlay.
+        djui_button_create(body, "Chat", DJUI_BUTTON_STYLE_NORMAL, djui_chat_box_open_menu);
+
         struct Mod* addedMods[MAX_HOOKED_MOD_MENU_ELEMENTS] = { 0 };
         int modCount = 0;
         for (int i = 0; i < gHookedModMenuElementsCount; i++) {

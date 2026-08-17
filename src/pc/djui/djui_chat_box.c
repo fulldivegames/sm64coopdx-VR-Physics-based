@@ -6,11 +6,15 @@
 #include "pc/chat_commands.h"
 #include "pc/configfile.h"
 #include "djui.h"
+#include "djui_hud_utils.h"
+#include "djui_panel.h"
+#include "djui_panel_pause.h"
 #include "engine/math_util.h"
 
 struct DjuiChatBox* gDjuiChatBox = NULL;
 bool gDjuiChatBoxFocus = false;
 static bool sDjuiChatBoxClearText = false;
+static bool sDjuiChatBoxMenuMode = false;
 
 #define MAX_HISTORY_SIZE 256
 
@@ -99,8 +103,31 @@ void sent_history_reset_navigation(ArrayList *arrayList) {
 
 bool djui_chat_box_render(struct DjuiBase* base) {
     struct DjuiChatBox* chatBox = (struct DjuiChatBox*)base;
+    if (sDjuiChatBoxMenuMode) {
+        // The normal pause panel may still exist in a cached VR HUD display
+        // list for one eye/frame after it is destroyed.  Draw a dedicated
+        // nearly-opaque modal backdrop here so it can never compete with the
+        // chat history or keyboard for readability.
+        djui_reset_hud_params();
+        djui_hud_set_resolution(RESOLUTION_DJUI);
+        djui_hud_set_color(0, 0, 0, 242);
+        const f32 screenWidth = djui_hud_get_screen_width();
+        const f32 screenHeight = djui_hud_get_screen_height();
+        djui_hud_render_rect(0.0f, 0.0f, screenWidth, screenHeight);
+        // The virtual keyboard is 286px tall and sits 18px above the bottom.
+        // Size Chat to the space that actually remains on this HUD canvas;
+        // Quest does not always expose the desktop's assumed 720px height.
+        const f32 keyboardTop = screenHeight - 304.0f;
+        const f32 availableHeight = clamp(keyboardTop - 18.0f,
+            120.0f, 380.0f);
+        djui_base_set_size(&chatBox->base, 760.0f, availableHeight);
+        djui_reset_hud_params();
+    }
     struct DjuiBase* ccBase = &chatBox->chatContainer->base;
-    djui_base_set_size(ccBase, 1.0f, chatBox->base.comp.height - 32 - 8);
+    const f32 topInset = sDjuiChatBoxMenuMode ? 44.0f : 0.0f;
+    djui_base_set_location(ccBase, 0.0f, topInset);
+    djui_base_set_size(ccBase, 1.0f,
+        chatBox->base.comp.height - 32.0f - 8.0f - topInset);
     if (chatBox->scrolling) {
         f32 yMax = chatBox->chatContainer->base.elem.height - chatBox->chatFlow->base.height.value;
         f32 target = chatBox->chatFlow->base.y.value + (chatBox->scrollY - chatBox->chatFlow->base.y.value) * (configSmoothScrolling ? 0.5f : 1.f);
@@ -109,7 +136,17 @@ bool djui_chat_box_render(struct DjuiBase* base) {
         if (target < yMax || 0.f < target) {
             chatBox->scrollY = clamp(target, yMax, 0.f);
         }
-    } else { chatBox->scrollY = chatBox->chatFlow->base.y.value; }
+    } else {
+        // The modal changes size after the HUD canvas is known. Re-anchor the
+        // flow to the newest message using the current container height every
+        // frame; retaining the pre-resize Y value could leave all history
+        // clipped below the visible Chat area until another message arrived.
+        const f32 newest = fminf(0.0f,
+            chatBox->chatContainer->base.elem.height -
+            chatBox->chatFlow->base.height.value);
+        chatBox->chatFlow->base.y.value = newest;
+        chatBox->scrollY = newest;
+    }
 
     if (sDjuiChatBoxClearText) {
         sDjuiChatBoxClearText = false;
@@ -154,14 +191,72 @@ static void djui_chat_box_input_enter(struct DjuiInputbox* chatInput) {
 
     djui_inputbox_set_text(chatInput, "");
     djui_inputbox_select_all(chatInput);
-    if (gDjuiChatBoxFocus) { djui_chat_box_toggle(); }
+    if (gDjuiChatBoxFocus) {
+        if (sDjuiChatBoxMenuMode) {
+            // The dedicated menu remains open for conversation. Enter sends,
+            // clears the field, and immediately returns focus to the keyboard.
+            djui_interactable_set_input_focus(&chatInput->base);
+        } else {
+            djui_chat_box_toggle();
+        }
+    }
+}
+
+void djui_chat_box_close_menu(void) {
+    if (!sDjuiChatBoxMenuMode) return;
+    sDjuiChatBoxMenuMode = false;
+    // Tear down the keyboard focus before recreating the pause panel.  Leaving
+    // the input box focused made the keyboard consume every subsequent pad
+    // event even though it was no longer visible.
+    djui_interactable_set_input_focus(NULL);
+    gDjuiChatBoxFocus = false;
+    djui_chat_box_set_focus_style();
+    gInteractableOverridePad = false;
+    djui_base_set_size(&gDjuiChatBox->base, 600.0f, 400.0f);
+    djui_base_set_alignment(&gDjuiChatBox->base,
+        DJUI_HALIGN_LEFT, DJUI_VALIGN_BOTTOM);
+    djui_base_set_location(&gDjuiChatBox->base, 0.0f, 0.0f);
+    if (gDjuiChatBox != NULL && gDjuiChatBox->backButton != NULL) {
+        djui_base_set_visible(&gDjuiChatBox->backButton->base, false);
+        djui_base_set_enabled(&gDjuiChatBox->backButton->base, false);
+    }
+    // Normalize any partial/stale panel state before restoring Pause. This is
+    // harmless when Chat correctly destroyed it on entry and prevents an
+    // interrupted transition from leaving a visible but non-interactive menu.
+    djui_panel_shutdown();
+    djui_panel_pause_create(NULL);
+}
+
+bool djui_chat_box_is_menu_mode(void) {
+    return sDjuiChatBoxMenuMode;
+}
+
+void djui_chat_box_focus_back_button(void) {
+    if (!sDjuiChatBoxMenuMode || gDjuiChatBox == NULL ||
+        gDjuiChatBox->backButton == NULL) {
+        return;
+    }
+    djui_interactable_set_input_focus(&gDjuiChatBox->backButton->base);
+}
+
+void djui_chat_box_focus_input(void) {
+    if (!sDjuiChatBoxMenuMode || gDjuiChatBox == NULL ||
+        gDjuiChatBox->chatInput == NULL) {
+        return;
+    }
+    djui_interactable_set_input_focus(&gDjuiChatBox->chatInput->base);
+}
+
+static void djui_chat_box_back_clicked(UNUSED struct DjuiBase* caller) {
+    djui_chat_box_close_menu();
 }
 
 static void djui_chat_box_input_escape(struct DjuiInputbox* chatInput) {
     djui_interactable_set_input_focus(NULL);
     djui_inputbox_set_text(chatInput, "");
     djui_inputbox_select_all(chatInput);
-    if (gDjuiChatBoxFocus) { djui_chat_box_toggle(); }
+    if (sDjuiChatBoxMenuMode) djui_chat_box_close_menu();
+    else if (gDjuiChatBoxFocus) djui_chat_box_toggle();
 }
 
 static char* get_main_command_from_input(const char* input) {
@@ -520,6 +615,33 @@ void djui_chat_box_toggle(void) {
     gDjuiChatBox->chatFlow->base.y.value = gDjuiChatBox->chatContainer->base.elem.height - gDjuiChatBox->chatFlow->base.height.value;
 }
 
+void djui_chat_box_open_menu(UNUSED struct DjuiBase* caller) {
+    if (gDjuiChatBox == NULL) return;
+    djui_panel_shutdown();
+    sDjuiChatBoxMenuMode = true;
+    // Keep the message input entirely above the 286px on-screen keyboard.
+    // At the fixed 720p DJUI canvas this leaves an explicit gap instead of
+    // allowing the keyboard to cover the input field.
+    djui_base_set_size(&gDjuiChatBox->base, 760.0f, 380.0f);
+    djui_base_set_alignment(&gDjuiChatBox->base,
+        DJUI_HALIGN_CENTER, DJUI_VALIGN_TOP);
+    djui_base_set_location(&gDjuiChatBox->base, 0.0f, 18.0f);
+    if (gDjuiChatBox->backButton != NULL) {
+        djui_base_set_visible(&gDjuiChatBox->backButton->base, true);
+        djui_base_set_enabled(&gDjuiChatBox->backButton->base, true);
+    }
+    gInteractableOverridePad = true;
+    if (!gDjuiChatBoxFocus) djui_chat_box_toggle();
+    // Always enter at the newest messages. Older messages remain in the flow
+    // for the session and can be scrolled, while the viewport naturally shows
+    // roughly the latest three to five lines on the Quest chat HUD.
+    gDjuiChatBox->scrolling = false;
+    gDjuiChatBox->scrollY =
+        gDjuiChatBox->chatContainer->base.elem.height -
+        gDjuiChatBox->chatFlow->base.height.value;
+    gDjuiChatBox->chatFlow->base.y.value = gDjuiChatBox->scrollY;
+}
+
 struct DjuiChatBox* djui_chat_box_create(void) {
     if (gDjuiChatBox != NULL) {
         djui_base_destroy(&gDjuiChatBox->base);
@@ -566,6 +688,18 @@ struct DjuiChatBox* djui_chat_box_create(void) {
     djui_interactable_hook_text_editing(&chatInput->base, djui_chat_box_input_on_text_editing);
     djui_interactable_hook_scroll(&chatInput->base, djui_chat_box_input_on_scroll);
     chatBox->chatInput = chatInput;
+
+    struct DjuiButton* backButton = djui_button_create(base, "Back",
+        DJUI_BUTTON_STYLE_BACK, djui_chat_box_back_clicked);
+    djui_base_set_size_type(&backButton->base,
+        DJUI_SVT_ABSOLUTE, DJUI_SVT_ABSOLUTE);
+    djui_base_set_size(&backButton->base, 120.0f, 36.0f);
+    djui_base_set_alignment(&backButton->base,
+        DJUI_HALIGN_LEFT, DJUI_VALIGN_TOP);
+    djui_base_set_location(&backButton->base, 0.0f, 0.0f);
+    djui_base_set_visible(&backButton->base, false);
+    djui_base_set_enabled(&backButton->base, false);
+    chatBox->backButton = backButton;
 
     gDjuiChatBox = chatBox;
     djui_chat_box_set_focus_style();
