@@ -22,6 +22,7 @@
 #include "star_select.h"
 #include "prevent_bss_reordering.h"
 #include "pc/network/network.h"
+#include "pc/vr/vr.h"
 #include "pc/lua/utils/smlua_misc_utils.h"
 #include "engine/math_util.h"
 #include "game/print.h"
@@ -65,6 +66,32 @@ s8 sSelectableStarIndex = 0;
 // Act Selector menu timer that keeps counting until you choose an act.
 static s32 sActSelectorMenuTimer = 0;
 
+// VR renders the act stars into the existing flat menu overlay. Keeping this
+// state local to the selector preserves the original 3D presentation in flat
+// mode and prevents the hidden selector objects from leaking between screens.
+static bool sVrActSelectorOverlay = false;
+
+// A clean, blank IA8 star used for the next unlocked mission. IA8 lets the
+// overlay tint the same mask blue without introducing another ROM asset.
+ALIGNED8 static const Texture sVrBlankStarTexture[16 * 16] = {
+    0,0,0,0,0,0,0,128,128,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,255,255,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,128,255,255,128,0,0,0,0,0,0,
+    0,0,0,0,0,0,255,255,255,255,0,0,0,0,0,0,
+    0,128,128,128,128,255,255,255,255,255,255,128,128,128,128,0,
+    0,128,255,255,255,255,255,255,255,255,255,255,255,255,128,0,
+    0,0,128,255,255,255,255,255,255,255,255,255,255,128,0,0,
+    0,0,0,128,255,255,255,255,255,255,255,255,128,0,0,0,
+    0,0,0,0,255,255,255,255,255,255,255,255,0,0,0,0,
+    0,0,0,128,255,255,255,255,255,255,255,255,128,0,0,0,
+    0,0,0,255,255,255,255,128,128,255,255,255,255,0,0,0,
+    0,0,128,255,255,255,128,0,0,128,255,255,255,128,0,0,
+    0,0,255,255,255,128,0,0,0,0,128,255,255,255,0,0,
+    0,128,255,255,128,0,0,0,0,0,0,128,255,255,128,0,
+    0,128,255,128,0,0,0,0,0,0,0,0,128,255,128,0,
+    0,0,128,0,0,0,0,0,0,0,0,0,0,128,0,0,
+};
+
 /**
  * Act Selector Star Type Loop Action
  * Defines a select type for a star in the act selector.
@@ -102,6 +129,9 @@ void bhv_act_selector_star_type_loop(void) {
  * Renders the 100 coin star with an special star selector type.
  */
 void render_100_coin_star(u8 stars) {
+    if (sVrActSelectorOverlay) {
+        return;
+    }
     if ((stars & (1 << 6))) {
         // If the 100 coin star has been collected, create a new star selector next to the coin score.
         sStarSelectorModels[6] = spawn_object_abs_with_rot(gCurrentObject, 0, MODEL_STAR,
@@ -124,6 +154,24 @@ void bhv_act_selector_init(void) {
     s16 i = 0;
     s32 selectorModelIDs[10] = { 0 };
     u8 stars = save_file_get_star_flags(gCurrSaveFileNum - 1, gCurrCourseNum - 1);
+
+    sVrActSelectorOverlay = vr_is_active();
+    if (sVrActSelectorOverlay) {
+        // Reveal only the uninterrupted completed sequence and the next
+        // mission. Later stars remain hidden even if a mod/save obtained one
+        // out of order, matching the requested one-at-a-time progression.
+        sVisibleStars = 0;
+        while (sVisibleStars < 6 &&
+               (stars & (1 << sVisibleStars)) != 0) {
+            sVisibleStars++;
+        }
+        if (sVisibleStars < 6) {
+            sVisibleStars++;
+        }
+        sInitSelectedActNum = max(sVisibleStars, 1);
+        sSelectableStarIndex = max(sVisibleStars - 1, 0);
+        return;
+    }
 
     sVisibleStars = 0;
     while (i != sObtainedStars) {
@@ -184,6 +232,17 @@ void bhv_act_selector_loop(void) {
     s8 i;
     u8 starIndexCounter;
     u8 stars = save_file_get_star_flags(gCurrSaveFileNum - 1, gCurrCourseNum - 1);
+
+    if (sVrActSelectorOverlay) {
+        handle_menu_scrolling(
+            MENU_SCROLL_HORIZONTAL,
+            &sSelectableStarIndex,
+            0,
+            max(sVisibleStars - 1, 0)
+        );
+        sSelectedActIndex = sSelectableStarIndex;
+        return;
+    }
 
     if (sObtainedStars != 6) {
         // Sometimes, stars are not selectable even if they appear on the screen.
@@ -410,6 +469,42 @@ void print_act_selector_strings(void) {
     }
 
     gSPDisplayList(gDisplayListHead++, dl_menu_ia8_text_end);
+
+    if (sVrActSelectorOverlay && sVisibleStars > 0) {
+        void** hudLut = segmented_to_virtual(main_hud_lut);
+        const u8 stars = save_file_get_star_flags(
+            gCurrSaveFileNum - 1,
+            gCurrCourseNum - 1
+        );
+        for (i = 0; i < sVisibleStars; i++) {
+#ifdef VERSION_EU
+            const s16 centerX = 143 - sVisibleStars * 15 + (i + 1) * 30 + 4;
+#else
+            const s16 centerX = 139 - sVisibleStars * 17 + (i + 1) * 34 + 4;
+#endif
+            const bool selected = sSelectedActIndex == i;
+            const s16 size = selected ? 28 : 22;
+            const s16 iconX = centerX - size / 2;
+            const s16 iconY = 75;
+            if ((stars & (1 << i)) != 0) {
+                // The collected state uses SM64's real colored HUD star.
+                gDPSetEnvColor(gDisplayListHead++, 255, 255, 255, 255);
+                render_hud_icon(
+                    NULL, hudLut[44], G_IM_FMT_RGBA, G_IM_SIZ_16b,
+                    16, 16, iconX, iconY, size, size,
+                    0, 0, 16, 16
+                );
+            } else {
+                // Only the single next unlocked star can reach this branch.
+                gDPSetEnvColor(gDisplayListHead++, 64, 150, 255, 235);
+                render_hud_icon(
+                    NULL, sVrBlankStarTexture, G_IM_FMT_IA, G_IM_SIZ_8b,
+                    16, 16, iconX, iconY, size, size,
+                    0, 0, 16, 16
+                );
+            }
+        }
+    }
 }
 
 /**
@@ -440,6 +535,7 @@ s32 lvl_init_act_selector_values_and_stars(UNUSED s32 arg, UNUSED s32 unused) {
     sActSelectorMenuTimer = 0;
     sSelectedActIndex = 0;
     sSelectableStarIndex = 0;
+    sVrActSelectorOverlay = false;
     sObtainedStars = save_file_get_course_star_count(gCurrSaveFileNum - 1, gCurrCourseNum - 1);
 
     // Don't count 100 coin star

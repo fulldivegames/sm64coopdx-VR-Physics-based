@@ -4939,11 +4939,23 @@ static bool vr_special_moves_projectile_hits_enemy(
             struct Object* target = (struct Object*)node;
             const u32 enemyTypes = INTERACT_DAMAGE | INTERACT_BULLY |
                 INTERACT_BOUNCE_TOP | INTERACT_BOUNCE_TOP2 |
-                INTERACT_KOOPA | INTERACT_SPINY_WALKING;
+                INTERACT_KOOPA | INTERACT_SPINY_WALKING |
+                INTERACT_MR_BLIZZARD | INTERACT_CLAM_OR_BUBBA;
+            const bool protectedBoss =
+                obj_has_behavior(target, bhvKingBobomb) ||
+                obj_has_behavior(target, bhvBowser) ||
+                obj_has_behavior(target, bhvBowserBodyAnchor) ||
+                obj_has_behavior(target, bhvBowserTailAnchor);
+            const bool grabbableEnemy =
+                obj_has_behavior(target, bhvBobomb) ||
+                obj_has_behavior(target, bhvChuckya) ||
+                obj_has_behavior(target, bhvHeaveHo);
             if (target == projectile || target == mario->marioObj ||
+                protectedBoss ||
                 (target->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
                 target->oIntangibleTimer != 0 ||
-                (target->oInteractType & enemyTypes) == 0) {
+                ((target->oInteractType & enemyTypes) == 0 &&
+                 !grabbableEnemy)) {
                 continue;
             }
             const f32 dx = projectile->oPosX - target->oPosX;
@@ -4959,6 +4971,10 @@ static bool vr_special_moves_projectile_hits_enemy(
 
             mario->interactObj = target;
             attack_object(mario, target, INT_PUNCH);
+            // Match a normal Bob-omb blast's damage status. This preserves
+            // each enemy's native reaction/death logic instead of inventing
+            // Fire Flower-specific health behavior.
+            target->oInteractStatus |= INT_STATUS_TOUCHED_BOB_OMB;
             struct Object* explosion = spawn_object(
                 projectile,
                 MODEL_EXPLOSION,
