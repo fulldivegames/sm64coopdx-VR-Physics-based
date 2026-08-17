@@ -39,6 +39,7 @@
 #define VR_HAND_COLLISION_RADIUS_MAX 24.0f
 #define VR_HAND_COLLISION_RELEASE_MARGIN 3.0f
 #define VR_HAND_COLLISION_MAX_SWEEP 300.0f
+#define VR_HAND_COLLISION_MAX_HEADSET_DISTANCE 125.0f
 #define VR_FIST_MAX_SWEEP_DISTANCE 150.0f
 #define VR_PUNCH_SOUND_COMBO_RESET_FRAMES 18
 #define VR_MOTION_DIVE_PAIR_WINDOW_FRAMES 5
@@ -479,6 +480,31 @@ static bool vr_hand_interaction_resolve_hand_collision(
         position[1] = ceilingHeight - radius;
         collisionSurface = ceiling;
         collided = true;
+    }
+
+    // Never let a collision plane leave a glove behind after the player
+    // walks away. Once the constrained pose is roughly four feet from the
+    // HMD, prefer the live controller pose even if that reset crosses the
+    // surface. A nearby contact can be established again on the next frame.
+    if (collided || state->constraintActive) {
+        Vec3f headsetPosition;
+        if (vr_get_stabilized_headset_world_position(
+                headsetPosition,
+                false
+            )) {
+            const f32 dx = position[0] - headsetPosition[0];
+            const f32 dy = position[1] - headsetPosition[1];
+            const f32 dz = position[2] - headsetPosition[2];
+            if (dx * dx + dy * dy + dz * dz >
+                VR_HAND_COLLISION_MAX_HEADSET_DISTANCE *
+                    VR_HAND_COLLISION_MAX_HEADSET_DISTANCE) {
+                vec3f_copy(position, rawPosition);
+                state->constraintActive = false;
+                state->constraintObject = NULL;
+                collisionSurface = NULL;
+                collided = false;
+            }
+        }
     }
 
     if (collisionSurface != NULL) {
@@ -988,6 +1014,35 @@ bool vr_hand_interaction_get_held_object_position(
     return true;
 }
 
+static void vr_special_moves_offset_fireball_anchor(Vec3f position) {
+    Vec3f headsetPosition;
+    if (position == NULL ||
+        !vr_get_stabilized_headset_world_position(
+            headsetPosition,
+            false
+        )) {
+        return;
+    }
+
+    // The fist helper targets the glove's knuckles. Pull the formed fireball
+    // a short distance back toward the HMD so it rests over the palm instead
+    // of intersecting the fingers. This remains stable regardless of the
+    // player's controller calibration or current facing direction.
+    Vec3f towardHead = {
+        headsetPosition[0] - position[0],
+        headsetPosition[1] - position[1],
+        headsetPosition[2] - position[2]
+    };
+    const f32 distance = vec3f_length(towardHead);
+    if (distance <= 0.001f) {
+        return;
+    }
+    const f32 scale = 8.0f / distance;
+    for (u32 axis = 0; axis < 3; axis++) {
+        position[axis] += towardHead[axis] * scale;
+    }
+}
+
 bool vr_hand_interaction_get_late_held_object_position(
     struct Object* object,
     Vec3f position
@@ -1014,6 +1069,7 @@ bool vr_hand_interaction_get_late_held_object_position(
             VR_CONTROLLER_RIGHT,
             handPosition
         );
+        vr_special_moves_offset_fireball_anchor(handPosition);
         vec3f_copy(position, handPosition);
         return true;
     }
@@ -4153,7 +4209,9 @@ static void vr_hand_interaction_collect_coins_at_headset(
     if (mario == NULL ||
         gObjectLists == NULL ||
         (sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_NONE &&
-         (mario->action & ACT_FLAG_SWIMMING) == 0)) {
+         (mario->action & ACT_FLAG_SWIMMING) == 0 &&
+         mario->action != ACT_FLYING &&
+         mario->action != ACT_FLYING_TRIPLE_JUMP)) {
         return;
     }
 
@@ -4170,10 +4228,10 @@ static void vr_hand_interaction_collect_coins_at_headset(
     const f32 headsetTop = headsetBottom +
         VR_HEADSET_INTERACTION_HEIGHT;
 
-      // Object collision is normally generated before Mario's late-frame HMD
-      // collider update. Scan only while physically climbing or swimming,
-      // giving the headset a small, safe collectible extension without moving
-    // Mario's environment collider or triggering enemies, hazards, and warps.
+    // Object collision is normally generated before Mario's late-frame HMD
+    // collider update. Scan while physically climbing, swimming, or flying,
+    // and only for coins/1-Ups, giving the headset a small extension without
+    // moving Mario's environment collider or triggering hazards and warps.
     for (s32 listIndex = 0;
          listIndex < NUM_OBJ_LISTS;
          listIndex++) {
@@ -4586,10 +4644,11 @@ static bool vr_special_moves_spawn_pickup(
     return false;
 }
 
-bool vr_special_moves_spawn_fire_flower_chance(
+static bool vr_special_moves_spawn_fire_flower_with_chance(
     struct Object* box,
     struct MarioState* owner,
-    f32 chance
+    f32 chance,
+    f32 velocityY
 ) {
     if (!configVrSpecialFireFlower || !vr_is_active() ||
         !vr_special_moves_fire_flower_online_allowed() || box == NULL ||
@@ -4598,11 +4657,27 @@ bool vr_special_moves_spawn_fire_flower_chance(
         return false;
     }
     return vr_special_moves_spawn_pickup(
-        box,
+        owner->marioObj,
         box->oPosX,
         box->oPosY + 65.0f,
         box->oPosZ,
-        VR_FIRE_FLOWER_SPAWN_VELOCITY
+        velocityY
+    );
+}
+
+bool vr_special_moves_spawn_fire_flower_chance(
+    struct Object* box,
+    struct MarioState* owner,
+    f32 chance
+) {
+    // Breakable/carryable boxes deactivate immediately. Keep their flower
+    // attached to Mario's persistent object and pop it clearly above the
+    // debris before gravity settles it on the floor.
+    return vr_special_moves_spawn_fire_flower_with_chance(
+        box,
+        owner,
+        chance,
+        20.0f
     );
 }
 
@@ -4610,10 +4685,11 @@ bool vr_special_moves_spawn_fire_flower(
     struct Object* box,
     struct MarioState* owner
 ) {
-    return vr_special_moves_spawn_fire_flower_chance(
+    return vr_special_moves_spawn_fire_flower_with_chance(
         box,
         owner,
-        0.5f
+        0.5f,
+        VR_FIRE_FLOWER_SPAWN_VELOCITY
     );
 }
 
@@ -5019,6 +5095,9 @@ static bool vr_special_moves_update_fireball_hand(
             }
         }
         if (sVrFireballChargeObject != NULL) {
+            Vec3f fireballPosition;
+            vec3f_copy(fireballPosition, position);
+            vr_special_moves_offset_fireball_anchor(fireballPosition);
             const f32 progress = clamp(
                 (f32)(sVrFireballChargeFrames -
                     VR_FIREBALL_FORM_DELAY_FRAMES) /
@@ -5028,7 +5107,7 @@ static bool vr_special_moves_update_fireball_hand(
             );
             for (u32 axis = 0; axis < 3; axis++) {
                 (&sVrFireballChargeObject->oPosX)[axis] =
-                    position[axis];
+                    fireballPosition[axis];
             }
             sVrFireballChargeObject->oAnimState =
                 (s32)((gGlobalTimer >> 1) & 7U);
@@ -5039,6 +5118,11 @@ static bool vr_special_moves_update_fireball_hand(
                 0.05f + progress * 0.55f
             );
             obj_update_gfx_pos_and_angle(sVrFireballChargeObject);
+            // A forming fireball is a controller attachment, not a simulated
+            // moving object. Do not blend its root toward the prior 30 Hz
+            // sample; the render-time late latch supplies the newest pose.
+            sVrFireballChargeObject->header.gfx.skipInterpolationTimestamp =
+                gGlobalTimer;
 
             const f32 speedSq = velocity[0] * velocity[0] +
                 velocity[1] * velocity[1] + velocity[2] * velocity[2];
