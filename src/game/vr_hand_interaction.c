@@ -5066,7 +5066,9 @@ static bool vr_special_moves_update_fireball_hand(
                     state,
                     fireballPosition
                 )) {
-                vec3f_copy(fireballPosition, position);
+                for (u32 axis = 0; axis < 3; axis++) {
+                    fireballPosition[axis] = position[axis];
+                }
             }
             const f32 progress = clamp(
                 (f32)(sVrFireballChargeFrames -
