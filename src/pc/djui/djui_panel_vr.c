@@ -1366,7 +1366,7 @@ static void djui_panel_vr_special_moves_create(
     {
         djui_checkbox_create(
             body,
-            "Fire Flower (50% Item Boxes / 25% Breakable Boxes)",
+            "Fire Flower (50% Item Boxes / 30% Breakable Boxes)",
             &configVrSpecialFireFlower,
             NULL
         );

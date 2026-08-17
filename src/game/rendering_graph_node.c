@@ -2630,6 +2630,59 @@ bool vr_get_controller_world_fist_from_state(
     return true;
 }
 
+bool vr_get_controller_world_palm_from_state(
+    u32 handIndex,
+    const struct VrControllerState* state,
+    Vec3f worldPosition
+) {
+    Vec3f rawFist;
+    if (!vr_get_controller_world_fist_raw_from_state(
+            handIndex,
+            state,
+            rawFist,
+            NULL
+        )) {
+        return false;
+    }
+
+    const float* rotation = state->aimPoseValid
+        ? state->aimRotation
+        : state->gripRotation;
+    Vec3f right = { 1.0f, 0.0f, 0.0f };
+    Vec3f backward = { 0.0f, 0.0f, 1.0f };
+    vr_rotate_pose_vector(rotation, right, right);
+    vr_rotate_pose_vector(rotation, backward, backward);
+
+    const f32 gloveScale =
+        (f32)clamp(configVrGloveSize, 25U, 250U) / 70.0f;
+    const f32 knuckleToPalm = 6.0f * gloveScale;
+    const f32 palmSurface = 12.0f * gloveScale;
+    const f32 palmNormalSign =
+        handIndex == VR_CONTROLLER_RIGHT ? -1.0f : 1.0f;
+    Vec3f localOffset = {
+        backward[0] * knuckleToPalm +
+            right[0] * palmSurface * palmNormalSign,
+        backward[1] * knuckleToPalm +
+            right[1] * palmSurface * palmNormalSign,
+        backward[2] * knuckleToPalm +
+            right[2] * palmSurface * palmNormalSign
+    };
+
+    Vec3f constrainedFist;
+    vec3f_copy(constrainedFist, rawFist);
+    vr_hand_interaction_apply_hand_collision_position(
+        handIndex,
+        constrainedFist
+    );
+    for (u32 axis = 0; axis < 3; axis++) {
+        worldPosition[axis] = constrainedFist[axis] +
+            localOffset[0] * sVrControllerCameraInverse[0][axis] +
+            localOffset[1] * sVrControllerCameraInverse[1][axis] +
+            localOffset[2] * sVrControllerCameraInverse[2][axis];
+    }
+    return true;
+}
+
 bool vr_get_controller_climb_fist(
     const Vec3f worldPosition,
     Vec3f climbPosition

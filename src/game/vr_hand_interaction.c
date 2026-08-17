@@ -1032,35 +1032,6 @@ bool vr_hand_interaction_get_held_object_position(
     return true;
 }
 
-static void vr_special_moves_offset_fireball_anchor(Vec3f position) {
-    Vec3f headsetPosition;
-    if (position == NULL ||
-        !vr_get_stabilized_headset_world_position(
-            headsetPosition,
-            false
-        )) {
-        return;
-    }
-
-    // The fist helper targets the glove's knuckles. Pull the formed fireball
-    // a short distance back toward the HMD so it rests over the palm instead
-    // of intersecting the fingers. This remains stable regardless of the
-    // player's controller calibration or current facing direction.
-    Vec3f towardHead = {
-        headsetPosition[0] - position[0],
-        headsetPosition[1] - position[1],
-        headsetPosition[2] - position[2]
-    };
-    const f32 distance = vec3f_length(towardHead);
-    if (distance <= 0.001f) {
-        return;
-    }
-    const f32 scale = 8.0f / distance;
-    for (u32 axis = 0; axis < 3; axis++) {
-        position[axis] += towardHead[axis] * scale;
-    }
-}
-
 bool vr_hand_interaction_get_late_held_object_position(
     struct Object* object,
     Vec3f position
@@ -1074,20 +1045,14 @@ bool vr_hand_interaction_get_late_held_object_position(
     Vec3f handPosition;
     if (object == sVrFireballChargeObject) {
         if (!vr_get_controller_state(VR_CONTROLLER_RIGHT, &state) ||
-            !vr_get_controller_world_fist_raw_from_state(
+            !vr_get_controller_world_palm_from_state(
                 VR_CONTROLLER_RIGHT,
                 &state,
-                handPosition,
-                NULL
+                handPosition
             )) {
             vec3f_copy(position, &object->oPosX);
             return true;
         }
-        vr_hand_interaction_apply_hand_collision_position(
-            VR_CONTROLLER_RIGHT,
-            handPosition
-        );
-        vr_special_moves_offset_fireball_anchor(handPosition);
         vec3f_copy(position, handPosition);
         return true;
     }
@@ -5028,7 +4993,7 @@ static bool vr_special_moves_try_quick_fireball(
     projectile->oOpacity = 255;
     projectile->oAnimState =
         (s32)((gGlobalTimer >> 1) & 7U);
-    obj_scale(projectile, 0.45f);
+    obj_scale(projectile, 0.9f);
     obj_update_gfx_pos_and_angle(projectile);
 
     vec3f_set(
@@ -5122,8 +5087,13 @@ static bool vr_special_moves_update_fireball_hand(
         }
         if (sVrFireballChargeObject != NULL) {
             Vec3f fireballPosition;
-            vec3f_copy(fireballPosition, position);
-            vr_special_moves_offset_fireball_anchor(fireballPosition);
+            if (!vr_get_controller_world_palm_from_state(
+                    VR_CONTROLLER_RIGHT,
+                    state,
+                    fireballPosition
+                )) {
+                vec3f_copy(fireballPosition, position);
+            }
             const f32 progress = clamp(
                 (f32)(sVrFireballChargeFrames -
                     VR_FIREBALL_FORM_DELAY_FRAMES) /
@@ -5141,7 +5111,7 @@ static bool vr_special_moves_update_fireball_hand(
                 (s32)(51.0f + progress * 204.0f);
             obj_scale(
                 sVrFireballChargeObject,
-                0.05f + progress * 0.55f
+                0.1f + progress * 1.1f
             );
             obj_update_gfx_pos_and_angle(sVrFireballChargeObject);
             // A forming fireball is a controller attachment, not a simulated
@@ -5198,7 +5168,7 @@ static bool vr_special_moves_update_fireball_hand(
                     VR_THROW_VELOCITY_SCALE;
             }
             sVrFireballChargeObject->oOpacity = 255;
-            obj_scale(sVrFireballChargeObject, 0.6f);
+            obj_scale(sVrFireballChargeObject, 1.2f);
             sVrFireballProjectiles[slot] = sVrFireballChargeObject;
             sVrFireballProjectileLifetime[slot] = 0;
             play_sound(
