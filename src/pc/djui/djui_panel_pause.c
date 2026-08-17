@@ -9,6 +9,7 @@
 #include "djui_panel_menu.h"
 #include "djui_panel_confirm.h"
 #include "djui_panel_mod_menu.h"
+#include "djui_panel_playerlist.h"
 #include "pc/pc_main.h"
 #include "pc/network/network.h"
 #include "pc/lua/smlua_hooks.h"
@@ -78,6 +79,7 @@ void djui_panel_pause_create(struct DjuiBase* caller) {
         // Keep chat reachable on both desktop and standalone without relying
         // on a physical keyboard or a platform-specific overlay.
         djui_button_create(body, "Chat", DJUI_BUTTON_STYLE_NORMAL, djui_chat_box_open_menu);
+        djui_button_create(body, "Players", DJUI_BUTTON_STYLE_NORMAL, djui_panel_playerlist_menu_create);
 
         struct Mod* addedMods[MAX_HOOKED_MOD_MENU_ELEMENTS] = { 0 };
         int modCount = 0;

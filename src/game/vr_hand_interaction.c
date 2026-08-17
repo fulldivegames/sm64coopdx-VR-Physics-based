@@ -4972,6 +4972,23 @@ static bool vr_special_moves_projectile_hits_enemy(
             // each enemy's native reaction/death logic instead of inventing
             // Fire Flower-specific health behavior.
             target->oInteractStatus |= INT_STATUS_TOUCHED_BOB_OMB;
+            if (obj_has_behavior(target, bhvMrBlizzard)) {
+                // Jumping Mr. Blizzards do not consume the generic Bob-omb
+                // status used by most enemies. Give this enemy an explicit
+                // one-hit Fire Flower defeat. Its behavior keeps it defeated
+                // for 30 seconds before restoring the correct snowman type.
+                if (target->oNumLootCoins > 0) {
+                    obj_spawn_loot_yellow_coins(
+                        target,
+                        target->oNumLootCoins,
+                        20.0f
+                    );
+                }
+                target->oAction = MR_BLIZZARD_ACT_DEATH;
+                target->prevObj = target->oMrBlizzardHeldObj = NULL;
+                target->oMrBlizzardTimer = 30 * 30;
+                network_send_object(target);
+            }
             struct Object* explosion = spawn_object(
                 projectile,
                 MODEL_EXPLOSION,
