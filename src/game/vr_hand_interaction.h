@@ -68,6 +68,11 @@ bool vr_special_moves_spawn_fire_flower(
     struct Object* box,
     struct MarioState* owner
 );
+bool vr_special_moves_spawn_fire_flower_chance(
+    struct Object* box,
+    struct MarioState* owner,
+    f32 chance
+);
 bool vr_special_moves_spawn_cheat_fire_flower(void);
 bool vr_special_moves_fire_flower_active(void);
 bool vr_special_moves_grant_fire_flower(void);

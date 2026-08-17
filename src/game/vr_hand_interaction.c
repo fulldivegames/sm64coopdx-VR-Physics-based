@@ -22,6 +22,8 @@
 
 #include "pc/configfile.h"
 #include "pc/lua/smlua_hooks.h"
+#include "pc/network/network.h"
+#include "pc/network/coopnet/coopnet.h"
 #include "pc/network/packets/packet.h"
 #include "pc/vr/vr.h"
 
@@ -77,6 +79,7 @@
 #define VR_FIRE_FLOWER_SPAWN_VELOCITY 6.0f
 #define VR_FIRE_FLOWER_GRAVITY 0.65f
 #define VR_FIRE_FLOWER_FALL_SPEED 7.0f
+#define VR_FIRE_FLOWER_DURATION_FRAMES 1800U
 #define VR_FIREBALL_FORM_DELAY_FRAMES 6U
 #define VR_FIREBALL_FORM_FRAMES 60U
 #define VR_FIREBALL_READY_FRAMES \
@@ -229,6 +232,7 @@ static u8 sVrBowserFrameVelocitySamples = 0;
 static bool sVrInteractionTrackingActive = false;
 static bool sVrHeadsetColliderActive = false;
 static bool sVrFireFlowerPowered = false;
+static u16 sVrFireFlowerTimer = 0;
 static u16 sVrFireballChargeFrames = 0;
 static s16 sVrFireFlowerLevel = -1;
 static s16 sVrFireFlowerArea = -1;
@@ -948,8 +952,9 @@ bool vr_hand_interaction_is_tracked_held_object(
     struct Object* object
 ) {
     return object != NULL &&
-        object == sVrTrackedHeldObject &&
-        sVrTrackedHeldGripMask != 0;
+        ((object == sVrTrackedHeldObject &&
+          sVrTrackedHeldGripMask != 0) ||
+         object == sVrFireballChargeObject);
 }
 
 bool vr_hand_interaction_blocks_native_held_object_release(
@@ -974,7 +979,8 @@ bool vr_hand_interaction_get_held_object_position(
 ) {
     if (position == NULL ||
         !sVrTrackedHeldPositionValid ||
-        !vr_hand_interaction_is_tracked_held_object(object)) {
+        object != sVrTrackedHeldObject ||
+        sVrTrackedHeldGripMask == 0) {
         return false;
     }
 
@@ -993,6 +999,25 @@ bool vr_hand_interaction_get_late_held_object_position(
 
     struct VrControllerState state;
     Vec3f handPosition;
+    if (object == sVrFireballChargeObject) {
+        if (!vr_get_controller_state(VR_CONTROLLER_RIGHT, &state) ||
+            !vr_get_controller_world_fist_raw_from_state(
+                VR_CONTROLLER_RIGHT,
+                &state,
+                handPosition,
+                NULL
+            )) {
+            vec3f_copy(position, &object->oPosX);
+            return true;
+        }
+        vr_hand_interaction_apply_hand_collision_position(
+            VR_CONTROLLER_RIGHT,
+            handPosition
+        );
+        vec3f_copy(position, handPosition);
+        return true;
+    }
+
     if (!vr_get_controller_state(sVrTrackedHeldHand, &state) ||
         !vr_get_controller_world_fist_from_state(
             sVrTrackedHeldHand,
@@ -1025,7 +1050,8 @@ bool vr_hand_interaction_apply_held_object_transform(
     struct Object* object
 ) {
     if (!sVrTrackedHeldPositionValid ||
-        !vr_hand_interaction_is_tracked_held_object(object) ||
+        object != sVrTrackedHeldObject ||
+        sVrTrackedHeldGripMask == 0 ||
         (object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
         return false;
     }
@@ -4453,22 +4479,43 @@ static u32 vr_special_moves_allocate_fireball_projectile(void) {
 
 static void vr_special_moves_reset_power(void) {
     sVrFireFlowerPowered = false;
+    sVrFireFlowerTimer = 0;
     vr_special_moves_clear_fireball_charge();
     for (u32 slot = 0; slot < VR_FIREBALL_PROJECTILE_COUNT; slot++) {
         vr_special_moves_clear_fireball_projectile(slot);
     }
 }
 
+static bool vr_special_moves_fire_flower_online_allowed(void) {
+#ifdef COOPNET
+    // Public CoopNet clients may be joining an unmodified host. The native
+    // Fire Flower implementation is not a downloadable Lua mod and its
+    // projectile object has no cross-version protocol, so keep it local-only
+    // there. Hosts remain enabled, as do direct/private sessions where the
+    // players can deliberately run matching VR builds.
+    if (gNetworkType == NT_CLIENT &&
+        gNetworkSystem == &gNetworkSystemCoopNet &&
+        gCoopNetPassword[0] == '\0') {
+        return false;
+    }
+#endif
+    return true;
+}
+
 bool vr_special_moves_fire_flower_active(void) {
-    return configVrSpecialFireFlower && sVrFireFlowerPowered;
+    return configVrSpecialFireFlower &&
+        sVrFireFlowerPowered &&
+        vr_special_moves_fire_flower_online_allowed();
 }
 
 bool vr_special_moves_grant_fire_flower(void) {
     if (!configVrSpecialFireFlower || !vr_is_active() ||
+        !vr_special_moves_fire_flower_online_allowed() ||
         gMarioStates[0].marioObj == NULL) {
         return false;
     }
     sVrFireFlowerPowered = true;
+    sVrFireFlowerTimer = VR_FIRE_FLOWER_DURATION_FRAMES;
     sVrFireFlowerLevel = gCurrLevelNum;
     sVrFireFlowerArea = gCurrAreaIndex;
     return true;
@@ -4539,12 +4586,15 @@ static bool vr_special_moves_spawn_pickup(
     return false;
 }
 
-bool vr_special_moves_spawn_fire_flower(
+bool vr_special_moves_spawn_fire_flower_chance(
     struct Object* box,
-    struct MarioState* owner
+    struct MarioState* owner,
+    f32 chance
 ) {
-    if (!configVrSpecialFireFlower || !vr_is_active() || box == NULL ||
-        owner == NULL || owner->playerIndex != 0 || random_float() >= 0.5f) {
+    if (!configVrSpecialFireFlower || !vr_is_active() ||
+        !vr_special_moves_fire_flower_online_allowed() || box == NULL ||
+        owner == NULL || owner->playerIndex != 0 ||
+        random_float() >= clamp(chance, 0.0f, 1.0f)) {
         return false;
     }
     return vr_special_moves_spawn_pickup(
@@ -4556,9 +4606,22 @@ bool vr_special_moves_spawn_fire_flower(
     );
 }
 
+bool vr_special_moves_spawn_fire_flower(
+    struct Object* box,
+    struct MarioState* owner
+) {
+    return vr_special_moves_spawn_fire_flower_chance(
+        box,
+        owner,
+        0.5f
+    );
+}
+
 bool vr_special_moves_spawn_cheat_fire_flower(void) {
     struct MarioState* mario = &gMarioStates[0];
-    if (!vr_is_active() || mario->marioObj == NULL) {
+    if (!vr_is_active() ||
+        !vr_special_moves_fire_flower_online_allowed() ||
+        mario->marioObj == NULL) {
         return false;
     }
 
@@ -5059,9 +5122,16 @@ void vr_hand_interaction_update(struct MarioState* mario) {
     }
 
     if (!configVrSpecialFireFlower || !vr_is_active() ||
+        !vr_special_moves_fire_flower_online_allowed() ||
         (sVrFireFlowerPowered &&
          (sVrFireFlowerLevel != gCurrLevelNum ||
           sVrFireFlowerArea != gCurrAreaIndex))) {
+        vr_special_moves_reset_power();
+    }
+    if (sVrFireFlowerPowered &&
+        !configVrCheatNoFireFlowerTimer &&
+        sVrFireFlowerTimer > 0 &&
+        --sVrFireFlowerTimer == 0) {
         vr_special_moves_reset_power();
     }
     vr_special_moves_update_pickups(mario);
