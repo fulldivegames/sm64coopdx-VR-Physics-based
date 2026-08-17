@@ -7,6 +7,7 @@
 
 #include "area.h"
 #include "audio/external.h"
+#include "camera.h"
 #include "engine/math_util.h"
 #include "engine/lighting_engine.h"
 #include "data/dynos_cmap.cpp.h"
@@ -71,6 +72,7 @@
 
 #define MAX_FAR_PLANE_DIST 1000000.f
 #define VR_LEDGE_CAMERA_DROP 80.0f
+#define VR_STAR_SPAWN_FOCUS_RESPONSE 0.24f
 
 f32 gProjectionMaxNearValue = 5;
 s16 gProjectionVanillaNearValue = 100;
@@ -792,6 +794,11 @@ static bool sVrSinkingCameraDepthValid = false;
 static u32 sVrSinkingCameraDepthTimestamp = 0;
 static f32 sVrSinkingCameraDepthPrev = 0.0f;
 static f32 sVrSinkingCameraDepth = 0.0f;
+static bool sVrStarSpawnFocusValid = false;
+static u32 sVrStarSpawnFocusTimestamp = 0;
+static f32 sVrStarSpawnFocusBlendPrev = 0.0f;
+static f32 sVrStarSpawnFocusBlend = 0.0f;
+static Vec3f sVrStarSpawnFocusTarget = { 0.0f, 0.0f, 0.0f };
 static bool sVrAudioListenerValid = false;
 static bool sVrAudioListenerPreparedForFrame = false;
 static Vec3f sVrAudioListenerPosition = { 0 };
@@ -883,6 +890,11 @@ void vr_reset_first_person_calibration(void) {
     sVrSinkingCameraDepthTimestamp = 0;
     sVrSinkingCameraDepthPrev = 0.0f;
     sVrSinkingCameraDepth = 0.0f;
+    sVrStarSpawnFocusValid = false;
+    sVrStarSpawnFocusTimestamp = 0;
+    sVrStarSpawnFocusBlendPrev = 0.0f;
+    sVrStarSpawnFocusBlend = 0.0f;
+    vec3f_set(sVrStarSpawnFocusTarget, 0.0f, 0.0f, 0.0f);
     sVrAudioListenerValid = false;
     sVrAudioListenerPreparedForFrame = false;
     vec3f_set(sVrAudioListenerPosition, 0.0f, 0.0f, 0.0f);
@@ -1994,6 +2006,102 @@ static f32 vr_get_ledge_camera_drop(void) {
     return 0.0f;
 }
 
+static void vr_apply_star_spawn_camera_focus(
+    const Vec3f cameraPosition,
+    Vec3f forward
+) {
+    const bool cutsceneActive =
+        configVrImmersiveStarSpawnFocus &&
+        gCamera != NULL &&
+        (gCamera->cutscene == CUTSCENE_STAR_SPAWN ||
+         gCamera->cutscene == CUTSCENE_RED_COIN_STAR_SPAWN) &&
+        gCutsceneFocus != NULL &&
+        (gCutsceneFocus->activeFlags & ACTIVE_FLAG_ACTIVE) != 0;
+
+    if (!sVrStarSpawnFocusValid ||
+        sVrStarSpawnFocusTimestamp != gGlobalTimer) {
+        const bool continuous =
+            sVrStarSpawnFocusValid &&
+            gGlobalTimer == sVrStarSpawnFocusTimestamp + 1;
+        sVrStarSpawnFocusBlendPrev = continuous
+            ? sVrStarSpawnFocusBlend
+            : 0.0f;
+        if (!continuous) {
+            sVrStarSpawnFocusBlend = 0.0f;
+        }
+
+        const f32 targetBlend = cutsceneActive ? 1.0f : 0.0f;
+        sVrStarSpawnFocusBlend +=
+            (targetBlend - sVrStarSpawnFocusBlend) *
+            VR_STAR_SPAWN_FOCUS_RESPONSE;
+        if (fabsf(targetBlend - sVrStarSpawnFocusBlend) < 0.001f) {
+            sVrStarSpawnFocusBlend = targetBlend;
+        }
+
+        if (cutsceneActive) {
+            sVrStarSpawnFocusTarget[0] = gCutsceneFocus->oPosX;
+            sVrStarSpawnFocusTarget[1] =
+                gCutsceneFocus->oPosY +
+                fmaxf(gCutsceneFocus->hitboxHeight, 40.0f);
+            sVrStarSpawnFocusTarget[2] = gCutsceneFocus->oPosZ;
+        }
+        sVrStarSpawnFocusTimestamp = gGlobalTimer;
+        sVrStarSpawnFocusValid = true;
+    }
+
+    const f32 blend = gRenderingInterpolated
+        ? delta_interpolate_f32(
+            sVrStarSpawnFocusBlendPrev,
+            sVrStarSpawnFocusBlend,
+            clamp(gRenderingDelta, 0.0f, 1.0f)
+        )
+        : sVrStarSpawnFocusBlend;
+    if (blend <= 0.001f) {
+        if (!cutsceneActive) {
+            sVrStarSpawnFocusValid = false;
+        }
+        return;
+    }
+
+    Vec3f baseFocus = {
+        cameraPosition[0] + forward[0] * 100.0f,
+        cameraPosition[1] + forward[1] * 100.0f,
+        cameraPosition[2] + forward[2] * 100.0f
+    };
+    f32 unusedDistance;
+    s16 basePitch;
+    s16 baseYaw;
+    s16 targetPitch;
+    s16 targetYaw;
+    vec3f_get_dist_and_angle(
+        cameraPosition,
+        baseFocus,
+        &unusedDistance,
+        &basePitch,
+        &baseYaw
+    );
+    vec3f_get_dist_and_angle(
+        cameraPosition,
+        sVrStarSpawnFocusTarget,
+        &unusedDistance,
+        &targetPitch,
+        &targetYaw
+    );
+
+    const f32 smoothBlend = blend * blend * (3.0f - 2.0f * blend);
+    const s16 blendedPitch = (s16)(
+        basePitch +
+        (s32)roundf((f32)(s16)(targetPitch - basePitch) * smoothBlend)
+    );
+    const s16 blendedYaw = (s16)(
+        baseYaw +
+        (s32)roundf((f32)(s16)(targetYaw - baseYaw) * smoothBlend)
+    );
+    forward[0] = coss(blendedPitch) * sins(blendedYaw);
+    forward[1] = sins(blendedPitch);
+    forward[2] = coss(blendedPitch) * coss(blendedYaw);
+}
+
 static bool vr_get_stabilized_first_person_pose(
     Vec3f cameraPosition,
     Vec3f cameraFocus,
@@ -2057,6 +2165,9 @@ static bool vr_get_stabilized_first_person_pose(
     cameraPosition[1] = cameraAnchor[1];
     cameraPosition[2] = cameraAnchor[2] +
         forward[2] * cameraDepth;
+    // Star-spawn cutscenes may temporarily rotate the view toward their
+    // focus, but the calibrated camera position remains completely intact.
+    vr_apply_star_spawn_camera_focus(cameraPosition, forward);
     cameraFocus[0] = cameraPosition[0] + forward[0] * 100.0f;
     cameraFocus[1] = cameraPosition[1] + forward[1] * 100.0f;
     cameraFocus[2] = cameraPosition[2] + forward[2] * 100.0f;

@@ -68,6 +68,8 @@
 #define VR_HEADSET_INTERACTION_HEIGHT 48.0f
 #define VR_THROW_MIN_SPEED 60.0f
 #define VR_THROW_VELOCITY_SCALE 0.125f
+#define VR_FIREBALL_LAUNCH_VELOCITY_SCALE \
+    (VR_THROW_VELOCITY_SCALE * 2.0f)
 #define VR_THROW_VELOCITY_MEMORY 0.78f
 #define VR_BOWSER_TURN_DEADZONE 0.18f
 #define VR_BOWSER_HAND_TURN_FULL_INPUT 0x600
@@ -255,6 +257,8 @@ static u16
     sVrFireballProjectileLifetime[VR_FIREBALL_PROJECTILE_COUNT] = { 0 };
 static Vec3f
     sVrFireballProjectileVelocity[VR_FIREBALL_PROJECTILE_COUNT] = { { 0 } };
+static bool
+    sVrFireballProjectileLaunchBoost[VR_FIREBALL_PROJECTILE_COUNT] = { false };
 static Vec3f sVrFireballRememberedVelocity = { 0.0f, 0.0f, 0.0f };
 static f32 sVrHeadsetColliderSavedRadius = 50.0f;
 static f32 sVrHeadsetColliderSavedHeight = 160.0f;
@@ -4522,6 +4526,7 @@ static void vr_special_moves_clear_fireball_projectile(u32 slot) {
         0.0f,
         0.0f
     );
+    sVrFireballProjectileLaunchBoost[slot] = false;
 }
 
 static u32 vr_special_moves_allocate_fireball_projectile(void) {
@@ -4594,7 +4599,8 @@ bool vr_special_moves_grant_fire_flower(void) {
     sVrFireFlowerMusicTimer = VR_FIRE_FLOWER_DURATION_FRAMES;
     sVrFireFlowerLevel = gCurrLevelNum;
     sVrFireFlowerArea = gCurrAreaIndex;
-    if ((gMarioStates[0].flags &
+    if (configVrSpecialFireFlowerMusic &&
+        (gMarioStates[0].flags &
          (MARIO_METAL_CAP | MARIO_VANISH_CAP)) == 0) {
         play_cap_music(
             SEQUENCE_ARGS(4, gLevelValues.wingCapSequence)
@@ -4612,6 +4618,13 @@ static void vr_special_moves_update_fire_flower_music(
     }
 
     const u32 specialCaps = mario->flags & MARIO_SPECIAL_CAPS;
+    if (!configVrSpecialFireFlowerMusic) {
+        if (specialCaps == 0) {
+            stop_cap_music();
+        }
+        sVrFireFlowerMusicTimer--;
+        return;
+    }
     // Metal and Vanish Cap own the cap-music channel while active. Wing Cap
     // shares Powerful Mario with the Fire Flower, so the de-duplicated call
     // simply keeps the current track running without overlap or a restart.
@@ -5038,6 +5051,13 @@ static void vr_special_moves_update_projectiles(struct MarioState* mario) {
             projectile->oPosY < floorHeight + 18.0f) {
             projectile->oPosY = floorHeight + 18.0f;
             (*velocity)[1] = 8.0f;
+            if (sVrFireballProjectileLaunchBoost[slot]) {
+                // The hand throw gets a stronger initial shot, then returns
+                // to the established skipping speed on its first landing.
+                (*velocity)[0] *= 0.5f;
+                (*velocity)[2] *= 0.5f;
+                sVrFireballProjectileLaunchBoost[slot] = false;
+            }
             (*velocity)[0] *= 0.985f;
             (*velocity)[2] *= 0.985f;
         }
@@ -5276,8 +5296,9 @@ static bool vr_special_moves_update_fireball_hand(
             for (u32 axis = 0; axis < 3; axis++) {
                 sVrFireballProjectileVelocity[slot][axis] =
                     sVrFireballRememberedVelocity[axis] *
-                    VR_THROW_VELOCITY_SCALE;
+                    VR_FIREBALL_LAUNCH_VELOCITY_SCALE;
             }
+            sVrFireballProjectileLaunchBoost[slot] = true;
             sVrFireballChargeObject->oOpacity = 255;
             sVrFireballChargeObject->oInteractType = 0;
             obj_scale(sVrFireballChargeObject, 1.2f);

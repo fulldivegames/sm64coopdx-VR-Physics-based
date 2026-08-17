@@ -238,6 +238,7 @@ static void djui_panel_vr_special_moves_defaults(
 ) {
     (void)caller;
     configVrSpecialFireFlower = true;
+    configVrSpecialFireFlowerMusic = true;
 }
 
 static void djui_panel_vr_immersion_defaults(struct DjuiBase* caller) {
@@ -252,6 +253,7 @@ static void djui_panel_vr_immersion_defaults(struct DjuiBase* caller) {
     configVrImmersiveRemovableCap = false;
     configVrImmersiveLookDownTransparency = true;
     configVrImmersiveCarrySpeed = false;
+    configVrImmersiveStarSpawnFocus = true;
     configVrExperimentalSideFlipFollow = true;
     configVrExperimentalWallJumpTurn = true;
     configVrPhysicalCrouching = true;
@@ -1366,8 +1368,14 @@ static void djui_panel_vr_special_moves_create(
     {
         djui_checkbox_create(
             body,
-            "Fire Flower (50% Item Boxes / 30% Breakable Boxes)",
+            "Fire Flower (50% Item Boxes / 25% Cork Boxes)",
             &configVrSpecialFireFlower,
+            NULL
+        );
+        djui_checkbox_create(
+            body,
+            "Fire Flower Music",
+            &configVrSpecialFireFlowerMusic,
             NULL
         );
         djui_button_create(
@@ -1453,6 +1461,13 @@ static void djui_panel_vr_immersion_create(struct DjuiBase* caller) {
             body,
             "Carrying-Speed Movement While Holding",
             &configVrImmersiveCarrySpeed,
+            NULL
+        );
+
+        djui_checkbox_create(
+            body,
+            "Look Toward Spawned Stars",
+            &configVrImmersiveStarSpawnFocus,
             NULL
         );
 
