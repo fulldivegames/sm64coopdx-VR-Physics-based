@@ -10,6 +10,7 @@
 #include "game/vr_hand_interaction.h"
 
 static bool sVrMode = false;
+static bool sVrSpawnFireFlowerAction = false;
 
 static char* sVrControllerBindingChoices[
     VR_CONTROLLER_BINDING_COUNT
@@ -53,6 +54,10 @@ static unsigned int djui_panel_vr_clamp_uint(
 
 static void djui_panel_vr_spawn_fire_flower(struct DjuiBase* caller) {
     (void)caller;
+    if (!sVrSpawnFireFlowerAction) {
+        return;
+    }
+    sVrSpawnFireFlowerAction = false;
     vr_special_moves_spawn_cheat_fire_flower();
 }
 
@@ -1276,10 +1281,11 @@ static void djui_panel_vr_cheats_create(struct DjuiBase* caller) {
             &configVrCheatFreeFly,
             NULL
         );
-        djui_button_create(
+        sVrSpawnFireFlowerAction = false;
+        djui_checkbox_create(
             body,
             "Spawn Fire Flower",
-            DJUI_BUTTON_STYLE_NORMAL,
+            &sVrSpawnFireFlowerAction,
             djui_panel_vr_spawn_fire_flower
         );
         djui_checkbox_create(
