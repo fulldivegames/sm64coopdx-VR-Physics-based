@@ -1,4 +1,4 @@
-SM64 CO-OP DX VR v0.7.1 - WINDOWS PLAYER GUIDE
+SM64 CO-OP DX VR v0.7.2 - WINDOWS PLAYER GUIDE
 ==============================================
 
 This is an active fan project. The PC and Quest standalone editions have not
@@ -41,7 +41,7 @@ INSTALL MODS
   packs from the DynOS menu.
 - Avoid duplicate nesting such as mods/My Mod/My Mod/files. Install one mod
   at a time when troubleshooting.
-- v0.7.1 includes compatibility work for Character Selector, multiple
+- v0.7.2 includes compatibility work for Character Selector, multiple
   character packs, DynOS paths, palette paths, Lua HUDs, and VR menu display.
 
 
@@ -107,12 +107,13 @@ CHAT AND PLAYERS
 
 FIRE FLOWER
 
-- Fire Flowers can replace supported coin/1-Up item boxes and cork boxes.
+- Fire Flowers have a 50% chance in supported coin/1-Up item boxes and a 30%
+  chance in supported cork boxes.
 - With Fire Flower active, close the right fist with Grip, hold Trigger to
   charge, then swing and release Trigger to throw the tracked fireball.
 - The normal attack button can fire a quick forward shot.
-- Special Moves controls Fire Flower and its music. Cheats includes Spawn
-  Fire Flower and No Fire Flower Timer.
+- Special Moves controls Fire Flower and its music. Cheats > Spawn Menu can
+  create a Fire Flower, and No Fire Flower Timer keeps the power active.
 - Fire Flower is native to the VR builds. It is not transferred to public
   CoopNet players and is disabled in CoopNet sessions. Use matching builds
   through Direct Connection for supported multiplayer testing.
@@ -127,7 +128,9 @@ RASENGAN / RASEN-SHURIKEN
 - With a charged Rasengan, hold Special (Left Secondary by default). If the
   overhead option is enabled, keep the hand above the headset while charging.
   Physically swing and release Right Trigger to throw the finished
-  Rasen-Shuriken. It explodes on geometry or supported enemies.
+  Rasen-Shuriken. It explodes on geometry or supported enemies, remains live
+  for 1.5 seconds, then fades for 0.5 seconds. An enemy that remains inside
+  for the complete duration receives a second hit.
 - Special Moves enables both attacks. Cheats contains their charge-time
   sliders.
 
@@ -255,9 +258,19 @@ HUD Settings
   HUD opacity and corner spread.
 
 Cheats
-  Level Select, climb-any-surface, special-move charge times, and movement
-  speed controls. Level Select includes the castle, every main course,
-  Bowser stages, secret/cap stages, and the ending.
+  Level Select, Spawn Menu, climb-any-surface, special-move charge times, and
+  movement speed controls. Level Select includes the castle, every main
+  course, Bowser stages, secret/cap stages, and the ending. Spawn Menu creates
+  Wing, Vanish, or Metal Caps and Fire Flowers above Mario.
+
+COLOR PALETTES
+
+- In the player palette editor, Color Palette opens a controller-friendly
+  list of 44 named colors and applies the selected RGB/hex value to the
+  current character part.
+- Normal RGB sliders and hex entry still work. Custom presets remain saved.
+- The editable Fireflower preset controls the temporary powered-up outfit;
+  the previously selected normal palette returns when the power ends.
 
 Immersion
   Crouch/Sand Camera, Face-Stuck Blackout, Cannon Aim Direction Cone, and

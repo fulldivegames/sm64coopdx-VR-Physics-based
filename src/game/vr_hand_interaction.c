@@ -98,7 +98,8 @@
 #define VR_RASENGAN_IMPACT_MAX_FRAMES 90U
 // Two rotated, double-sided shells contribute four translucent surfaces.
 // Alpha 42 per surface composes to approximately 50% visible opacity.
-#define VR_RASENGAN_MAX_OPACITY 42
+#define VR_RASENGAN_MAX_OPACITY 56
+#define VR_RASENGAN_RING_MAX_OPACITY 205
 #define VR_RASENGAN_HAND_SCALE 0.1125f
 #define VR_RASENGAN_MODEL_RADIUS 64.0f
 #define VR_RASENGAN_CONTACT_RADIUS 18.0f
@@ -115,26 +116,18 @@
 #define VR_RASENGAN_READY_FADE_FRAMES 30U
 #define VR_RASEN_SHURIKEN_READY_LIFETIME_FRAMES 300U
 #define VR_RASEN_SHURIKEN_MAX_FLIGHT_FRAMES 300U
-#define VR_RASEN_SHURIKEN_EXPLOSION_FRAMES 15U
+#define VR_RASEN_SHURIKEN_EXPLOSION_HOLD_FRAMES 45U
+#define VR_RASEN_SHURIKEN_EXPLOSION_FADE_FRAMES 15U
+#define VR_RASEN_SHURIKEN_EXPLOSION_FRAMES \
+    (VR_RASEN_SHURIKEN_EXPLOSION_HOLD_FRAMES + \
+     VR_RASEN_SHURIKEN_EXPLOSION_FADE_FRAMES)
 #define VR_RASEN_SHURIKEN_FLIGHT_SPEED 67.5f
 #define VR_RASEN_SHURIKEN_MIN_THROW_SPEED 55.0f
 #define VR_RASEN_SHURIKEN_EXPLOSION_SCALE \
     (VR_RASENGAN_HAND_SCALE * 40.0f)
 #define VR_RASEN_SHURIKEN_EXPLOSION_RADIUS \
     (VR_RASENGAN_MODEL_RADIUS * VR_RASEN_SHURIKEN_EXPLOSION_SCALE)
-
-#define VR_ANCHORABLE_INTERACT_TYPES ( \
-    INTERACT_BOUNCE_TOP | \
-    INTERACT_BOUNCE_TOP2 | \
-    INTERACT_BULLY | \
-    INTERACT_HIT_FROM_BELOW | \
-    INTERACT_HOOT | \
-    INTERACT_KOOPA | \
-    INTERACT_KOOPA_SHELL | \
-    INTERACT_PLAYER | \
-    INTERACT_SPINY_WALKING | \
-    INTERACT_TEXT \
-)
+#define VR_RASEN_SHURIKEN_TRACKED_TARGET_COUNT 64U
 
 #define VR_FIST_ATTACKABLE_TYPES ( \
     INTERACT_BULLY | \
@@ -265,6 +258,7 @@ static Vec3f sVrBowserFrameVelocity = { 0.0f, 0.0f, 0.0f };
 static u8 sVrBowserFrameVelocitySamples = 0;
 static bool sVrInteractionTrackingActive = false;
 static bool sVrHeadsetColliderActive = false;
+static struct Object* sVrHeadsetColliderObject = NULL;
 static bool sVrFireFlowerPowered = false;
 static u16 sVrFireFlowerTimer = 0;
 // This remains finite when the no-timer cheat keeps the power active.
@@ -306,6 +300,18 @@ static struct Object* sVrRasenShurikenProjectile = NULL;
 static Vec3f sVrRasenShurikenVelocity = { 0.0f, 0.0f, 0.0f };
 static u16 sVrRasenShurikenProjectileFrames = 0;
 static u16 sVrRasenShurikenExplosionFrames = 0;
+static struct Object* sVrRasenShurikenHitTargets[
+    VR_RASEN_SHURIKEN_TRACKED_TARGET_COUNT
+] = { NULL };
+static u16 sVrRasenShurikenHitFirstFrame[
+    VR_RASEN_SHURIKEN_TRACKED_TARGET_COUNT
+] = { 0 };
+static u16 sVrRasenShurikenHitLastFrame[
+    VR_RASEN_SHURIKEN_TRACKED_TARGET_COUNT
+] = { 0 };
+static bool sVrRasenShurikenHitContinuous[
+    VR_RASEN_SHURIKEN_TRACKED_TARGET_COUNT
+] = { false };
 static f32 sVrHeadsetColliderSavedRadius = 50.0f;
 static f32 sVrHeadsetColliderSavedHeight = 160.0f;
 static f32 sVrHeadsetColliderSavedDownOffset = 0.0f;
@@ -622,6 +628,12 @@ static bool vr_hand_interaction_resolve_hand_collision(
 static void vr_hand_interaction_sync_climb_collider_to_headset(
     struct MarioState* mario
 );
+static bool vr_hand_interaction_point_overlaps_object(
+    const Vec3f position,
+    f32 radius,
+    f32 height,
+    struct Object* object
+);
 
 static void vr_hand_interaction_apply_headset_collider(
     struct MarioState* mario,
@@ -633,6 +645,20 @@ static void vr_hand_interaction_apply_headset_collider(
         return;
     }
 
+    if (sVrHeadsetColliderActive &&
+        sVrHeadsetColliderObject != mario->marioObj) {
+        if (sVrHeadsetColliderObject != NULL) {
+            sVrHeadsetColliderObject->hitboxRadius =
+                sVrHeadsetColliderSavedRadius;
+            sVrHeadsetColliderObject->hitboxHeight =
+                sVrHeadsetColliderSavedHeight;
+            sVrHeadsetColliderObject->hitboxDownOffset =
+                sVrHeadsetColliderSavedDownOffset;
+        }
+        sVrHeadsetColliderActive = false;
+        sVrHeadsetColliderObject = NULL;
+    }
+
     if (!sVrHeadsetColliderActive) {
         sVrHeadsetColliderSavedRadius =
             mario->marioObj->hitboxRadius;
@@ -641,6 +667,7 @@ static void vr_hand_interaction_apply_headset_collider(
         sVrHeadsetColliderSavedDownOffset =
             mario->marioObj->hitboxDownOffset;
         sVrHeadsetColliderActive = true;
+        sVrHeadsetColliderObject = mario->marioObj;
     }
 
     mario->marioObj->hitboxRadius =
@@ -1652,9 +1679,13 @@ static bool vr_hand_interaction_hand_is_behind_heavy_grabbable(
     const Vec3f handPosition,
     struct Object* object
 ) {
-    if (object == NULL || handPosition == NULL ||
-        (object->oInteractionSubtype & INT_SUBTYPE_GRABS_MARIO) == 0 ||
-        obj_has_behavior(object, bhvKingBobomb)) {
+    if (object == NULL || handPosition == NULL) {
+        return false;
+    }
+
+    const bool kingBobomb = obj_has_behavior(object, bhvKingBobomb);
+    if (!kingBobomb &&
+        (object->oInteractionSubtype & INT_SUBTYPE_GRABS_MARIO) == 0) {
         return true;
     }
 
@@ -1662,6 +1693,9 @@ static bool vr_hand_interaction_hand_is_behind_heavy_grabbable(
         handPosition[2] - object->oPosZ,
         handPosition[0] - object->oPosX
     );
+    // Heavy actors that grab Mario, including King Bob-omb, expose only a
+    // rear grab zone. A 120-degree rear cone prevents front/side grabs while
+    // remaining practical with tracked-hand contact.
     return abs_angle_diff(handYaw, object->oMoveAngleYaw) >= 0x5555;
 }
 
@@ -1688,9 +1722,18 @@ static bool vr_hand_interaction_grab_overlaps_object(
         object->hitboxHeight,
         object->hurtboxHeight
     );
-    if (obj_has_behavior(object, bhvKingBobomb)) {
-        objectRadius = fmaxf(objectRadius, 180.0f);
-        objectHeight = fmaxf(objectHeight, 300.0f);
+    const bool kingBobomb = obj_has_behavior(object, bhvKingBobomb);
+    if (kingBobomb) {
+        // King Bob-omb's native interaction volume is intentionally broad
+        // enough for his grab-Mario attack. It is not an appropriate hand
+        // pickup volume: taking the maximum here allowed that native volume
+        // to reach around his sides and into the front. Use a dedicated,
+        // visible-body-sized pickup cylinder and the rear-cone test below.
+        objectRadius = 145.0f;
+        objectHeight = 285.0f;
+        // The global physical-grab extension is intentionally generous for
+        // small enemies. Do not let it extend through this boss's body.
+        extraReach = fminf(extraReach, 24.0f);
     }
     if (objectRadius <= 0.0f) {
         objectRadius = 30.0f;
@@ -1815,14 +1858,19 @@ void vr_hand_interaction_update_headset_collider(
 
     if (!useHeadsetCollider) {
         if (sVrHeadsetColliderActive) {
-            mario->marioObj->hitboxRadius =
-                sVrHeadsetColliderSavedRadius;
-            mario->marioObj->hitboxHeight =
-                sVrHeadsetColliderSavedHeight;
-            mario->marioObj->hitboxDownOffset =
-                sVrHeadsetColliderSavedDownOffset;
-            vec3f_copy(&mario->marioObj->oPosX, mario->pos);
+            if (sVrHeadsetColliderObject != NULL) {
+                sVrHeadsetColliderObject->hitboxRadius =
+                    sVrHeadsetColliderSavedRadius;
+                sVrHeadsetColliderObject->hitboxHeight =
+                    sVrHeadsetColliderSavedHeight;
+                sVrHeadsetColliderObject->hitboxDownOffset =
+                    sVrHeadsetColliderSavedDownOffset;
+            }
+            if (sVrHeadsetColliderObject == mario->marioObj) {
+                vec3f_copy(&mario->marioObj->oPosX, mario->pos);
+            }
             sVrHeadsetColliderActive = false;
+            sVrHeadsetColliderObject = NULL;
         }
         return;
     }
@@ -1841,6 +1889,33 @@ void vr_hand_interaction_update_headset_collider(
     vr_hand_interaction_apply_headset_collider(
         mario,
         headsetPosition
+    );
+}
+
+bool vr_hand_interaction_validate_headset_damage_contact(
+    struct MarioState* mario,
+    struct Object* object
+) {
+    if (!sVrHeadsetColliderActive ||
+        mario == NULL ||
+        object == NULL ||
+        sVrHeadsetColliderObject != mario->marioObj) {
+        return true;
+    }
+
+    Vec3f headsetPosition;
+    if (!vr_get_stabilized_headset_world_position(
+            headsetPosition,
+            false
+        )) {
+        return false;
+    }
+
+    return vr_hand_interaction_point_overlaps_object(
+        headsetPosition,
+        VR_HEADSET_INTERACTION_RADIUS,
+        VR_HEADSET_INTERACTION_HEIGHT,
+        object
     );
 }
 
@@ -3660,20 +3735,16 @@ static bool vr_hand_interaction_object_can_be_anchored(
         sVrTrackedAnchorObject != NULL ||
         (object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
         object->oIntangibleTimer != 0 ||
-        (object->oInteractType & INTERACT_GRABBABLE) != 0 ||
-        (object->oInteractType &
-            VR_ANCHORABLE_INTERACT_TYPES) == 0) {
+        (object->oInteractType & INTERACT_GRABBABLE) != 0) {
         return false;
     }
 
-    // INTERACT_TEXT is shared by NPCs and signs. Only animated text actors
-    // count as people/NPC anchor targets; this keeps static signs out.
-    if ((object->oInteractType & INTERACT_TEXT) != 0 &&
-        object->oAnimations == NULL) {
-        return false;
-    }
-
-    return true;
+    // Moving-actor anchoring is deliberately narrower than native object
+    // grabbing. Hoot and Klepto are the only non-carry actors that physical
+    // hands may hold; players, NPCs, and ordinary enemies must retain their
+    // original interaction behavior.
+    return (object->oInteractType & INTERACT_HOOT) != 0 ||
+        obj_has_behavior(object, bhvKlepto);
 }
 
 static struct Object* vr_hand_interaction_find_anchor_target(
@@ -4235,7 +4306,7 @@ static bool vr_hand_interaction_attack_object(
         vr_special_moves_spawn_fire_flower_chance(
             object,
             mario,
-            0.25f
+            0.30f
         );
     }
 
@@ -4628,6 +4699,12 @@ static void vr_special_moves_clear_rasen_shuriken_projectile(void) {
     vec3f_set(sVrRasenShurikenVelocity, 0.0f, 0.0f, 0.0f);
     sVrRasenShurikenProjectileFrames = 0;
     sVrRasenShurikenExplosionFrames = 0;
+    for (u32 i = 0; i < VR_RASEN_SHURIKEN_TRACKED_TARGET_COUNT; i++) {
+        sVrRasenShurikenHitTargets[i] = NULL;
+        sVrRasenShurikenHitFirstFrame[i] = 0;
+        sVrRasenShurikenHitLastFrame[i] = 0;
+        sVrRasenShurikenHitContinuous[i] = false;
+    }
 }
 
 static void vr_special_moves_clear_fireball_projectile(u32 slot) {
@@ -4806,13 +4883,74 @@ Gfx* geo_vr_rasengan_color(
     generated->fnNode.node.flags =
         (generated->fnNode.node.flags & 0xFF) |
         (LAYER_TRANSPARENT << 8);
+    const bool charged = object == sVrRasenganObject &&
+        (sVrRasenShurikenReady ||
+         sVrRasenganChargeFrames >=
+            vr_special_moves_rasengan_ready_frames());
+    const u8 pulseStep = (u8)(gGlobalTimer & 7U);
+    const u8 glow = charged
+        ? (u8)((pulseStep <= 4U ? pulseStep : 8U - pulseStep) * 6U)
+        : 0U;
     gDPSetEnvColor(
         &displayList[0],
-        210,
-        235,
+        (u8)min(210U + glow, 255U),
+        (u8)min(235U + glow / 2U, 255U),
         255,
         (u8)clamp(object->oOpacity, 0, 255)
     );
+    gSPEndDisplayList(&displayList[1]);
+    return displayList;
+}
+
+Gfx* geo_vr_rasengan_ring_color(
+    s32 callContext,
+    struct GraphNode* node,
+    UNUSED void* context
+) {
+    if (callContext != GEO_CONTEXT_RENDER || node == NULL ||
+        gCurGraphNodeObject == NULL) {
+        return NULL;
+    }
+    Gfx* displayList = alloc_display_list(2 * sizeof(Gfx));
+    if (displayList == NULL) {
+        return NULL;
+    }
+    struct Object* object = (struct Object*)gCurGraphNodeObject;
+    struct GraphNodeGenerated* generated =
+        (struct GraphNodeGenerated*)node;
+    generated->fnNode.node.flags =
+        (generated->fnNode.node.flags & 0xFF) |
+        (LAYER_TRANSPARENT << 8);
+
+    f32 reveal = 1.0f;
+    if (generated->parameter >= 1 && generated->parameter <= 3) {
+        const bool showAll =
+            sVrRasenShurikenReady ||
+            object == sVrRasenShurikenProjectile;
+        if (!showAll) {
+            const f32 fadeStart =
+                (f32)(generated->parameter - 1) * 15.0f;
+            reveal = clamp(
+                ((f32)sVrRasenShurikenChargeFrames - fadeStart) /
+                    15.0f,
+                0.0f,
+                1.0f
+            );
+        }
+    }
+    const u8 alpha = (u8)clamp(
+        (s32)roundf(
+            (f32)object->oOpacity *
+            (f32)VR_RASENGAN_RING_MAX_OPACITY * reveal /
+            (f32)VR_RASENGAN_MAX_OPACITY
+        ),
+        0,
+        VR_RASENGAN_RING_MAX_OPACITY
+    );
+    // Keep the tornado crown visibly blue-white without tinting it as deeply
+    // as the energy sphere. Alpha follows the parent so explosion rings fade
+    // out with the bubble instead of popping away.
+    gDPSetPrimColor(&displayList[0], 0, 0, 235, 245, 255, alpha);
     gSPEndDisplayList(&displayList[1]);
     return displayList;
 }
@@ -4900,6 +5038,24 @@ Gfx* geo_vr_rasengan_visual_spin(
             // its own plane around the centered Rasengan.
             vec3s_set(rotation->rotation, 0, 0, primary);
             break;
+        case 6:
+            vec3s_set(rotation->rotation,
+                (s16)(primary + 0x1800),
+                (s16)(-secondary),
+                (s16)(secondary + 0x3000));
+            break;
+        case 7:
+            vec3s_set(rotation->rotation,
+                (s16)(-primary),
+                (s16)(secondary + 0x2800),
+                (s16)(primary / 2 + 0x5000));
+            break;
+        case 8:
+            vec3s_set(rotation->rotation,
+                (s16)(secondary + 0x4000),
+                (s16)(primary + 0x1000),
+                (s16)(-secondary));
+            break;
     }
     return NULL;
 }
@@ -4968,7 +5124,7 @@ static bool vr_special_moves_spawn_pickup(
         pickup->oPosY = y;
         pickup->oPosZ = z;
         pickup->oOpacity = 255;
-        obj_scale(pickup, 0.75f);
+        obj_scale(pickup, 0.375f);
         obj_update_gfx_pos_and_angle(pickup);
         sVrFireFlowerPickups[i] = pickup;
         sVrFireFlowerPickupVelocityY[i] = velocityY;
@@ -5219,6 +5375,170 @@ static void vr_special_moves_update_pickups(struct MarioState* mario) {
     }
 }
 
+static bool vr_special_moves_target_is_whomp(struct Object* target) {
+    return target != NULL &&
+        (obj_has_behavior(target, bhvSmallWhomp) ||
+         obj_has_behavior(target, bhvWhompKingBoss));
+}
+
+bool vr_special_moves_spawn_cheat_cap(enum VrCheatSpawnCap cap) {
+    struct MarioState* mario = &gMarioStates[0];
+    if (mario->marioObj == NULL || mario->character == NULL) {
+        return false;
+    }
+
+    s32 model = mario->character->capModelId;
+    const BehaviorScript* behavior = bhvVanishCap;
+    switch (cap) {
+        case VR_CHEAT_SPAWN_WING_CAP:
+            model = mario->character->capWingModelId;
+            behavior = bhvWingCap;
+            break;
+        case VR_CHEAT_SPAWN_METAL_CAP:
+            model = mario->character->capMetalModelId;
+            behavior = bhvMetalCap;
+            break;
+        case VR_CHEAT_SPAWN_VANISH_CAP:
+            break;
+        default:
+            return false;
+    }
+
+    struct Object* pickup = spawn_object(mario->marioObj, model, behavior);
+    if (pickup == NULL) {
+        return false;
+    }
+    pickup->oPosX = mario->pos[0];
+    pickup->oPosY = mario->pos[1] + 480.0f;
+    pickup->oPosZ = mario->pos[2];
+    pickup->oVelY = 0.0f;
+    obj_update_gfx_pos_and_angle(pickup);
+    return true;
+}
+
+static bool vr_special_moves_point_is_behind_target(
+    struct Object* target,
+    f32 x,
+    f32 z
+) {
+    if (target == NULL) {
+        return false;
+    }
+    const s16 hitYaw = atan2s(z - target->oPosZ, x - target->oPosX);
+    // Use the rear hemisphere. The old 120-degree cone was too narrow for
+    // wide Whomp geometry and could reject a hand visibly touching its back.
+    return abs_angle_diff(hitYaw, target->oMoveAngleYaw) >= 0x4000;
+}
+
+static void vr_special_moves_get_enemy_contact_bounds(
+    struct Object* target,
+    f32* radius,
+    f32* height
+) {
+    const bool kingWhomp =
+        target != NULL && obj_has_behavior(target, bhvWhompKingBoss);
+    if (target != NULL && obj_has_behavior(target, bhvKingBobomb)) {
+        // Keep special-move contact on the visible back rather than allowing
+        // the old full-body sphere to trigger from beside or above the boss.
+        // This does not alter King Bob-omb's native grab/dive hitbox. The
+        // impact visual uses separate full-body bounds below.
+        *radius = 150.0f;
+        *height = 300.0f;
+        return;
+    }
+    if (vr_special_moves_target_is_whomp(target)) {
+        // Whomps are surface objects and deliberately have no ordinary
+        // attack hitbox. Supply bounds around their full rendered geometry,
+        // including the horizontal belly-flop pose.
+        *radius = kingWhomp ? 520.0f : 260.0f;
+        *height = kingWhomp ? 900.0f : 450.0f;
+        return;
+    }
+    *radius = fmaxf(
+        fmaxf(target->hitboxRadius, target->hurtboxRadius),
+        20.0f
+    );
+    *height = fmaxf(
+        fmaxf(target->hitboxHeight, target->hurtboxHeight),
+        40.0f
+    );
+}
+
+static void vr_special_moves_release_mario_from_grabber(
+    struct MarioState* mario,
+    struct Object* target
+) {
+    if (mario == NULL || target == NULL) {
+        return;
+    }
+    target->oInteractStatus &= ~INT_STATUS_GRABBED_MARIO;
+    target->usingObj = NULL;
+    if (mario->action == ACT_GRABBED &&
+        (mario->usedObj == target || mario->heldByObj == target)) {
+        mario->usedObj = NULL;
+        mario->heldByObj = NULL;
+        mario->vel[1] = fmaxf(mario->vel[1], 10.0f);
+        mario->forwardVel = 0.0f;
+        set_mario_action(mario, ACT_FREEFALL, 0);
+    }
+}
+
+static void vr_special_moves_apply_rear_target_hit(
+    struct MarioState* mario,
+    struct Object* target,
+    f32 hitX,
+    f32 hitZ
+) {
+    if (mario == NULL || target == NULL) {
+        return;
+    }
+    const s16 awayYaw = atan2s(
+        target->oPosZ - hitZ,
+        target->oPosX - hitX
+    );
+    mario->interactObj = target;
+    if (obj_has_behavior(target, bhvKingBobomb)) {
+        // Use the boss's native thrown state so landing counts exactly one
+        // hit and retains its normal three-hit fight and defeat sequence.
+        vr_special_moves_release_mario_from_grabber(mario, target);
+        target->oMoveAngleYaw = awayYaw;
+        target->oAction = 4;
+        target->oSubAction = 0;
+        target->oMoveFlags &= ~OBJ_MOVE_MASK_ON_GROUND;
+        target->oForwardVel = fmaxf(target->oForwardVel, 52.0f);
+        target->oVelY = fmaxf(target->oVelY, 35.0f);
+    } else if (obj_has_behavior(target, bhvWhompKingBoss)) {
+        target->oHealth = max(target->oHealth - 1, 0);
+        target->oForwardVel = 0.0f;
+        target->oVelY = 0.0f;
+        target->oAction = target->oHealth == 0 ? 8 : 2;
+        target->oSubAction = 0;
+        play_sound(
+            SOUND_OBJ2_WHOMP_SOUND_SHORT,
+            target->header.gfx.cameraToObject
+        );
+    } else if (obj_has_behavior(target, bhvSmallWhomp)) {
+        target->oNumLootCoins = max(target->oNumLootCoins, 5);
+        obj_spawn_loot_yellow_coins(
+            target,
+            target->oNumLootCoins,
+            20.0f
+        );
+        target->oForwardVel = 0.0f;
+        target->oVelY = 0.0f;
+        target->oAction = 8;
+        target->oSubAction = 0;
+    }
+    smlua_call_event_hooks(
+        HOOK_ON_INTERACT,
+        mario,
+        target,
+        target->oInteractType,
+        true
+    );
+    network_send_object(target);
+}
+
 static bool vr_special_moves_projectile_hits_enemy(
     struct MarioState* mario,
     struct Object* projectile
@@ -5236,41 +5556,80 @@ static bool vr_special_moves_projectile_hits_enemy(
                 INTERACT_BOUNCE_TOP | INTERACT_BOUNCE_TOP2 |
                 INTERACT_KOOPA | INTERACT_SPINY_WALKING |
                 INTERACT_MR_BLIZZARD | INTERACT_CLAM_OR_BUBBA;
+            const bool kingBobomb =
+                obj_has_behavior(target, bhvKingBobomb) &&
+                target->oAction == 2;
             const bool protectedBoss =
-                obj_has_behavior(target, bhvKingBobomb) ||
+                obj_has_behavior(target, bhvWhompKingBoss) ||
                 obj_has_behavior(target, bhvBowser) ||
                 obj_has_behavior(target, bhvBowserBodyAnchor) ||
                 obj_has_behavior(target, bhvBowserTailAnchor);
             const bool grabbableEnemy =
                 obj_has_behavior(target, bhvBobomb) ||
                 obj_has_behavior(target, bhvChuckya) ||
-                obj_has_behavior(target, bhvHeaveHo);
+                obj_has_behavior(target, bhvHeaveHo) ||
+                kingBobomb;
+            const bool regularWhomp =
+                obj_has_behavior(target, bhvSmallWhomp) &&
+                target->oAction < 8;
             if (target == projectile || target == mario->marioObj ||
                 protectedBoss ||
                 (target->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
-                target->oIntangibleTimer != 0 ||
+                (target->oIntangibleTimer != 0 && !regularWhomp) ||
                 ((target->oInteractType & enemyTypes) == 0 &&
-                 !grabbableEnemy)) {
+                 !grabbableEnemy && !regularWhomp)) {
                 continue;
             }
             const f32 dx = projectile->oPosX - target->oPosX;
             const f32 dz = projectile->oPosZ - target->oPosZ;
             const f32 targetBottom = target->oPosY - target->hitboxDownOffset;
-            const f32 targetTop = targetBottom + fmaxf(target->hitboxHeight, 80.0f);
-            const f32 radius = fmaxf(target->hitboxRadius, 35.0f) + 24.0f;
+            f32 contactRadius = 0.0f;
+            f32 targetHeight = 0.0f;
+            vr_special_moves_get_enemy_contact_bounds(
+                target,
+                &contactRadius,
+                &targetHeight
+            );
+            const f32 targetTop = targetBottom + targetHeight;
+            const f32 radius = fmaxf(contactRadius, 35.0f) + 24.0f;
             if (dx * dx + dz * dz > radius * radius ||
                 projectile->oPosY < targetBottom - 24.0f ||
                 projectile->oPosY > targetTop + 24.0f) {
                 continue;
             }
 
-            mario->interactObj = target;
-            attack_object(mario, target, INT_PUNCH);
-            // Match a normal Bob-omb blast's damage status. This preserves
-            // each enemy's native reaction/death logic instead of inventing
-            // Fire Flower-specific health behavior.
-            target->oInteractStatus |= INT_STATUS_TOUCHED_BOB_OMB;
-            if (obj_has_behavior(target, bhvMrBlizzard)) {
+            const bool rearTarget = regularWhomp || kingBobomb;
+            if (rearTarget) {
+                if (!vr_special_moves_point_is_behind_target(
+                        target,
+                        projectile->oPosX,
+                        projectile->oPosZ
+                    )) {
+                    continue;
+                }
+                vr_special_moves_apply_rear_target_hit(
+                    mario,
+                    target,
+                    projectile->oPosX,
+                    projectile->oPosZ
+                );
+            }
+
+            if (!rearTarget) {
+                mario->interactObj = target;
+                attack_object(
+                    mario,
+                    target,
+                    obj_has_behavior(target, bhvGoomba) &&
+                        target->oGoombaSize == GOOMBA_SIZE_HUGE
+                        ? INT_GROUND_POUND_OR_TWIRL
+                        : INT_PUNCH
+                );
+                // Match a normal Bob-omb blast's damage status. This
+                // preserves native enemy reaction/death logic.
+                target->oInteractStatus |= INT_STATUS_TOUCHED_BOB_OMB;
+            }
+            if (!rearTarget && obj_has_behavior(target, bhvMrBlizzard)) {
                 // Jumping Mr. Blizzards do not consume the generic Bob-omb
                 // status used by most enemies. Give this enemy an explicit
                 // one-hit Fire Flower defeat. Its behavior keeps it defeated
@@ -5385,7 +5744,6 @@ static bool vr_special_moves_rasengan_target_is_protected(
         obj_has_behavior(target, bhvBowser) ||
         obj_has_behavior(target, bhvBowserBodyAnchor) ||
         obj_has_behavior(target, bhvBowserTailAnchor) ||
-        obj_has_behavior(target, bhvWhompKingBoss) ||
         obj_has_behavior(target, bhvBigBullyWithMinions) ||
         obj_has_behavior(target, bhvBigChillBully) ||
         obj_has_behavior(target, bhvEyerokBoss) ||
@@ -5401,10 +5759,11 @@ static bool vr_special_moves_rasengan_target_is_eligible(
     struct MarioState* mario,
     struct Object* object
 ) {
+    const bool whompTarget = vr_special_moves_target_is_whomp(object);
     if (mario == NULL || object == NULL ||
         object == mario->marioObj || object == mario->heldObj ||
         (object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
-        object->oIntangibleTimer != 0) {
+        (object->oIntangibleTimer != 0 && !whompTarget)) {
         return false;
     }
 
@@ -5424,23 +5783,27 @@ static bool vr_special_moves_rasengan_target_is_eligible(
         obj_has_behavior(object, bhvBreakableBoxSmall) ||
         obj_has_behavior(object, bhvJumpingBox) ||
         obj_has_behavior(object, bhvExclamationBox) ||
+        (obj_has_behavior(object, bhvSmallWhomp) &&
+            object->oAction < 8) ||
+        (obj_has_behavior(object, bhvWhompKingBoss) &&
+            object->oAction >= 2 && object->oAction < 8) ||
         (obj_has_behavior(object, bhvKingBobomb) &&
             object->oAction == 2);
     return eligibleType &&
         !vr_special_moves_rasengan_target_is_protected(object);
 }
 
-static bool vr_special_moves_rasengan_is_behind_king_bobomb(
+static bool vr_special_moves_rasengan_is_behind_target(
     struct Object* object
 ) {
     if (object == NULL || sVrRasenganObject == NULL) {
         return false;
     }
-    const s16 sphereYaw = atan2s(
-        sVrRasenganObject->oPosZ - object->oPosZ,
-        sVrRasenganObject->oPosX - object->oPosX
+    return vr_special_moves_point_is_behind_target(
+        object,
+        sVrRasenganObject->oPosX,
+        sVrRasenganObject->oPosZ
     );
-    return abs_angle_diff(sphereYaw, object->oMoveAngleYaw) >= 0x5555;
 }
 
 static struct Object* vr_special_moves_resolve_rasengan_target(
@@ -5498,6 +5861,27 @@ static void vr_special_moves_get_rasengan_target_bounds(
         return;
     }
 
+    if (obj_has_behavior(target, bhvKingBobomb)) {
+        // Enclose the complete rendered boss after a valid back contact even
+        // though the activation zone itself is intentionally much smaller.
+        *centerY = target->oPosY + 200.0f;
+        *radius = 260.0f;
+        return;
+    }
+
+    if (vr_special_moves_target_is_whomp(target)) {
+        f32 contactRadius = 0.0f;
+        f32 contactHeight = 0.0f;
+        vr_special_moves_get_enemy_contact_bounds(
+            target,
+            &contactRadius,
+            &contactHeight
+        );
+        *centerY = target->oPosY + contactHeight * 0.5f;
+        *radius = fmaxf(contactRadius, contactHeight * 0.5f);
+        return;
+    }
+
     const f32 height = fmaxf(
         fmaxf(target->hitboxHeight, target->hurtboxHeight),
         80.0f
@@ -5552,8 +5936,10 @@ static bool vr_special_moves_try_rasengan_hit(
         return false;
     }
 
-    if (obj_has_behavior(object, bhvKingBobomb) &&
-        !vr_special_moves_rasengan_is_behind_king_bobomb(object)) {
+    if ((obj_has_behavior(object, bhvKingBobomb) ||
+         obj_has_behavior(object, bhvSmallWhomp) ||
+         obj_has_behavior(object, bhvWhompKingBoss)) &&
+        !vr_special_moves_rasengan_is_behind_target(object)) {
         return false;
     }
 
@@ -5570,18 +5956,22 @@ static bool vr_special_moves_try_rasengan_hit(
         sVrRasenganImpactVelocity[0] = sins(yaw) * 120.0f;
         sVrRasenganImpactVelocity[2] = coss(yaw) * 120.0f;
     }
-    sVrRasenganTarget->oMoveAngleYaw = atan2s(
-        sVrRasenganImpactVelocity[2],
-        sVrRasenganImpactVelocity[0]
-    );
-    sVrRasenganTarget->oForwardVel = fmaxf(
-        sVrRasenganTarget->oForwardVel,
-        42.0f
-    );
-    sVrRasenganTarget->oVelY = fmaxf(
-        sVrRasenganTarget->oVelY,
-        15.0f
-    );
+    if (!vr_special_moves_target_is_whomp(sVrRasenganTarget)) {
+        sVrRasenganTarget->oMoveAngleYaw = atan2s(
+            sVrRasenganImpactVelocity[2],
+            sVrRasenganImpactVelocity[0]
+        );
+    }
+    if (!vr_special_moves_target_is_whomp(sVrRasenganTarget)) {
+        sVrRasenganTarget->oForwardVel = fmaxf(
+            sVrRasenganTarget->oForwardVel,
+            42.0f
+        );
+        sVrRasenganTarget->oVelY = fmaxf(
+            sVrRasenganTarget->oVelY,
+            15.0f
+        );
+    }
     play_sound(
         SOUND_OBJ2_BOWSER_ROAR,
         object->header.gfx.cameraToObject
@@ -5630,13 +6020,12 @@ static bool vr_special_moves_check_rasengan_contact(
                 continue;
             }
 
-            const f32 objectRadius = fmaxf(
-                object->hitboxRadius,
-                object->hurtboxRadius
-            );
-            const f32 objectHeight = fmaxf(
-                object->hitboxHeight,
-                object->hurtboxHeight
+            f32 objectRadius = 0.0f;
+            f32 objectHeight = 0.0f;
+            vr_special_moves_get_enemy_contact_bounds(
+                object,
+                &objectRadius,
+                &objectHeight
             );
             if (objectRadius <= 0.0f || objectHeight <= 0.0f) {
                 continue;
@@ -5656,13 +6045,18 @@ static bool vr_special_moves_check_rasengan_contact(
             }
 
             bool allowInteract = true;
-            smlua_call_event_hooks(
-                HOOK_ALLOW_INTERACT,
-                mario,
-                object,
-                object->oInteractType,
-                &allowInteract
-            );
+            const bool explicitRearTarget =
+                obj_has_behavior(object, bhvKingBobomb) ||
+                vr_special_moves_target_is_whomp(object);
+            if (!explicitRearTarget) {
+                smlua_call_event_hooks(
+                    HOOK_ALLOW_INTERACT,
+                    mario,
+                    object,
+                    object->oInteractType,
+                    &allowInteract
+                );
+            }
             if (allowInteract && vr_special_moves_try_rasengan_hit(
                     mario,
                     VR_CONTROLLER_RIGHT,
@@ -5693,11 +6087,15 @@ static void vr_special_moves_update_rasengan_impact(
     const bool bobombTarget = obj_has_behavior(target, bhvBobomb);
     const bool chainChompTarget = obj_has_behavior(target, bhvChainChomp);
     const bool kingBobombTarget = obj_has_behavior(target, bhvKingBobomb);
+    const bool kingWhompTarget = obj_has_behavior(target, bhvWhompKingBoss);
+    const bool regularWhompTarget =
+        obj_has_behavior(target, bhvSmallWhomp);
     const bool pokeyTarget = obj_has_behavior(target, bhvPokey);
     const u16 pushFrames = bobombTarget
         ? VR_RASENGAN_BOBOMB_CARRY_FRAMES
         : VR_RASENGAN_IMPACT_GROW_FRAMES;
-    if (sVrRasenganImpactFrames <= pushFrames) {
+    if (sVrRasenganImpactFrames <= pushFrames &&
+        !kingWhompTarget && !regularWhompTarget) {
         const f32 horizontalLength = sqrtf(
             sVrRasenganImpactVelocity[0] *
                 sVrRasenganImpactVelocity[0] +
@@ -5755,12 +6153,16 @@ static void vr_special_moves_update_rasengan_impact(
     obj_update_gfx_pos_and_angle(sVrRasenganObject);
 
     if (sVrRasenganImpactFrames <= VR_RASENGAN_IMPACT_GROW_FRAMES) {
-        target->oMoveAngleYaw = atan2s(
-            sVrRasenganImpactVelocity[2],
-            sVrRasenganImpactVelocity[0]
-        );
-        target->oForwardVel = fmaxf(target->oForwardVel, 42.0f);
-        target->oVelY = fmaxf(target->oVelY, 10.0f);
+        if (!kingWhompTarget && !regularWhompTarget) {
+            target->oMoveAngleYaw = atan2s(
+                sVrRasenganImpactVelocity[2],
+                sVrRasenganImpactVelocity[0]
+            );
+        }
+        if (!kingWhompTarget && !regularWhompTarget) {
+            target->oForwardVel = fmaxf(target->oForwardVel, 42.0f);
+            target->oVelY = fmaxf(target->oVelY, 10.0f);
+        }
         if (!bobombTarget &&
             sVrRasenganImpactFrames == VR_RASENGAN_IMPACT_GROW_FRAMES) {
             mario->interactObj = target;
@@ -5769,11 +6171,39 @@ static void vr_special_moves_update_rasengan_impact(
             } else if (kingBobombTarget) {
                 // Use King Bob-omb's native thrown action so landing removes
                 // exactly one health point and preserves his three-hit fight.
+                vr_special_moves_release_mario_from_grabber(mario, target);
                 target->oAction = 4;
                 target->oSubAction = 0;
                 target->oMoveFlags &= ~OBJ_MOVE_MASK_ON_GROUND;
                 target->oForwardVel = fmaxf(target->oForwardVel, 52.0f);
                 target->oVelY = fmaxf(target->oVelY, 35.0f);
+            } else if (kingWhompTarget) {
+                // A rear Rasengan is one native boss hit. Preserve the
+                // three-hit health counter and the original defeat dialog.
+                target->oHealth = max(target->oHealth - 1, 0);
+                target->oForwardVel = 0.0f;
+                target->oVelY = 0.0f;
+                target->oFaceAnglePitch = 0;
+                target->oAngleVelPitch = 0;
+                target->oAction = target->oHealth == 0 ? 8 : 2;
+                target->oSubAction = 0;
+                play_sound(
+                    SOUND_OBJ2_WHOMP_SOUND_SHORT,
+                    target->header.gfx.cameraToObject
+                );
+            } else if (regularWhompTarget) {
+                target->oNumLootCoins = max(target->oNumLootCoins, 5);
+                obj_spawn_loot_yellow_coins(
+                    target,
+                    target->oNumLootCoins,
+                    20.0f
+                );
+                target->oForwardVel = 0.0f;
+                target->oVelY = 0.0f;
+                target->oFaceAnglePitch = 0;
+                target->oAngleVelPitch = 0;
+                target->oAction = 8;
+                target->oSubAction = 0;
             } else {
                 const bool breakableTarget =
                     obj_has_behavior(target, bhvBreakableBox) ||
@@ -5783,10 +6213,17 @@ static void vr_special_moves_update_rasengan_impact(
                     vr_special_moves_spawn_fire_flower_chance(
                         target,
                         mario,
-                        0.25f
+                        0.30f
                     );
                 }
-                attack_object(mario, target, INT_PUNCH);
+                attack_object(
+                    mario,
+                    target,
+                    obj_has_behavior(target, bhvGoomba) &&
+                        target->oGoombaSize == GOOMBA_SIZE_HUGE
+                        ? INT_GROUND_POUND_OR_TWIRL
+                        : INT_PUNCH
+                );
                 target->oInteractStatus |= INT_STATUS_TOUCHED_BOB_OMB;
                 if (!chainChompTarget && !breakableTarget &&
                     !obj_has_behavior(target, bhvExclamationBox)) {
@@ -5801,7 +6238,8 @@ static void vr_special_moves_update_rasengan_impact(
                 true
             );
             network_send_object(target);
-            if (kingBobombTarget || pokeyTarget) {
+            if (kingBobombTarget || kingWhompTarget ||
+                regularWhompTarget || pokeyTarget) {
                 vr_special_moves_clear_rasengan();
                 return;
             }
@@ -5834,6 +6272,64 @@ static void vr_special_moves_update_rasengan_impact(
     }
 }
 
+static void vr_special_moves_apply_rasen_shuriken_damage(
+    struct MarioState* mario,
+    struct Object* explosion,
+    struct Object* object
+) {
+    if (mario == NULL || explosion == NULL || object == NULL) {
+        return;
+    }
+
+    const bool rearTarget =
+        obj_has_behavior(object, bhvKingBobomb) ||
+        vr_special_moves_target_is_whomp(object);
+    if (rearTarget) {
+        vr_special_moves_apply_rear_target_hit(
+            mario,
+            object,
+            explosion->oPosX,
+            explosion->oPosZ
+        );
+        return;
+    }
+    if (obj_has_behavior(object, bhvPokey)) {
+        vr_special_moves_rasengan_attack_pokey(mario, object);
+        return;
+    }
+    if (obj_has_behavior(object, bhvBreakableBox) ||
+        obj_has_behavior(object, bhvBreakableBoxSmall) ||
+        obj_has_behavior(object, bhvJumpingBox)) {
+        vr_special_moves_spawn_fire_flower_chance(
+            object,
+            mario,
+            0.30f
+        );
+    }
+    mario->interactObj = object;
+    attack_object(
+        mario,
+        object,
+        obj_has_behavior(object, bhvGoomba) &&
+            object->oGoombaSize == GOOMBA_SIZE_HUGE
+            ? INT_GROUND_POUND_OR_TWIRL
+            : INT_PUNCH
+    );
+    object->oInteractStatus |= INT_STATUS_TOUCHED_BOB_OMB;
+    if (!obj_has_behavior(object, bhvChainChomp) &&
+        (object->oInteractType & INTERACT_BREAKABLE) == 0) {
+        object->oHealth = max(object->oHealth - 1, 0);
+    }
+    smlua_call_event_hooks(
+        HOOK_ON_INTERACT,
+        mario,
+        object,
+        object->oInteractType,
+        true
+    );
+    network_send_object(object);
+}
+
 static void vr_special_moves_rasen_shuriken_damage_area(
     struct MarioState* mario,
     struct Object* explosion
@@ -5842,6 +6338,7 @@ static void vr_special_moves_rasen_shuriken_damage_area(
         return;
     }
     const f32 radius = VR_RASEN_SHURIKEN_EXPLOSION_RADIUS;
+    const u16 explosionFrame = sVrRasenShurikenExplosionFrames;
     for (s32 listIndex = 0; listIndex < NUM_OBJ_LISTS; listIndex++) {
         struct ObjectNode* list = &gObjectLists[listIndex];
         struct ObjectNode* node = list->next;
@@ -5852,17 +6349,15 @@ static void vr_special_moves_rasen_shuriken_damage_area(
                 !vr_special_moves_rasengan_target_is_eligible(
                     mario,
                     object
-                ) ||
-                obj_has_behavior(object, bhvKingBobomb)) {
+                )) {
                 continue;
             }
-            const f32 objectRadius = fmaxf(
-                fmaxf(object->hitboxRadius, object->hurtboxRadius),
-                20.0f
-            );
-            const f32 objectHeight = fmaxf(
-                fmaxf(object->hitboxHeight, object->hurtboxHeight),
-                40.0f
+            f32 objectRadius = 0.0f;
+            f32 objectHeight = 0.0f;
+            vr_special_moves_get_enemy_contact_bounds(
+                object,
+                &objectRadius,
+                &objectHeight
             );
             const f32 dx = object->oPosX - explosion->oPosX;
             const f32 dz = object->oPosZ - explosion->oPosZ;
@@ -5876,39 +6371,71 @@ static void vr_special_moves_rasen_shuriken_damage_area(
                 continue;
             }
 
+            const bool rearTarget =
+                obj_has_behavior(object, bhvKingBobomb) ||
+                vr_special_moves_target_is_whomp(object);
+            if (rearTarget &&
+                !vr_special_moves_point_is_behind_target(
+                    object,
+                    explosion->oPosX,
+                    explosion->oPosZ
+                )) {
+                continue;
+            }
+
+            struct Object* damageTarget = object;
             if (obj_has_behavior(object, bhvPokeyBodyPart) &&
                 object->parentObj != NULL &&
                 obj_has_behavior(object->parentObj, bhvPokey)) {
-                vr_special_moves_rasengan_attack_pokey(
+                damageTarget = object->parentObj;
+            }
+
+            s32 hitSlot = -1;
+            s32 freeSlot = -1;
+            for (u32 i = 0;
+                 i < VR_RASEN_SHURIKEN_TRACKED_TARGET_COUNT;
+                 i++) {
+                if (sVrRasenShurikenHitTargets[i] == damageTarget) {
+                    hitSlot = (s32)i;
+                    break;
+                }
+                if (freeSlot < 0 && sVrRasenShurikenHitTargets[i] == NULL) {
+                    freeSlot = (s32)i;
+                }
+            }
+            if (hitSlot < 0) {
+                if (freeSlot < 0) {
+                    continue;
+                }
+                hitSlot = freeSlot;
+                sVrRasenShurikenHitTargets[hitSlot] = damageTarget;
+                sVrRasenShurikenHitFirstFrame[hitSlot] = explosionFrame;
+                sVrRasenShurikenHitLastFrame[hitSlot] = explosionFrame;
+                sVrRasenShurikenHitContinuous[hitSlot] =
+                    explosionFrame == 1U;
+                vr_special_moves_apply_rasen_shuriken_damage(
                     mario,
-                    object->parentObj
+                    explosion,
+                    damageTarget
                 );
-                continue;
+            } else {
+                if (sVrRasenShurikenHitLastFrame[hitSlot] + 1U !=
+                    explosionFrame) {
+                    sVrRasenShurikenHitContinuous[hitSlot] = false;
+                }
+                sVrRasenShurikenHitLastFrame[hitSlot] = explosionFrame;
             }
-            if (obj_has_behavior(object, bhvBreakableBox) ||
-                obj_has_behavior(object, bhvBreakableBoxSmall) ||
-                obj_has_behavior(object, bhvJumpingBox)) {
-                vr_special_moves_spawn_fire_flower_chance(
-                    object,
+
+            if (explosionFrame == VR_RASEN_SHURIKEN_EXPLOSION_FRAMES &&
+                sVrRasenShurikenHitContinuous[hitSlot] &&
+                sVrRasenShurikenHitFirstFrame[hitSlot] == 1U) {
+                vr_special_moves_apply_rasen_shuriken_damage(
                     mario,
-                    0.25f
+                    explosion,
+                    damageTarget
                 );
+                sVrRasenShurikenHitContinuous[hitSlot] = false;
             }
-            mario->interactObj = object;
-            attack_object(mario, object, INT_PUNCH);
-            object->oInteractStatus |= INT_STATUS_TOUCHED_BOB_OMB;
-            if (!obj_has_behavior(object, bhvChainChomp) &&
-                (object->oInteractType & INTERACT_BREAKABLE) == 0) {
-                object->oHealth = max(object->oHealth - 3, 0);
-            }
-            smlua_call_event_hooks(
-                HOOK_ON_INTERACT,
-                mario,
-                object,
-                object->oInteractType,
-                true
-            );
-            network_send_object(object);
         }
     }
 }
@@ -5921,6 +6448,12 @@ static void vr_special_moves_rasen_shuriken_explode(
         return;
     }
     sVrRasenShurikenExplosionFrames = 1;
+    for (u32 i = 0; i < VR_RASEN_SHURIKEN_TRACKED_TARGET_COUNT; i++) {
+        sVrRasenShurikenHitTargets[i] = NULL;
+        sVrRasenShurikenHitFirstFrame[i] = 0;
+        sVrRasenShurikenHitLastFrame[i] = 0;
+        sVrRasenShurikenHitContinuous[i] = false;
+    }
     vec3f_set(sVrRasenShurikenVelocity, 0.0f, 0.0f, 0.0f);
     obj_set_model(sVrRasenShurikenProjectile, MODEL_VR_RASENGAN);
     obj_scale(
@@ -5954,24 +6487,30 @@ static bool vr_special_moves_rasen_shuriken_hits_enemy(
             if (!vr_special_moves_rasengan_target_is_eligible(
                     mario,
                     object
-                ) ||
-                obj_has_behavior(object, bhvKingBobomb)) {
+                )) {
                 continue;
             }
-            const f32 objectRadius = fmaxf(
-                fmaxf(object->hitboxRadius, object->hurtboxRadius),
-                20.0f
-            ) + 20.0f;
-            const f32 objectHeight = fmaxf(
-                fmaxf(object->hitboxHeight, object->hurtboxHeight),
-                40.0f
+            f32 objectRadius = 0.0f;
+            f32 objectHeight = 0.0f;
+            vr_special_moves_get_enemy_contact_bounds(
+                object,
+                &objectRadius,
+                &objectHeight
             );
+            objectRadius += 20.0f;
             const f32 dx = projectile->oPosX - object->oPosX;
             const f32 dz = projectile->oPosZ - object->oPosZ;
             const f32 bottom = object->oPosY - object->hitboxDownOffset;
             if (dx * dx + dz * dz <= objectRadius * objectRadius &&
                 projectile->oPosY + 20.0f >= bottom &&
-                projectile->oPosY - 20.0f <= bottom + objectHeight) {
+                projectile->oPosY - 20.0f <= bottom + objectHeight &&
+                (!(obj_has_behavior(object, bhvKingBobomb) ||
+                   vr_special_moves_target_is_whomp(object)) ||
+                 vr_special_moves_point_is_behind_target(
+                    object,
+                    projectile->oPosX,
+                    projectile->oPosZ
+                 ))) {
                 return true;
             }
         }
@@ -5997,9 +6536,29 @@ static void vr_special_moves_update_rasen_shuriken_projectile(
         projectile->oFaceAngleYaw = 0;
         projectile->oFaceAngleRoll = 0;
         obj_update_gfx_pos_and_angle(projectile);
-        if (++sVrRasenShurikenExplosionFrames >
+        const u16 explosionFrame =
+            ++sVrRasenShurikenExplosionFrames;
+        if (explosionFrame >
             VR_RASEN_SHURIKEN_EXPLOSION_FRAMES) {
             vr_special_moves_clear_rasen_shuriken_projectile();
+        } else if (explosionFrame >
+            VR_RASEN_SHURIKEN_EXPLOSION_HOLD_FRAMES) {
+            const u16 fadeFrame = explosionFrame -
+                VR_RASEN_SHURIKEN_EXPLOSION_HOLD_FRAMES;
+            projectile->oOpacity = (u8)(
+                (u32)VR_RASENGAN_MAX_OPACITY *
+                (VR_RASEN_SHURIKEN_EXPLOSION_FADE_FRAMES -
+                 fadeFrame) /
+                VR_RASEN_SHURIKEN_EXPLOSION_FADE_FRAMES
+            );
+        } else {
+            projectile->oOpacity = VR_RASENGAN_MAX_OPACITY;
+        }
+        if (explosionFrame <= VR_RASEN_SHURIKEN_EXPLOSION_FRAMES) {
+            // Keep the rendered bubble's entire volume live. Targets entering
+            // later receive one hit; a target continuously inside from the
+            // first frame through the fade receives one final second hit.
+            vr_special_moves_rasen_shuriken_damage_area(mario, projectile);
         }
         return;
     }

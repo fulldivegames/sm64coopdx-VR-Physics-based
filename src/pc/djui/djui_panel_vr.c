@@ -12,7 +12,6 @@
 #include "level_table.h"
 
 static bool sVrMode = false;
-static bool sVrSpawnFireFlowerAction = false;
 
 #define VR_LEVEL_SELECT_ENTRIES(X) \
     X(castle_grounds, "Castle Grounds", LEVEL_CASTLE_GROUNDS) \
@@ -122,11 +121,41 @@ static unsigned int djui_panel_vr_clamp_uint(
 
 static void djui_panel_vr_spawn_fire_flower(struct DjuiBase* caller) {
     (void)caller;
-    if (!sVrSpawnFireFlowerAction) {
-        return;
-    }
-    sVrSpawnFireFlowerAction = false;
     vr_special_moves_spawn_cheat_fire_flower();
+}
+
+static void djui_panel_vr_spawn_wing_cap(UNUSED struct DjuiBase* caller) {
+    vr_special_moves_spawn_cheat_cap(VR_CHEAT_SPAWN_WING_CAP);
+}
+
+static void djui_panel_vr_spawn_vanish_cap(UNUSED struct DjuiBase* caller) {
+    vr_special_moves_spawn_cheat_cap(VR_CHEAT_SPAWN_VANISH_CAP);
+}
+
+static void djui_panel_vr_spawn_metal_cap(UNUSED struct DjuiBase* caller) {
+    vr_special_moves_spawn_cheat_cap(VR_CHEAT_SPAWN_METAL_CAP);
+}
+
+static void djui_panel_vr_spawn_menu_create(struct DjuiBase* caller) {
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create("Spawn Menu", false);
+    struct DjuiBase* body = djui_three_panel_get_body(panel);
+
+    djui_button_create(body, "Wing Cap", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_spawn_wing_cap);
+    djui_button_create(body, "Vanish Cap", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_spawn_vanish_cap);
+    djui_button_create(body, "Metal Cap", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_spawn_metal_cap);
+    djui_button_create(body, "Fire Flower", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_spawn_fire_flower);
+    djui_button_create(
+        body,
+        DLANG(MENU, BACK),
+        DJUI_BUTTON_STYLE_BACK,
+        djui_panel_menu_back
+    );
+    djui_panel_add(caller, panel, NULL);
 }
 
 static void djui_panel_vr_mode_changed(struct DjuiBase* caller) {
@@ -255,7 +284,7 @@ static void djui_panel_vr_motion_control_defaults(
     configVrPunchSpeed = 150;
     configVrPunchDistance = 20;
     configVrPunchGripThreshold = 35;
-    configVrPunchColliderLength = 250;
+    configVrPunchColliderLength = 275;
     configVrBowserSpinAcceleration = 100;
     configVrBowserMaxSpinSpeed = 100;
 }
@@ -331,7 +360,7 @@ static void djui_panel_vr_immersion_defaults(struct DjuiBase* caller) {
     configVrImmersiveRemovableCap = false;
     configVrImmersiveLookDownTransparency = true;
     configVrImmersiveCarrySpeed = false;
-    configVrImmersiveStarSpawnFocus = true;
+    configVrImmersiveStarSpawnFocus = false;
     configVrImmersiveGhostPunchArm = true;
     configVrExperimentalSideFlipFollow = true;
     configVrExperimentalWallJumpTurn = true;
@@ -1373,6 +1402,12 @@ static void djui_panel_vr_cheats_create(struct DjuiBase* caller) {
             DJUI_BUTTON_STYLE_NORMAL,
             djui_panel_vr_level_select_create
         );
+        djui_button_create(
+            body,
+            "Spawn Menu",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_vr_spawn_menu_create
+        );
         djui_checkbox_create(
             body,
             "Climb Any Wall or Ceiling",
@@ -1396,13 +1431,6 @@ static void djui_panel_vr_cheats_create(struct DjuiBase* caller) {
             "Free Fly",
             &configVrCheatFreeFly,
             NULL
-        );
-        sVrSpawnFireFlowerAction = false;
-        djui_checkbox_create(
-            body,
-            "Spawn Fire Flower",
-            &sVrSpawnFireFlowerAction,
-            djui_panel_vr_spawn_fire_flower
         );
         djui_checkbox_create(
             body,
@@ -1516,7 +1544,7 @@ static void djui_panel_vr_special_moves_create(
     {
         djui_checkbox_create(
             body,
-            "Fire Flower (50% Item Boxes / 25% Cork Boxes)",
+            "Fire Flower (50% Item Boxes / 30% Cork Boxes)",
             &configVrSpecialFireFlower,
             NULL
         );

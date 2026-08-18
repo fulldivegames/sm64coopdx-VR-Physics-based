@@ -2015,8 +2015,17 @@ static void vr_apply_star_spawn_camera_focus(
     Vec3f cameraPosition,
     Vec3f forward
 ) {
+    if (!configVrImmersiveStarSpawnFocus) {
+        // Do not let a blend accumulated while this option was enabled leak
+        // into later star cutscenes after the player disables it.
+        sVrStarSpawnFocusValid = false;
+        sVrStarSpawnFocusTimestamp = 0;
+        sVrStarSpawnFocusBlendPrev = 0.0f;
+        sVrStarSpawnFocusBlend = 0.0f;
+        return;
+    }
+
     const bool cutsceneActive =
-        configVrImmersiveStarSpawnFocus &&
         gCamera != NULL &&
         (gCamera->cutscene == CUTSCENE_STAR_SPAWN ||
          gCamera->cutscene == CUTSCENE_RED_COIN_STAR_SPAWN) &&
@@ -2163,6 +2172,10 @@ static bool vr_get_stabilized_first_person_pose(
             (f32)cameraHeightOffset;
         cameraAnchor[2] = marioAnchor[2];
     }
+    // Keep the regular first-person eye point just above the animated upper
+    // torso. This small constant clearance prevents running poses from
+    // exposing the inside of the chest without changing saved height values.
+    cameraAnchor[1] += 7.0f;
     cameraAnchor[1] -= vr_get_smoothed_sinking_camera_depth();
     cameraAnchor[1] -= vr_get_ledge_camera_drop();
     cameraPosition[0] = cameraAnchor[0] +
@@ -5499,6 +5512,14 @@ static void vr_adjust_local_mario_body_transform(
         heightOffset += vr_get_local_mario_torso_alignment(
             heightOffset
         );
+        if ((gMarioStates[0].action & ACT_GROUP_MASK) ==
+            ACT_GROUP_MOVING) {
+            // Walking/running animations lift the torso root slightly above
+            // its idle placement. Counter only that small visual difference
+            // so changing between standing and moving does not make the chest
+            // jump, without changing Mario's camera, physics, or collision.
+            heightOffset -= 2.0f;
+        }
     }
 
     // Animated part translations are local to their parent bone. Applying

@@ -14,7 +14,7 @@
 </p>
 
 > [!IMPORTANT]
-> The current public release is **v0.7.1**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur.
+> The current public release is **v0.7.2**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur.
 
 SM64 Co-Op DX VR currently targets 64-bit Windows, OpenGL, and OpenXR. It keeps the original game's flat-screen mode and multiplayer foundation while adding native stereoscopic rendering, 6DoF tracking, VR-aware cameras, remappable motion-controller input, physical interactions, comfort options, and extensive calibration settings.
 
@@ -82,7 +82,7 @@ The lower-left corner of the main menu shows the installed VR version and checks
 The Windows release keeps the normal SM64 Co-Op DX mod layout inside the extracted game folder:
 
 ```text
-SM64-Co-Op-DX-VR-Windows-v0.7.1/
+SM64-Co-Op-DX-VR-Windows-v0.7.2/
 ├── mods/
 ├── dynos/
 │   └── packs/
@@ -202,13 +202,28 @@ Third Person Mode centers the stereoscopic VR view on Mario and is intended for 
 
 ### Fire Flower
 
-Fire Flower is enabled by default under **VR > Special Moves**. Supported coin/1-Up item boxes and cork boxes can release a flower. While powered up, close the right glove with Grip, hold Right Trigger to charge an orange fireball, then physically swing and release Trigger to throw it. The normal Attack button fires a quick shot outside first-person mode. Fire Mario's palette and music end with the power-up; **Cheats** also provides **Spawn Fire Flower** and **No Fire Flower Timer**.
+Fire Flower is enabled by default under **VR > Special Moves**. Supported coin/1-Up item boxes have a 50% flower chance and supported cork boxes have a 30% chance. While powered up, close the right glove with Grip, hold Right Trigger to charge an orange fireball, then physically swing and release Trigger to throw it. The normal Attack button fires a quick shot outside first-person mode. Fire Mario's palette and music end with the power-up; **Cheats > Spawn Menu** can create a Fire Flower and **No Fire Flower Timer** keeps the power until a room transition.
 
 ### Rasengan and Rasen-Shuriken
 
 **Rasengan / Rasen-Shuriken** is enabled by default under **Special Moves**. Hold Right Trigger with an open right hand and circle a closed, empty left glove around it until the Rasengan finishes charging. Keep holding Right Trigger to retain it, then touch a supported enemy or breakable box with the sphere. The optional **Rasengan Grip + Trigger** setting replaces the circling gesture.
 
-With a charged Rasengan held, hold the mapped **Special** button—Left Secondary by default—while keeping the hand above the headset when **Rasen-Shuriken Overhead Charge** is enabled. Once charged, physically swing and release Right Trigger to throw it. It flies until it strikes geometry or a supported enemy, then expands into an area-damage sphere. Charge-time sliders are available in **Cheats**. Boss and actor-specific protections still follow the move's built-in rules.
+With a charged Rasengan held, hold the mapped **Special** button—Left Secondary by default—while keeping the hand above the headset when **Rasen-Shuriken Overhead Charge** is enabled. Once charged, physically swing and release Right Trigger to throw it. It flies until it strikes geometry or a supported enemy, then expands into a rotating area-damage sphere for 1.5 seconds and fades over 0.5 seconds. Entering the sphere causes one Bob-omb-strength hit; remaining inside for its complete lifetime causes a second. King Bob-omb and Whomps accept these moves only through their back weak spots, preserve their native multi-hit boss rules, and retain normal grab behavior. Charge-time sliders are available in **Cheats**.
+
+### Level Select and Spawn Menu
+
+Open **Settings > VR > Cheats** while in a game:
+
+- **Level Select** opens a scrollable list of the castle areas, all main courses, secret stages, cap stages, Bowser stages/arenas, and the ending. Courses with missions enter through their normal Act Select path.
+- **Spawn Menu** creates a Wing Cap, Vanish Cap, Metal Cap, or Fire Flower above Mario. Close the menu to let the selected pickup fall into the level.
+
+These are cheats and can bypass normal progression. They do not alter save data unless normal gameplay inside the destination does so.
+
+### Custom color-palette selector
+
+Open the player palette editor and choose **Color Palette** to open the controller-friendly quick selector. It provides 44 distinct named colors, including direct red/blue values, neutrals, skin tones, metallic colors, and extended crayon-style shades. Selecting a color returns to the editor and writes its RGB/hex value into the currently selected character part; Back exits without changing it. Normal RGB sliders and hex editing remain available.
+
+Custom presets remain saved in the normal palette folder. The generated **Fireflower** preset controls the temporary Fire Flower outfit, so players can edit that preset to customize their powered-up colors; the previously selected normal palette is restored when the power ends.
 
 ## Core VR features
 
@@ -259,7 +274,7 @@ The headset remains free inside the cannon. With the default Aim Direction Cone 
 | HUD Settings | HUD opacity and corner spread |
 | Immersion | Crouch/sand camera, face-stuck blackout, cannon cone, 3D sound, ledge camera, underwater filter, side-flip follow, wall-jump turn, and physical crouching |
 | Effects | Twirl Tornado Effect |
-| Cheats | Level Select, Climb Any Wall or Ceiling, special-move charge times, and flying/swimming/running speed controls |
+| Cheats | Level Select, Spawn Menu, Climb Any Wall or Ceiling, special-move charge times, and flying/swimming/running speed controls |
 | Experimental | Flat first person, True First Person, True Diving (Camera Effect), Arms Mode, and original Mario movement |
 
 Every VR submenu includes **Set to Defaults**.
@@ -281,15 +296,28 @@ v0.6.27 expands compatibility around mod discovery, Lua HUD/menu presentation, c
 
 Compatibility is not universal. Mods that replace camera, player action, input, HUD, rendering, collision, or character geometry can conflict with VR behavior. Install one at a time when troubleshooting and report the exact mod name/version, headset/runtime, and reproduction steps. A mod working in normal SM64 Co-Op DX does not guarantee that every first-person physical interaction will behave correctly.
 
-## v0.7.1 — Special Moves and Level Select Update
+## v0.7.2 — Boss Combat, Spawn Tools, and Camera Fixes
+
+- Added **Cheats > Spawn Menu** with Wing Cap, Vanish Cap, Metal Cap, and Fire Flower buttons while retaining the complete scrollable Level Select
+- Expanded Rasengan and Rasen-Shuriken interactions across giant Goombas, Pokeys, breakable boxes, Whomps, King Whomp, and King Bob-omb while preserving protected actors and native boss progression
+- Added the persistent Rasen-Shuriken explosion volume: one hit on entry, a second hit only after continuous full-duration exposure, a 1.5-second hold, and a 0.5-second fade
+- Tightened King Bob-omb's physical grab and special-move activation to a back-sized weak spot without changing ordinary Bob-ombs or other normal grabbables; impact visuals still wrap his complete model
+- Added rear Fire Flower damage to King Bob-omb as one native boss hit and stabilized Whomp reactions so attacks cannot leave them walking face-down or trapped in an invalid action
+- Raised and stabilized the first-person camera/body relationship, matched moving torso height to idle height, and kept the previous-height compatibility option
+- Changed **Look Toward Spawned Star** to default off for new and upgraded installs and immediately clears any residual camera blend when disabled
+- Raised cork-box Fire Flower odds to 30%, retained 50% supported item-box odds, and kept the smaller pickup presentation
+- Added the 44-color quick palette selector with reliable controller scrolling, direct RGB/hex application, persistent custom presets, and an editable **Fireflower** power-up palette
+- Kept headset/player damage contact synchronized, narrowed physical anchoring to intended actors, and slightly extended the default punch reach without limiting its slider
+
+## Previous Release Notes
+
+### v0.7.1 — Special Moves and Level Select Update
 
 - Added the default-on **Rasengan / Rasen-Shuriken** special move with physical charging, headset-rate animation, hand contact attacks, physical throwing, collision-triggered area damage, protected-boss rules, and configurable charge controls
 - Added **Cheats > Level Select**, a scrollable in-game list covering the castle, all 15 main courses, Bowser stages and arenas, secret/cap stages, and the ending; normal courses use their native Act Select entry path
 - Kept the corrected first-person Mario body relationship as the default and added **Camera Settings > Use Previous Mario Body Height** for players who prefer the earlier height
 - Improved tracked hand/held-effect interpolation at 72, 90, and 120 Hz while preserving the original 30 Hz gameplay simulation
 - Added and refined color-palette selection, DynOS refresh, modded HUD placement, ghost button-punch presentation, Fire Flower behavior, enemy interactions, and VR camera stability
-
-## Previous Release Notes
 
 ### v0.7.0 — Chat and Fireball Update
 

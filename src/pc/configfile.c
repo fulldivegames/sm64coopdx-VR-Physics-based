@@ -152,7 +152,7 @@ bool         configVrImmersiveUnderwaterFilter    = true;
 bool         configVrImmersiveRemovableCap        = false;
 bool         configVrImmersiveLookDownTransparency = true;
 bool         configVrImmersiveCarrySpeed          = false;
-bool         configVrImmersiveStarSpawnFocus       = true;
+bool         configVrImmersiveStarSpawnFocus       = false;
 bool         configVrImmersiveGhostPunchArm        = true;
 bool         configVrMovementOverhaul             = false;
 bool         configVrMarioPunchSound              = true;
@@ -162,10 +162,11 @@ bool         configVrTurnDuringJumps              = true;
 unsigned int configVrPunchSpeed                   = 150;
 unsigned int configVrPunchDistance                = 20;
 unsigned int configVrPunchGripThreshold           = 35;
-unsigned int configVrPunchColliderLength          = 250;
+unsigned int configVrPunchColliderLength          = 275;
 unsigned int configVrBowserSpinAcceleration       = 100;
 unsigned int configVrBowserMaxSpinSpeed           = 100;
 static unsigned int sConfigVrInteractionTuningVersion = 0;
+static unsigned int sConfigVrStarFocusDefaultVersion = 0;
 unsigned int configVrGloveSize                    = 70;
 unsigned int configVrLeftGloveRotationX           = 180;
 unsigned int configVrLeftGloveRotationY           = 0;
@@ -511,6 +512,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_bowser_spin_acceleration",    .type = CONFIG_TYPE_UINT, .uintValue = &configVrBowserSpinAcceleration},
     {.name = "vr_bowser_max_spin_speed",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrBowserMaxSpinSpeed},
     {.name = "vr_interaction_tuning_version",  .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrInteractionTuningVersion},
+    {.name = "vr_star_focus_default_version",  .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrStarFocusDefaultVersion},
     {.name = "vr_glove_size",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrGloveSize},
     {.name = "vr_left_glove_rotation_x",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrLeftGloveRotationX},
     {.name = "vr_left_glove_rotation_y",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrLeftGloveRotationY},
@@ -1099,6 +1101,26 @@ static void configfile_migrate_vr_interaction_tuning(void) {
         }
         sConfigVrInteractionTuningVersion = 2;
     }
+
+    if (sConfigVrInteractionTuningVersion < 3) {
+        // Slightly extend only the prior default. Preserve every manually
+        // calibrated value and retain the slider's full 50-300% range.
+        if (configVrPunchColliderLength == 250U) {
+            configVrPunchColliderLength = 275U;
+        }
+        sConfigVrInteractionTuningVersion = 3;
+    }
+}
+
+static void configfile_migrate_vr_star_focus_default(void) {
+    if (sConfigVrStarFocusDefaultVersion >= 1) {
+        return;
+    }
+
+    // Star focus previously shipped enabled. Turn that former default off
+    // once for upgraded installs; subsequent player changes are preserved.
+    configVrImmersiveStarSpawnFocus = false;
+    sConfigVrStarFocusDefaultVersion = 1;
 }
 
 // Loads the config file specified by 'filename'
@@ -1119,6 +1141,7 @@ static void configfile_load_internal(const char *filename, bool* error) {
         configfile_migrate_vr_glove_calibration();
         configfile_migrate_vr_camera_height();
         configfile_migrate_vr_interaction_tuning();
+        configfile_migrate_vr_star_focus_default();
         configfile_save(filename);
         return;
     }
@@ -1234,6 +1257,7 @@ NEXT_OPTION:
     configfile_migrate_vr_glove_calibration();
     configfile_migrate_vr_camera_height();
     configfile_migrate_vr_interaction_tuning();
+    configfile_migrate_vr_star_focus_default();
 
     if (configGraphicsBackend < GAPI_GL || configGraphicsBackend > GAPI_MAX) { configGraphicsBackend = GAPI_GL; }
 

@@ -16,6 +16,10 @@ void vr_hand_interaction_apply_hand_collision_position(
 void vr_hand_interaction_update_headset_collider(
     struct MarioState* mario
 );
+bool vr_hand_interaction_validate_headset_damage_contact(
+    struct MarioState* mario,
+    struct Object* object
+);
 bool vr_hand_interaction_get_climb_camera_offset(Vec3f offset);
 bool vr_hand_interaction_is_physical_climb_active(
     struct MarioState* mario
@@ -74,6 +78,12 @@ bool vr_special_moves_spawn_fire_flower_chance(
     f32 chance
 );
 bool vr_special_moves_spawn_cheat_fire_flower(void);
+enum VrCheatSpawnCap {
+    VR_CHEAT_SPAWN_WING_CAP,
+    VR_CHEAT_SPAWN_VANISH_CAP,
+    VR_CHEAT_SPAWN_METAL_CAP,
+};
+bool vr_special_moves_spawn_cheat_cap(enum VrCheatSpawnCap cap);
 bool vr_special_moves_fire_flower_active(void);
 bool vr_special_moves_grant_fire_flower(void);
 Gfx* geo_vr_fireball_color(
@@ -82,6 +92,11 @@ Gfx* geo_vr_fireball_color(
     void* context
 );
 Gfx* geo_vr_rasengan_color(
+    s32 callContext,
+    struct GraphNode* node,
+    void* context
+);
+Gfx* geo_vr_rasengan_ring_color(
     s32 callContext,
     struct GraphNode* node,
     void* context

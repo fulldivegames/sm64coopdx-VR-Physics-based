@@ -14,9 +14,9 @@ ALIGNED8 const Texture vr_rasen_shuriken_texture[] = {
 
 extern ALIGNED8 const Texture tornado_seg5_texture_05013128[];
 
-// Three differently angled copies of this annulus are wrapped around both
-// Rasengan forms. Only the narrow top strip of the original tornado texture
-// is sampled, turning its bright crown into a compact energy ring.
+// Differently angled copies of this annulus are wrapped around the Rasengan
+// forms. Only the narrow top strip of the original tornado texture is sampled,
+// turning its bright crown into a compact energy ring.
 static const Vtx vr_rasengan_tornado_ring_vtx[] = {
     {{{77, 0, 0}, 0, {0, 0}, {255, 255, 255, 255}}},
     {{{66, 0, 0}, 0, {0, 124}, {255, 255, 255, 255}}},
@@ -50,7 +50,6 @@ const Gfx vr_rasengan_tornado_ring_dl[] = {
     gsDPPipeSync(),
     gsSPClearGeometryMode(G_LIGHTING | G_CULL_BACK | G_CULL_FRONT),
     gsDPSetCombineMode(G_CC_MODULATEIA_PRIM, G_CC_MODULATEIA_PRIM),
-    gsDPSetPrimColor(0, 0, 125, 220, 255, 175),
     gsDPSetTextureImage(G_IM_FMT_IA, G_IM_SIZ_16b, 1,
         tornado_seg5_texture_05013128),
     gsDPSetTile(G_IM_FMT_IA, G_IM_SIZ_16b, 0, 0, G_TX_LOADTILE, 0,
