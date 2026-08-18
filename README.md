@@ -381,6 +381,8 @@ When reporting a VR issue, include:
 
 This community build is not currently code-signed, so Windows SmartScreen may ask for confirmation. Verify that the ZIP came from this repository's official release page. Windows Firewall may also ask about network access because SM64 Co-Op DX contains online multiplayer; allow only the networks you intend to use.
 
+VPNs can prevent CoopNet from connecting. If public or private CoopNet immediately reports **Lost connection to CoopNet**, temporarily disconnect your VPN or exclude `SM64-Co-Op-DX-VR.exe` through the VPN's split-tunneling settings, then try again.
+
 ## Current limitations
 
 - Windows/OpenGL is the only completed OpenXR graphics path.
