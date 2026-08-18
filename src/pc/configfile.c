@@ -400,6 +400,9 @@ char         configCoopNetIp[MAX_CONFIG_STRING]   = DEFAULT_COOPNET_IP;
 unsigned int configCoopNetPort                    = DEFAULT_COOPNET_PORT;
 char         configPassword[MAX_CONFIG_STRING]    = "";
 char         configDestId[MAX_CONFIG_STRING]      = "0";
+#ifndef __ANDROID__
+static unsigned int sConfigCoopNetPcIdentityVersion = 0;
+#endif
 // DJUI settings
 unsigned int configDjuiTheme                      = DJUI_THEME_DARK;
 #ifdef HANDHELD
@@ -680,6 +683,9 @@ static const struct ConfigOption options[] = {
     {.name = "coopnet_port",                   .type = CONFIG_TYPE_UINT,   .uintValue   = &configCoopNetPort},
     {.name = "coopnet_password",               .type = CONFIG_TYPE_STRING, .stringValue = (char*)&configPassword, .maxStringLength = MAX_CONFIG_STRING},
     {.name = "coopnet_dest",                   .type = CONFIG_TYPE_STRING, .stringValue = (char*)&configDestId, .maxStringLength = MAX_CONFIG_STRING},
+#ifndef __ANDROID__
+    {.name = "coopnet_pc_identity_version",    .type = CONFIG_TYPE_UINT,   .uintValue = &sConfigCoopNetPcIdentityVersion},
+#endif
     // DJUI settings
     {.name = "djui_theme",                     .type = CONFIG_TYPE_UINT,   .uintValue   = &configDjuiTheme},
     {.name = "djui_theme_center",              .type = CONFIG_TYPE_BOOL,   .boolValue   = &configDjuiThemeCenter},
@@ -1123,6 +1129,21 @@ static void configfile_migrate_vr_star_focus_default(void) {
     sConfigVrStarFocusDefaultVersion = 1;
 }
 
+#ifndef __ANDROID__
+static void configfile_migrate_coopnet_pc_identity(void) {
+    if (sConfigCoopNetPcIdentityVersion >= 1) {
+        return;
+    }
+
+    // Older PC/standalone installs could inherit the same persisted CoopNet
+    // destination ID. CoopNet treats them as one client and disconnects the
+    // second device before it can create or list lobbies. Request a fresh,
+    // PC-specific identity once; the server persists the replacement ID.
+    snprintf(configDestId, MAX_CONFIG_STRING, "%s", "0");
+    sConfigCoopNetPcIdentityVersion = 1;
+}
+#endif
+
 // Loads the config file specified by 'filename'
 static void configfile_load_internal(const char *filename, bool* error) {
     fs_file_t *file;
@@ -1258,6 +1279,9 @@ NEXT_OPTION:
     configfile_migrate_vr_camera_height();
     configfile_migrate_vr_interaction_tuning();
     configfile_migrate_vr_star_focus_default();
+#ifndef __ANDROID__
+    configfile_migrate_coopnet_pc_identity();
+#endif
 
     if (configGraphicsBackend < GAPI_GL || configGraphicsBackend > GAPI_MAX) { configGraphicsBackend = GAPI_GL; }
 
