@@ -72,5 +72,6 @@ void vr_on_graphics_ready(void);
 bool vr_is_active(void);
 bool vr_set_active(bool active);
 void vr_request_recenter(void);
+void vr_request_horizontal_recenter(void);
 
 #endif

@@ -340,6 +340,7 @@ bool quest_game_initialize(void) {
     smlua_text_utils_init();
     mods_init();
     enable_queued_mods();
+    dynos_gfx_warmup_loaded_pack_shaders();
     audio_init();
     sound_init();
     if (gAudioApi == NULL || !gAudioApi->init()) {

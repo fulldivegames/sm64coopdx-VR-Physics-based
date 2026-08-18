@@ -10,6 +10,10 @@ const struct PlayerPalette DEFAULT_MARIO_PALETTE =
 //  Overalls              Shirt                 Gloves                Shoes                 Hair                  Skin                  Cap                   Emblem
 { { { 0x00, 0x00, 0xff }, { 0xff, 0x00, 0x00 }, { 0xff, 0xff, 0xff }, { 0x72, 0x1c, 0x0e }, { 0x73, 0x06, 0x00 }, { 0xfe, 0xc1, 0x79 }, { 0xff, 0x00, 0x00 }, { 0xff, 0x00, 0x00 } } };
 
+const struct PlayerPalette DEFAULT_FIRE_FLOWER_PALETTE =
+//  Overalls              Shirt                 Gloves                Shoes                 Hair                  Skin                  Cap                   Emblem
+{ { { 0xd2, 0x18, 0x18 }, { 0xff, 0xff, 0xff }, { 0xff, 0xff, 0xff }, { 0x5c, 0x30, 0x18 }, { 0x73, 0x06, 0x00 }, { 0xfe, 0xc1, 0x79 }, { 0xff, 0xff, 0xff }, { 0xff, 0xff, 0xff } } };
+
 static ini_t* sPalette = NULL;
 
 #if defined(__ANDROID__)
@@ -18,6 +22,75 @@ extern const char* quest_android_shared_palette_path(void);
 
 struct PresetPalette gPresetPalettes[MAX_PRESET_PALETTES] = { 0 };
 u16 gPresetPaletteCount = 0;
+
+static const char* FIRE_FLOWER_PALETTE_NAME = "Fireflower";
+
+static bool player_palette_write(
+    const char* palettesPath,
+    const char* name,
+    const struct PlayerPalette* palette
+) {
+    char ppath[SYS_MAX_PATH] = "";
+    snprintf(ppath, SYS_MAX_PATH, "%s/%s.ini", palettesPath, name);
+    fs_sys_mkdir(palettesPath);
+
+    FILE* file = fopen(ppath, "w");
+    if (file == NULL) {
+        LOG_ERROR("Unable to create file '%s.ini'!", name);
+        return false;
+    }
+
+    fprintf(file, "[PALETTE]\n\
+PANTS_R = %d\nPANTS_G = %d\nPANTS_B = %d\n\
+SHIRT_R = %d\nSHIRT_G = %d\nSHIRT_B = %d\n\
+GLOVES_R = %d\nGLOVES_G = %d\nGLOVES_B = %d\n\
+SHOES_R = %d\nSHOES_G = %d\nSHOES_B = %d\n\
+HAIR_R = %d\nHAIR_G = %d\nHAIR_B = %d\n\
+SKIN_R = %d\nSKIN_G = %d\nSKIN_B = %d\n\
+CAP_R = %d\nCAP_G = %d\nCAP_B = %d\n\
+EMBLEM_R = %d\nEMBLEM_G = %d\nEMBLEM_B = %d\n",
+        palette->parts[PANTS][0], palette->parts[PANTS][1], palette->parts[PANTS][2],
+        palette->parts[SHIRT][0], palette->parts[SHIRT][1], palette->parts[SHIRT][2],
+        palette->parts[GLOVES][0], palette->parts[GLOVES][1], palette->parts[GLOVES][2],
+        palette->parts[SHOES][0], palette->parts[SHOES][1], palette->parts[SHOES][2],
+        palette->parts[HAIR][0], palette->parts[HAIR][1], palette->parts[HAIR][2],
+        palette->parts[SKIN][0], palette->parts[SKIN][1], palette->parts[SKIN][2],
+        palette->parts[CAP][0], palette->parts[CAP][1], palette->parts[CAP][2],
+        palette->parts[EMBLEM][0], palette->parts[EMBLEM][1], palette->parts[EMBLEM][2]
+    );
+    fclose(file);
+    return true;
+}
+
+static void player_palette_ensure_fire_flower(const char* palettesPath) {
+    char ppath[SYS_MAX_PATH] = "";
+    snprintf(
+        ppath,
+        SYS_MAX_PATH,
+        "%s/%s.ini",
+        palettesPath,
+        FIRE_FLOWER_PALETTE_NAME
+    );
+    FILE* file = fopen(ppath, "r");
+    if (file != NULL) {
+        fclose(file);
+        return;
+    }
+    player_palette_write(
+        palettesPath,
+        FIRE_FLOWER_PALETTE_NAME,
+        &DEFAULT_FIRE_FLOWER_PALETTE
+    );
+}
+
+const struct PlayerPalette* player_palette_get_fire_flower(void) {
+    for (u16 i = 0; i < gPresetPaletteCount; i++) {
+        if (strcmp(gPresetPalettes[i].name, FIRE_FLOWER_PALETTE_NAME) == 0) {
+            return &gPresetPalettes[i].palette;
+        }
+    }
+    return &DEFAULT_FIRE_FLOWER_PALETTE;
+}
 
 static bool player_palette_init(const char* palettesPath, char* palette, bool appendPalettes) {
     // free old ini
@@ -98,6 +171,15 @@ void player_palettes_read(const char* palettesPath, bool appendPalettes) {
         snprintf(ppath, SYS_MAX_PATH, "%s/palettes", palettesPath);
     } else {
         snprintf(ppath, SYS_MAX_PATH, "%s", palettesPath);
+#if defined(__ANDROID__)
+        // Standalone user palettes live in shared storage. Avoid creating a
+        // duplicate Fireflower preset in the legacy private fallback path.
+        if (strcmp(ppath, quest_android_shared_palette_path()) == 0) {
+            player_palette_ensure_fire_flower(ppath);
+        }
+#else
+        player_palette_ensure_fire_flower(ppath);
+#endif
     }
 
     // open directory
@@ -120,6 +202,15 @@ void player_palettes_read(const char* palettesPath, bool appendPalettes) {
             c++;
         }
         if (strlen(path) == 0) { continue; }
+
+#if defined(__ANDROID__)
+        // A short-lived test build created Fireflower.ini in the legacy
+        // private palette directory. Prefer the editable shared copy and do
+        // not expose two identically named presets in the menu.
+        if (!appendPalettes &&
+            strcmp(palettesPath, quest_android_shared_palette_path()) != 0 &&
+            strcmp(path, FIRE_FLOWER_PALETTE_NAME) == 0) { continue; }
+#endif
 
         if (!player_palette_init(palettesPath, path, appendPalettes)) {
 #ifdef DEVELOPMENT
@@ -159,74 +250,14 @@ void player_palettes_read(const char* palettesPath, bool appendPalettes) {
 }
 
 void player_palette_export(char* name) {
-    // construct palette path
 #if defined(__ANDROID__)
     const char* palettesPath = quest_android_shared_palette_path();
 #else
     const char* palettesPath = fs_get_write_path(PALETTES_DIRECTORY);
 #endif
-    char ppath[SYS_MAX_PATH] = "";
-    snprintf(ppath, SYS_MAX_PATH, "%s/%s.ini", palettesPath, name);
-    fs_sys_mkdir(palettesPath);
-
-    FILE* file = fopen(ppath, "w");
-    if (!file) {
-        LOG_ERROR("Unable to create file '%s.ini'!", name);
-        return;
+    if (player_palette_write(palettesPath, name, &configPlayerPalette)) {
+        LOG_INFO("Saving palette as '%s.ini'", name);
     }
-
-    fprintf(file, "[PALETTE]\n\
-PANTS_R = %d\n\
-PANTS_G = %d\n\
-PANTS_B = %d\n\
-SHIRT_R = %d\n\
-SHIRT_G = %d\n\
-SHIRT_B = %d\n\
-GLOVES_R = %d\n\
-GLOVES_G = %d\n\
-GLOVES_B = %d\n\
-SHOES_R = %d\n\
-SHOES_G = %d\n\
-SHOES_B = %d\n\
-HAIR_R = %d\n\
-HAIR_G = %d\n\
-HAIR_B = %d\n\
-SKIN_R = %d\n\
-SKIN_G = %d\n\
-SKIN_B = %d\n\
-CAP_R = %d\n\
-CAP_G = %d\n\
-CAP_B = %d\n\
-EMBLEM_R = %d\n\
-EMBLEM_G = %d\n\
-EMBLEM_B = %d\n",
-    configPlayerPalette.parts[PANTS][0],
-    configPlayerPalette.parts[PANTS][1],
-    configPlayerPalette.parts[PANTS][2],
-    configPlayerPalette.parts[SHIRT][0],
-    configPlayerPalette.parts[SHIRT][1],
-    configPlayerPalette.parts[SHIRT][2],
-    configPlayerPalette.parts[GLOVES][0],
-    configPlayerPalette.parts[GLOVES][1],
-    configPlayerPalette.parts[GLOVES][2],
-    configPlayerPalette.parts[SHOES][0],
-    configPlayerPalette.parts[SHOES][1],
-    configPlayerPalette.parts[SHOES][2],
-    configPlayerPalette.parts[HAIR][0],
-    configPlayerPalette.parts[HAIR][1],
-    configPlayerPalette.parts[HAIR][2],
-    configPlayerPalette.parts[SKIN][0],
-    configPlayerPalette.parts[SKIN][1],
-    configPlayerPalette.parts[SKIN][2],
-    configPlayerPalette.parts[CAP][0],
-    configPlayerPalette.parts[CAP][1],
-    configPlayerPalette.parts[CAP][2],
-    configPlayerPalette.parts[EMBLEM][0],
-    configPlayerPalette.parts[EMBLEM][1],
-    configPlayerPalette.parts[EMBLEM][2]);
-    fclose(file);
-
-    LOG_INFO("Saving palette as '%s.ini'", name);
 }
 
 bool player_palette_delete(const char* palettesPath, char* name, bool appendPalettes) {

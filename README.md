@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/fulldivegames/sm64coopdx-VR"><strong>PC VR edition</strong></a>
+  <a href="https://github.com/fulldivegames/sm64coopdx-VR-Physics-based"><strong>PC VR edition</strong></a>
   &nbsp;|&nbsp; <strong>Quest standalone edition</strong>
 </p>
 
@@ -19,7 +19,7 @@
 > [!WARNING]
 > Standalone co-op, Chat, and its VR keyboard are still experimental. Text or other menu elements may occasionally appear blurry or visually incorrect; restarting the app or headset usually clears these issues. Co-op can also produce minor visual bugs. Large lobbies may reduce performance, and gameplay-changing server mods can cause visual problems, broken behavior, or crashes. Disconnecting may recover the session; otherwise, fully restart the game. Controller keyboard text chat is available; the microphone button currently does not provide working speech recognition and is still being developed.
 
-This repository contains the standalone Android/Quest port of [sm64coopdx-VR (Physics-based)](https://github.com/fulldivegames/sm64coopdx-VR), derived from [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx). It runs the game natively on the headset through OpenXR and OpenGL ES while retaining the original project's multiplayer foundation, Lua/mod support where compatible, first- and third-person cameras, tracked hands, and physical VR interactions.
+This repository contains the standalone Android/Quest port of [sm64coopdx-VR (Physics-based)](https://github.com/fulldivegames/sm64coopdx-VR-Physics-based), derived from [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx). It runs the game natively on the headset through OpenXR and OpenGL ES while retaining the original project's multiplayer foundation, Lua/mod support where compatible, first- and third-person cameras, tracked hands, and physical VR interactions.
 There are videos on my YouTube channel: https://www.youtube.com/@fulldivegames667 that show off the mod.
 
 ## Download and install with SideQuest
@@ -36,8 +36,8 @@ The release is a single APK. Players do not need Git, Android Studio, Gradle, AD
 
 ### Install the APK
 
-1. Open this repository's [latest release](https://github.com/fulldivegames/sm64coopdx-VR-Standalone/releases/latest).
-2. Download `SM64-Co-Op-DX-VR-Quest-v0.7.0.apk` under **Assets**.
+1. Open this repository's [latest release](https://github.com/fulldivegames/sm64coopdx-VR-Standalone-Physics-based/releases/latest).
+2. Download `SM64-Co-Op-DX-VR-Quest-v0.7.1.apk` under **Assets**.
 3. Connect the Quest to your computer and allow the USB debugging prompt inside the headset.
 4. Open SideQuest and confirm that the headset indicator is connected.
 5. Click **Install APK file from folder** in SideQuest, choose the downloaded APK, and wait for the install-success message.
@@ -49,7 +49,7 @@ The release is a single APK. Players do not need Git, Android Studio, Gradle, AD
 Updates can be installed over the existing app through SideQuest. Keep the same Android application installed if you want its private ROM/configuration data to remain available. Back up important saves before testing a new release.
 
 > [!IMPORTANT]
-> Install v0.7.0 directly over an existing installation so the private ROM, save, and settings remain available. Do not uninstall the app first.
+> Install v0.7.1 directly over an existing installation so the private ROM, save, and settings remain available. Do not uninstall the app first.
 
 > [!IMPORTANT]
 > The APK contains no ROM and no Nintendo game assets. Do not upload, bundle, or redistribute a ROM with this project. The app validates the unmodified US ROM before importing it into private application storage.
@@ -62,7 +62,7 @@ The standalone build loads compatible SM64 Co-Op DX mods from this easy-to-acces
 /sdcard/SM64VR/mods/
 ```
 
-1. Install or update to v0.7.0 and launch it once. Android opens the **Allow access to manage all files** page; enable access for **SM64 Co-Op DX VR Standalone**. This permission is used for the shared mod, DynOS, palette, and shader-cache folders.
+1. Install or update to v0.7.1 and launch it once. Android opens the **Allow access to manage all files** page; enable access for **SM64 Co-Op DX VR Standalone**. This permission is used for the shared mod, DynOS, palette, and shader-cache folders.
 2. Close and reopen the game once after granting access. The game creates `/sdcard/SM64VR/mods/` automatically.
 3. Download a mod compatible with SM64 Co-Op DX. The official community browser is [mods.sm64coopdx.com](https://mods.sm64coopdx.com/mods/).
 4. Extract the archive. Copy the **extracted mod folder**, not the `.zip`, into `SM64VR/mods` with SideQuest's file manager. The mod files must be directly inside their own folder rather than inside an extra duplicate folder.
@@ -81,7 +81,7 @@ The previous private `Android/data/com.fulldivegames.sm64coopdxvr/files/mods/` l
 
 ### Install DynOS packs
 
-Launch the game once after installing v0.7.0. The game automatically creates:
+Launch the game once after installing v0.7.1. The game automatically creates:
 
 ```text
 /sdcard/SM64VR/dynos/packs/
@@ -103,9 +103,9 @@ Custom palette files can be copied to:
 
 The persistent learned shader cache is stored in `/sdcard/SM64VR/shader-cache/`. It is managed by the game; do not install mods there.
 
-### Mod compatibility in v0.7.0
+### Mod compatibility in v0.7.1
 
-v0.7.0 includes expanded mod discovery, startup, menu, rendering, character-model, DynOS, and palette path compatibility. Character Selector was specifically tested with multiple character packs, including its in-game selection overlay. Multiple extracted DynOS packs are discovered from `dynos/packs`, and shared standalone paths now keep mods, packs, palettes, and shader-cache data accessible outside Android's restricted private-data folder.
+v0.7.1 includes expanded mod discovery, startup, menu, rendering, character-model, DynOS, and palette path compatibility. Character Selector was specifically tested with multiple character packs, including its in-game selection overlay. Multiple extracted DynOS packs are discovered from `dynos/packs`, and shared standalone paths now keep mods, packs, palettes, and shader-cache data accessible outside Android's restricted private-data folder.
 
 Compatibility is not universal. Mods that depend on desktop-native binaries, desktop-only graphics APIs, unsupported keyboard windows, extreme memory use, or assumptions about the original flat camera may still fail. Character packs can also define their own selection rules rather than appearing in the built-in Mario/Luigi/Toad/Wario/Waluigi list. Install one mod at a time when diagnosing a failure and report the exact mod name/version with a crash log when possible.
 
@@ -115,7 +115,7 @@ Known compatibility notes:
 
 - Loading many mods at once can increase startup time and memory use.
 - Render96 currently has known performance and crash issues on standalone.
-- Character Selector's in-game overlay was tested with multiple character packs for v0.7.0, but especially large or incompatible character packs can still cause instability.
+- Character Selector's in-game overlay was tested with multiple character packs for v0.7.1, but especially large or incompatible character packs can still cause instability.
 
 ## Tutorial: controls and how to play
 
@@ -184,6 +184,18 @@ Physical climbing is enabled by default, while Mario's standard automatic climbi
 
 Third Person Mode centers the stereoscopic view on Mario and is intended for conventional gamepad play. It remains independent of first-person tracked-hand and body-camera behavior, supports the default and free cameras, and can be used to play through the normal game without motion-control gestures.
 
+## Power-ups and special moves
+
+### Fire Flower
+
+Fire Flower is enabled by default under **VR > Special Moves**. Supported coin/1-Up item boxes and cork boxes can release a flower. While powered up, close the right glove with Grip, hold Right Trigger to charge an orange fireball, then physically swing and release Trigger to throw it. The normal Attack button fires a quick shot outside first-person mode. Fire Mario's palette and music end with the power-up; **Cheats** also provides **Spawn Fire Flower** and **No Fire Flower Timer**.
+
+### Rasengan and Rasen-Shuriken
+
+**Rasengan / Rasen-Shuriken** is enabled by default under **Special Moves**. Hold Right Trigger with an open right hand and circle a closed, empty left glove around it until the Rasengan finishes charging. Keep holding Right Trigger to retain it, then touch a supported enemy or breakable box with the sphere. The optional **Rasengan Grip + Trigger** setting replaces the circling gesture.
+
+With a charged Rasengan held, hold the mapped **Special** button—Y/Left Secondary by default—while keeping the hand above the headset when **Rasen-Shuriken Overhead Charge** is enabled. Once charged, physically swing and release Right Trigger to throw it. It flies until it strikes geometry or a supported enemy, then expands into an area-damage sphere. Charge-time sliders are available in **Cheats**. Boss and actor-specific protections still follow the move's built-in rules.
+
 ## Comfort, immersion, and visual options
 
 All options in **Settings > VR > Immersion** default to enabled:
@@ -204,7 +216,7 @@ Painting entries use a short white comfort fade. The optional True First Person 
 
 | Submenu | Main controls |
 | --- | --- |
-| Camera Settings | Camera mode, height/position, FOV, facing source, facing calibration, and standalone color controls |
+| Camera Settings | Camera mode, height/position, previous Mario body height, FOV, facing source, facing calibration, and standalone color controls |
 | Controller Settings | Motion-controller enablement, stick selection, button mappings, and optional trigger punch |
 | Motion Control Settings | Punching, grabbing, climbing, dives, jump turning, hit ranges, and Bowser tuning |
 | Model Settings | Body visibility/placement, feet-only, ledge and pole-flip visibility, glove scale, rotation, and position |
@@ -212,7 +224,7 @@ Painting entries use a short white comfort fade. The optional True First Person 
 | HUD Settings | HUD opacity and corner spread |
 | Immersion | Default-on comfort, audio, camera, underwater, cannon, and physical-crouch options |
 | Effects | Twirl tornado visual effect |
-| Cheats | Climb-any-surface, flying speed, swimming speed, and running speed |
+| Cheats | Level Select, climb-any-surface, special-move charge times, flying speed, swimming speed, and running speed |
 | Experimental | True First Person, True Diving, Arms Mode, and original movement options |
 
 ## Standalone-specific notes
@@ -227,7 +239,17 @@ Painting entries use a short white comfort fade. The optional True First Person 
 - Online co-op has not been comprehensively validated across every player count, mod combination, or network condition.
 - Large Lua mods, model packs, ROM hacks, and texture packs may exceed standalone memory/performance budgets or rely on desktop-only behavior.
 
-## v0.7.0 — Chat and Fireball Update
+## v0.7.1 — Special Moves and Level Select Update
+
+- Added the default-on **Rasengan / Rasen-Shuriken** special move with physical charging, headset-rate animation, hand contact attacks, physical throwing, collision-triggered area damage, protected-boss rules, and configurable charge controls
+- Added **Cheats > Level Select**, a scrollable in-game list covering the castle, all 15 main courses, Bowser stages and arenas, secret/cap stages, and the ending; normal courses use their native Act Select entry path
+- Kept the corrected first-person Mario body relationship as the default and added **Camera Settings > Use Previous Mario Body Height** for players who prefer the earlier height
+- Improved tracked hand/held-effect interpolation at 72, 90, and 120 Hz while preserving the original 30 Hz gameplay simulation
+- Added and refined color-palette selection, DynOS refresh, modded HUD placement, ghost button-punch presentation, Fire Flower behavior, enemy interactions, and VR camera stability
+
+## Previous Release Notes
+
+### v0.7.0 — Chat and Fireball Update
 
 - Added a controller-friendly in-game Chat HUD with retained recent messages, an anchored on-screen keyboard, Enter-to-send behavior, and reliable B/Back navigation
 - Added a **Players** HUD directly below Chat, showing connected player names, locations, and ping; press B to return
@@ -238,8 +260,6 @@ Painting entries use a short white comfort fade. The optional True First Person 
 - Expanded fireball collision coverage, including Chain Chomp and Mr. Blizzard. Mr. Blizzard explodes, disappears, and respawns after 30 seconds
 - Replaced the VR Act Select 3D stars with readable overlay stars, revealing completed missions and the next available mission in sequence
 - Continued high-resolution presentation fixes for the keyboard, main-menu logo, update text, Chat, and VR menu overlays
-
-## Previous Release Notes
 
 ### v0.6.27 — Co-op and Keyboards Update
 

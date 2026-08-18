@@ -91,8 +91,9 @@ u8 get_hud_opacity_alpha(u8 alpha) {
 }
 
 static s32 vr_hud_spread_x(s32 x) {
-    if (!vr_is_active()) return x;
-    const f32 factor = (f32)clamp(configVrHudSpread, 80U, 200U) / 100.0f;
+    if (!vr_is_active()) { return x; }
+    const f32 factor =
+        (f32)clamp(configVrHudSpread, 80U, 200U) / 100.0f;
     return (s32)roundf(
         (f32)SCREEN_WIDTH * 0.5f +
         ((f32)x - (f32)SCREEN_WIDTH * 0.5f) * factor
@@ -100,8 +101,9 @@ static s32 vr_hud_spread_x(s32 x) {
 }
 
 static s32 vr_hud_spread_y(s32 y) {
-    if (!vr_is_active()) return y;
-    const f32 factor = (f32)clamp(configVrHudSpread, 80U, 200U) / 100.0f;
+    if (!vr_is_active()) { return y; }
+    const f32 factor =
+        (f32)clamp(configVrHudSpread, 80U, 200U) / 100.0f;
     return (s32)roundf(
         (f32)SCREEN_HEIGHT * 0.5f +
         ((f32)y - (f32)SCREEN_HEIGHT * 0.5f) * factor
@@ -145,9 +147,12 @@ void patch_hud_interpolated(f32 delta) {
     if (sPowerMeterDisplayListPos && sPowerMeterMtx) {
         Mtx* mtx = sPowerMeterMtx;
         f32 interpY = delta_interpolate_f32(sPowerMeterPrevY, (f32)sPowerMeterHUD.y, delta);
-        guTranslate(mtx,
-                    (f32)vr_hud_group_x(sPowerMeterHUD.x, 140),
-                    (f32)vr_hud_group_y((s32)roundf(interpY), 166), 0);
+        guTranslate(
+            mtx,
+            (f32)vr_hud_group_x(sPowerMeterHUD.x, 140),
+            (f32)vr_hud_group_y((s32)roundf(interpY), 166),
+            0
+        );
         gSPMatrix(sPowerMeterDisplayListPos, VIRTUAL_TO_PHYSICAL(mtx),
               G_MTX_MODELVIEW | G_MTX_MUL | G_MTX_PUSH);
     }
@@ -210,9 +215,12 @@ void render_dl_power_meter(s16 numHealthWedges) {
         return;
     }
 
-    guTranslate(mtx,
-                (f32)vr_hud_group_x(sPowerMeterHUD.x, 140),
-                (f32)vr_hud_group_y((s32)roundf(sPowerMeterPrevY), 166), 0);
+    guTranslate(
+        mtx,
+        (f32)vr_hud_group_x(sPowerMeterHUD.x, 140),
+        (f32)vr_hud_group_y((s32)roundf(sPowerMeterPrevY), 166),
+        0
+    );
     sPowerMeterMtx = mtx;
     sPowerMeterDisplayListPos = gDisplayListHead;
 
@@ -547,19 +555,42 @@ static void render_vr_cannon_guidance_arrow_at(
 
 static void render_vr_cannon_guidance_arrows(void) {
     u8 alpha = 0;
-    if (!vr_get_cannon_vision_guidance(&alpha)) return;
+    if (!vr_get_cannon_vision_guidance(&alpha)) {
+        return;
+    }
+
     const f32 centerX = (f32)SCREEN_WIDTH * 0.5f;
     const f32 centerY = (f32)SCREEN_HEIGHT * 0.5f;
     const f32 horizontalOffset = 64.0f;
     const f32 verticalOffset = 54.0f;
-    render_vr_cannon_guidance_arrow_at(centerX, centerY + verticalOffset,
-        (s16)0x8000, alpha);
-    render_vr_cannon_guidance_arrow_at(centerX, centerY - verticalOffset,
-        0, alpha);
-    render_vr_cannon_guidance_arrow_at(centerX - horizontalOffset, centerY,
-        0x4000, alpha);
-    render_vr_cannon_guidance_arrow_at(centerX + horizontalOffset, centerY,
-        (s16)-0x4000, alpha);
+
+    // Four fixed Mario-font arrows always point inward toward the cannon's
+    // legal firing cone, so guidance remains readable even when the headset
+    // is facing far beyond one particular edge.
+    render_vr_cannon_guidance_arrow_at(
+        centerX,
+        centerY + verticalOffset,
+        (s16)0x8000,
+        alpha
+    );
+    render_vr_cannon_guidance_arrow_at(
+        centerX,
+        centerY - verticalOffset,
+        0,
+        alpha
+    );
+    render_vr_cannon_guidance_arrow_at(
+        centerX - horizontalOffset,
+        centerY,
+        0x4000,
+        alpha
+    );
+    render_vr_cannon_guidance_arrow_at(
+        centerX + horizontalOffset,
+        centerY,
+        (s16)-0x4000,
+        alpha
+    );
 }
 
 static bool vr_face_stuck_blackout_active(void) {
@@ -575,13 +606,19 @@ static bool vr_underwater_filter_active(void) {
     return vr_is_active() &&
         configVrImmersiveUnderwaterFilter &&
         (mario->action & ACT_GROUP_MASK) == ACT_GROUP_SUBMERGED &&
-        vr_get_stabilized_headset_world_position(headsetPosition, false) &&
+        vr_get_stabilized_headset_world_position(
+            headsetPosition,
+            false
+        ) &&
         headsetPosition[1] < (f32)mario->waterLevel - 8.0f;
 }
 
 static void render_vr_underwater_filter(void) {
+    // Low-opacity castle-water blue across the complete per-eye view.
     Vtx* vtx = alloc_display_list(sizeof(*vtx) * 4);
-    if (vtx == NULL) return;
+    if (vtx == NULL) {
+        return;
+    }
     vtx[0] = (Vtx) { { { -4096, -4096, 0 }, 0, { 0, 0 }, { 44, 120, 200, 64 } } };
     vtx[1] = (Vtx) { { {  4096, -4096, 0 }, 0, { 0, 0 }, { 44, 120, 200, 64 } } };
     vtx[2] = (Vtx) { { {  4096,  4096, 0 }, 0, { 0, 0 }, { 44, 120, 200, 64 } } };
@@ -597,10 +634,14 @@ static void render_vr_underwater_filter(void) {
 }
 
 static void render_vr_face_stuck_blackout(void) {
-    // Oversize the HUD-plane quad so it covers the complete per-eye field;
-    // the message remains on the normal fused stereo HUD plane.
+    // Extend far beyond the nominal 320x240 HUD plane. A screen-sized quad
+    // leaves visible VR peripheral space around it; this oversized quad
+    // covers the complete per-eye field while the text stays on the normal
+    // fused stereo HUD plane.
     Vtx *vtx = alloc_display_list(sizeof(*vtx) * 4);
-    if (vtx == NULL) return;
+    if (vtx == NULL) {
+        return;
+    }
     vtx[0] = (Vtx) { { { -4096, -4096, 0 }, 0, { 0, 0 }, { 0, 0, 0, 0xFF } } };
     vtx[1] = (Vtx) { { {  4096, -4096, 0 }, 0, { 0, 0 }, { 0, 0, 0, 0xFF } } };
     vtx[2] = (Vtx) { { {  4096,  4096, 0 }, 0, { 0, 0 }, { 0, 0, 0, 0xFF } } };
@@ -613,8 +654,12 @@ static void render_vr_face_stuck_blackout(void) {
     gSPVertexNonGlobal(gDisplayListHead++, vtx, 4, 0);
     gSP2Triangles(gDisplayListHead++, 0, 1, 2, 0, 0, 2, 3, 0);
     gDPPipeSync(gDisplayListHead++);
-    print_text_centered(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2,
-        "Face stuck in the ground");
+
+    print_text_centered(
+        SCREEN_WIDTH / 2,
+        SCREEN_HEIGHT / 2,
+        "Face stuck in the ground"
+    );
 }
 
 /**
@@ -786,7 +831,8 @@ void render_hud_camera_status(void) {
     cameraLUT = segmented_to_virtual(&main_hud_camera_lut);
     x = vr_hud_group_x(
         GFX_DIMENSIONS_RECT_FROM_RIGHT_EDGE(54),
-        GFX_DIMENSIONS_RECT_FROM_RIGHT_EDGE(54));
+        GFX_DIMENSIONS_RECT_FROM_RIGHT_EDGE(54)
+    );
     y = 205;
 
     if (sCameraHUD.status == CAM_STATUS_NONE) {
@@ -834,12 +880,18 @@ void render_hud(void) {
 #endif
 
     hudDisplayFlags = gHudDisplay.flags;
-    const bool faceStuckBlackout = vr_face_stuck_blackout_active();
-    const bool underwaterFilter = vr_underwater_filter_active();
+    const bool faceStuckBlackout =
+        vr_face_stuck_blackout_active();
+    const bool underwaterFilter =
+        vr_underwater_filter_active();
     const bool cannonHudActive =
         gMarioStates[0].action == ACT_IN_CANNON &&
         gCurrentArea != NULL &&
         gCurrentArea->camera != NULL;
+    // The VR FPS counter is owned by the VR HUD, not by a level or Lua mod's
+    // choice to hide the native game HUD. Keep the render pass alive for it.
+    const bool vrFpsActive = vr_is_active() && configVrShowFps &&
+        !gDjuiInMainMenu;
 
     if (hudDisplayFlags == HUD_DISPLAY_NONE) {
         sPowerMeterHUD.animation = POWER_METER_HIDDEN;
@@ -847,7 +899,12 @@ void render_hud(void) {
         sPowerMeterVisibleTimer = 0;
     }
     if (hudDisplayFlags == HUD_DISPLAY_NONE &&
-        !faceStuckBlackout && !underwaterFilter && !cannonHudActive) return;
+        !faceStuckBlackout &&
+        !underwaterFilter &&
+        !cannonHudActive &&
+        !vrFpsActive) {
+        return;
+    }
     {
 #ifdef VERSION_EU
         // basically create_dl_ortho_matrix but guOrtho screen width is different
@@ -868,7 +925,9 @@ void render_hud(void) {
 #else
         if (vr_is_active()) {
             Mtx *vrHudMtx = alloc_display_list(sizeof(*vrHudMtx));
-            if (vrHudMtx == NULL) return;
+            if (vrHudMtx == NULL) {
+                return;
+            }
             create_dl_identity_matrix();
             f32 hudLeft, hudRight, hudBottom, hudTop;
             get_vr_hud_ortho_bounds(
@@ -877,8 +936,11 @@ void render_hud(void) {
                     -10.0f, 10.0f, 1.0f);
             register_mtx_vr_hud(vrHudMtx);
             gSPPerspNormalize(gDisplayListHead++, 0xFFFF);
-            gSPMatrix(gDisplayListHead++, VIRTUAL_TO_PHYSICAL(vrHudMtx),
-                      G_MTX_PROJECTION | G_MTX_MUL | G_MTX_NOPUSH);
+            gSPMatrix(
+                gDisplayListHead++,
+                VIRTUAL_TO_PHYSICAL(vrHudMtx),
+                G_MTX_PROJECTION | G_MTX_MUL | G_MTX_NOPUSH
+            );
         } else {
             create_dl_ortho_matrix();
         }
@@ -906,7 +968,7 @@ void render_hud(void) {
         if (hudDisplayFlags & HUD_DISPLAY_FLAG_LIVES && showHud) {
             render_hud_mario_lives();
         }
-        if (showHud) {
+        if (vrFpsActive) {
             render_vr_hud_fps();
         }
 

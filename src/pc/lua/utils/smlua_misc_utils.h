@@ -125,6 +125,7 @@ void hud_set_value(enum HudDisplayValue type, s32 value);
 void hud_render_power_meter(s32 health, f32 x, f32 y, f32 width, f32 height);
 /* |description|Renders an interpolated power meter on the HUD|descriptionEnd| */
 void hud_render_power_meter_interpolated(s32 health, f32 prevX, f32 prevY, f32 prevWidth, f32 prevHeight, f32 x, f32 y, f32 width, f32 height);
+void hud_render_power_meter_interpolated_world(s32 health, f32 prevX, f32 prevY, f32 prevWidth, f32 prevHeight, f32 x, f32 y, f32 width, f32 height);
 /* |description|Gets if the star counter on the HUD should flash|descriptionEnd| */
 s8 hud_get_flash(void);
 /* |description|Sets if the star counter on the HUD should flash|descriptionEnd| */

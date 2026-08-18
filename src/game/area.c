@@ -457,6 +457,11 @@ void render_game(void) {
                       SCREEN_HEIGHT - BORDER_HEIGHT);
 
         if (!gDjuiDisabled) {
+            // Lua HUD geometry is rebuilt once per game tick and then reused
+            // for both VR eyes. Do not carry the previous DJUI pass' tiny Z
+            // offsets into this list: custom HUDs that draw many elements can
+            // otherwise drift into the same depth plane and visibly flicker.
+            gDjuiHudUtilsZ = 0.0f;
             djui_reset_hud_params();
             create_dl_ortho_matrix();
             djui_gfx_displaylist_begin();
@@ -507,6 +512,7 @@ void render_game(void) {
         }
     } else {
         // this will get drawn over anyways
+        gDjuiHudUtilsZ = 0.0f;
         djui_hud_set_vr_game_hud_style(true);
         smlua_call_event_hooks(HOOK_ON_HUD_RENDER_BEHIND, djui_reset_hud_params);
         djui_hud_set_vr_game_hud_style(false);

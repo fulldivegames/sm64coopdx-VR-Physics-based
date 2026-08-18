@@ -497,6 +497,15 @@ static void controller_vr_read(OSContPad* pad) {
         )) {
         pad->button |= START_BUTTON;
     }
+    if (controller_vr_binding_down(
+            configVrSpecialBinding,
+            leftAvailable,
+            &left,
+            rightAvailable,
+            &right
+        )) {
+        pad->button |= Y_BUTTON;
+    }
 
     const float* cameraStick = controller_vr_select_stick(
         configVrCameraStick,

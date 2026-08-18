@@ -34,8 +34,6 @@
 #include "mario.h"
 #include "mario_misc.h"
 #include "vr_hand_interaction.h"
-
-#define VR_LEDGE_CAMERA_DROP 80.0f
 #include "hardcoded.h"
 #include "levels/menu/header.h"
 #include "actors/common1.h"
@@ -73,6 +71,7 @@
 #define DISPLAY_LIST_HEAP_SIZE 32000
 
 #define MAX_FAR_PLANE_DIST 1000000.f
+#define VR_LEDGE_CAMERA_DROP 80.0f
 #define VR_STAR_SPAWN_FOCUS_RESPONSE 0.24f
 
 f32 gProjectionMaxNearValue = 5;
@@ -335,7 +334,10 @@ static void vr_grant_shaken_wing_cap(void) {
         MARIO_CAP_IN_HAND
     );
     mario->flags |= MARIO_WING_CAP | MARIO_CAP_ON_HEAD;
-    mario->capTimer = MAX(mario->capTimer, gLevelValues.wingCapDuration);
+    mario->capTimer = MAX(
+        mario->capTimer,
+        gLevelValues.wingCapDuration
+    );
     play_sound(
         SOUND_MENU_STAR_SOUND,
         mario->marioObj->header.gfx.cameraToObject
@@ -374,9 +376,12 @@ static void vr_update_painting_exit_hat_shake(
 
     if (sVrPaintingExitHatShakeVelocityValid) {
         const f32 previousSpeedSquared =
-            sVrPaintingExitHatShakeVelocity[0] * sVrPaintingExitHatShakeVelocity[0] +
-            sVrPaintingExitHatShakeVelocity[1] * sVrPaintingExitHatShakeVelocity[1] +
-            sVrPaintingExitHatShakeVelocity[2] * sVrPaintingExitHatShakeVelocity[2];
+            sVrPaintingExitHatShakeVelocity[0] *
+                sVrPaintingExitHatShakeVelocity[0] +
+            sVrPaintingExitHatShakeVelocity[1] *
+                sVrPaintingExitHatShakeVelocity[1] +
+            sVrPaintingExitHatShakeVelocity[2] *
+                sVrPaintingExitHatShakeVelocity[2];
         const f32 dot =
             velocity[0] * sVrPaintingExitHatShakeVelocity[0] +
             velocity[1] * sVrPaintingExitHatShakeVelocity[1] +
@@ -385,7 +390,8 @@ static void vr_update_painting_exit_hat_shake(
                 VR_HAT_SHAKE_MIN_SPEED * VR_HAT_SHAKE_MIN_SPEED &&
             dot <= -0.25f * sqrtf(speedSquared * previousSpeedSquared)) {
             sVrPaintingExitHatShakeReversals++;
-            if (sVrPaintingExitHatShakeReversals >= VR_HAT_SHAKE_REVERSALS_REQUIRED) {
+            if (sVrPaintingExitHatShakeReversals >=
+                VR_HAT_SHAKE_REVERSALS_REQUIRED) {
                 sVrPaintingExitHatWingCap = true;
                 vr_apply_haptic(hand, 0.8f, 0.18f, -1.0f);
                 play_sound(
@@ -538,6 +544,12 @@ static void vr_update_painting_exit_hat_gesture(void) {
             vec3f_copy(sVrPaintingExitHatVelocity, velocities[hand]);
             vr_update_painting_exit_hat_shake(hand, velocities[hand]);
         }
+        // A transition can briefly invalidate controller poses. Do not turn
+        // that tracking gap into a release behind the player; only a sampled
+        // open hand may throw the cap.
+        // Reattach before processing release. This lets a player place the
+        // cap on their head and open their hand naturally without spawning a
+        // dropped cap at their feet on the same input sample.
         // Merely touching the head never attaches the cap. Releasing it inside
         // this head-shaped volume puts it on; releasing it elsewhere throws
         // the normal or transformed Wing Cap as a physics object.
@@ -619,7 +631,8 @@ static void vr_update_painting_exit_hat_gesture(void) {
                             pickupRadiusSquared) {
                     continue;
                 }
-                sVrPaintingExitHatWingCap = obj_has_behavior(cap, bhvWingCap);
+                sVrPaintingExitHatWingCap =
+                    obj_has_behavior(cap, bhvWingCap);
                 cap->activeFlags = ACTIVE_FLAG_DEACTIVATED;
                 gVrPaintingExitHatObject = NULL;
                 sVrPaintingExitHatHand = hand;
@@ -799,11 +812,13 @@ static u32 sVrTorsoAlignmentCharacterTimestamp = 0;
 static f32 sVrTorsoAlignment = 0.0f;
 static bool sVrControllerCameraInverseValid = false;
 static u32 sVrControllerCameraInverseTimestamp = 0;
+static f32 sVrControllerCameraInverseDelta = -1.0f;
 static Mat4 sVrControllerCameraInverse;
 
 void vr_invalidate_first_person_tracked_world_cache(void) {
     sVrControllerCameraInverseValid = false;
     sVrControllerCameraInverseTimestamp = 0;
+    sVrControllerCameraInverseDelta = -1.0f;
     sVrBodyAnchorSampleValid = false;
     sVrBodyAnchorSampleTimestamp = 0;
     for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
@@ -832,6 +847,7 @@ void vr_reset_first_person_calibration(void) {
     sVrCameraYawSample = 0;
     sVrControllerCameraInverseValid = false;
     sVrControllerCameraInverseTimestamp = 0;
+    sVrControllerCameraInverseDelta = -1.0f;
 
     sVrHeadRotationMatrixValid = false;
     sVrBodyAnchorSampleValid = false;
@@ -921,7 +937,9 @@ void vr_handle_camera_mode_change(void) {
         // Third person is composed around Mario by the normal game camera.
         // Rebase the headset once on entry so a first-person room-space lean
         // or yaw offset cannot leave Mario permanently to one side.
-        vr_request_recenter();
+        // Recenter horizontal room position/yaw for third person without
+        // silently replacing the player's calibrated standing/seated height.
+        vr_request_horizontal_recenter();
     }
 }
 
@@ -1946,34 +1964,45 @@ static f32 vr_get_ledge_camera_drop(void) {
     if (!configVrImmersiveLedgeCamera) {
         return 0.0f;
     }
+
     struct MarioState* mario = &gMarioStates[0];
     switch (mario->action) {
         case ACT_LEDGE_GRAB:
             return VR_LEDGE_CAMERA_DROP;
+
         case ACT_LEDGE_CLIMB_SLOW_1:
         case ACT_LEDGE_CLIMB_SLOW_2:
         case ACT_LEDGE_CLIMB_FAST: {
-            const struct Animation* animation = mario->marioObj != NULL
-                ? mario->marioObj->header.gfx.animInfo.curAnim : NULL;
+            const struct Animation* animation =
+                mario->marioObj != NULL
+                    ? mario->marioObj->header.gfx.animInfo.curAnim
+                    : NULL;
             const f32 endFrame = animation != NULL
-                ? fmaxf((f32)animation->loopEnd - 1.0f, 1.0f) : 1.0f;
+                ? fmaxf((f32)animation->loopEnd - 1.0f, 1.0f)
+                : 1.0f;
             const f32 frame = mario->marioObj != NULL
                 ? (f32)mario->marioObj->header.gfx.animInfo.animFrame +
                     (gRenderingInterpolated
-                        ? clamp(gRenderingDelta, 0.0f, 1.0f) : 0.0f)
+                        ? clamp(gRenderingDelta, 0.0f, 1.0f)
+                        : 0.0f)
                 : endFrame;
-            return VR_LEDGE_CAMERA_DROP *
-                (1.0f - clamp(frame / endFrame, 0.0f, 1.0f));
+            const f32 progress = clamp(frame / endFrame, 0.0f, 1.0f);
+            return VR_LEDGE_CAMERA_DROP * (1.0f - progress);
         }
+
         case ACT_LEDGE_CLIMB_DOWN: {
-            const struct Animation* animation = mario->marioObj != NULL
-                ? mario->marioObj->header.gfx.animInfo.curAnim : NULL;
+            const struct Animation* animation =
+                mario->marioObj != NULL
+                    ? mario->marioObj->header.gfx.animInfo.curAnim
+                    : NULL;
             const f32 endFrame = animation != NULL
-                ? fmaxf((f32)animation->loopEnd - 1.0f, 1.0f) : 1.0f;
+                ? fmaxf((f32)animation->loopEnd - 1.0f, 1.0f)
+                : 1.0f;
             const f32 frame = mario->marioObj != NULL
                 ? (f32)mario->marioObj->header.gfx.animInfo.animFrame +
                     (gRenderingInterpolated
-                        ? clamp(gRenderingDelta, 0.0f, 1.0f) : 0.0f)
+                        ? clamp(gRenderingDelta, 0.0f, 1.0f)
+                        : 0.0f)
                 : 0.0f;
             return VR_LEDGE_CAMERA_DROP *
                 clamp(frame / endFrame, 0.0f, 1.0f);
@@ -2123,11 +2152,7 @@ static bool vr_get_stabilized_first_person_pose(
         cameraHeight,
         0U,
         VR_CAMERA_HEIGHT_MAX
-    )
-#ifdef __ANDROID__
-        + 35
-#endif
-        ;
+    );
     Vec3f cameraAnchor;
     if (!vr_get_mounted_hat_camera_position(
             marioAnchor,
@@ -2658,17 +2683,41 @@ bool vr_get_controller_world_fist_raw_from_state(
             backward[2] * knuckleOffset
     };
 
+    const f32 renderDelta = gRenderingInterpolated
+        ? clamp(gRenderingDelta, 0.0f, 1.0f)
+        : -1.0f;
     if (!sVrControllerCameraInverseValid ||
-        sVrControllerCameraInverseTimestamp != gGlobalTimer) {
+        sVrControllerCameraInverseTimestamp != gGlobalTimer ||
+        sVrControllerCameraInverseDelta != renderDelta) {
         Mat4 cameraMatrix;
+        Vec3f cameraPos;
+        Vec3f cameraFocus;
+        if (gRenderingInterpolated) {
+            delta_interpolate_vec3f(
+                cameraPos,
+                sCameraNode->prevPos,
+                sCameraNode->pos,
+                renderDelta
+            );
+            delta_interpolate_vec3f(
+                cameraFocus,
+                sCameraNode->prevFocus,
+                sCameraNode->focus,
+                renderDelta
+            );
+        } else {
+            vec3f_copy(cameraPos, sCameraNode->pos);
+            vec3f_copy(cameraFocus, sCameraNode->focus);
+        }
         vr_build_game_camera_matrix(
             cameraMatrix,
-            sCameraNode->pos,
-            sCameraNode->focus,
+            cameraPos,
+            cameraFocus,
             sCameraNode->roll
         );
         mtxf_inverse(sVrControllerCameraInverse, cameraMatrix);
         sVrControllerCameraInverseTimestamp = gGlobalTimer;
+        sVrControllerCameraInverseDelta = renderDelta;
         sVrControllerCameraInverseValid = true;
     }
 
@@ -2938,13 +2987,8 @@ static bool vr_get_ui_plane_ndc(
 
     // Match the comfortable 1.5 m head-locked plane used by the rest of the
     // VR UI, including its per-eye convergence.
-#ifdef __ANDROID__
-    const float uiDistance = 2.0f;
-    const float uiHalfHeight = 0.55f;
-#else
     const float uiDistance = 1.5f;
     const float uiHalfHeight = uiDistance * 0.45f;
-#endif
     const float uiHalfWidth = uiHalfHeight *
         ((float)SCREEN_WIDTH / (float)SCREEN_HEIGHT);
     const float eyeDepth = uiDistance + eyeOffset[2];
@@ -3475,43 +3519,70 @@ void patch_mtx_vr_shared(void) {
         configVrMotionControllerInput) {
         vr_patch_controller_hand_matrices(0);
 
-        struct MtxInterp *heldInterp = sVrHeldMatrixHead;
-        Vec3f latePosition;
-        if (heldInterp != NULL &&
-            vr_hand_interaction_get_late_held_object_position(
-                heldInterp->owner,
-                latePosition
-            )) {
+        if (sVrHeldMatrixHead != NULL) {
             Vec3f cameraPos;
             Vec3f cameraFocus;
             Mat4 cameraMatrix;
             if (sCameraNode != NULL) {
-                delta_interpolate_vec3f(cameraPos,
-                    sCameraNode->prevPos, sCameraNode->pos,
-                    gRenderingDelta);
-                delta_interpolate_vec3f(cameraFocus,
-                    sCameraNode->prevFocus, sCameraNode->focus,
-                    gRenderingDelta);
-                vr_build_game_camera_matrix(cameraMatrix, cameraPos,
-                    cameraFocus, sCameraNode->roll);
+                delta_interpolate_vec3f(
+                    cameraPos,
+                    sCameraNode->prevPos,
+                    sCameraNode->pos,
+                    gRenderingDelta
+                );
+                delta_interpolate_vec3f(
+                    cameraFocus,
+                    sCameraNode->prevFocus,
+                    sCameraNode->focus,
+                    gRenderingDelta
+                );
+                vr_build_game_camera_matrix(
+                    cameraMatrix,
+                    cameraPos,
+                    cameraFocus,
+                    sCameraNode->roll
+                );
             }
-            Vec3f heldRenderBase;
-            delta_interpolate_vec3f(heldRenderBase,
-                heldInterp->owner->header.gfx.prevPos,
-                heldInterp->owner->header.gfx.pos,
-                gRenderingDelta);
-            const f32 dx = latePosition[0] - heldRenderBase[0];
-            const f32 dy = latePosition[1] - heldRenderBase[1];
-            const f32 dz = latePosition[2] - heldRenderBase[2];
-            for (struct MtxInterp *interp = heldInterp;
-                 interp != NULL; interp = interp->nextVrHeld) {
+
+            // Sample and patch every attachment independently. Besides being
+            // correct when multiple render layers/attachments are present,
+            // this keeps the visual root on the latest predicted OpenXR hand
+            // pose at the headset refresh rate. Gameplay state and release
+            // velocity remain on the native simulation tick.
+            for (struct MtxInterp *interp = sVrHeldMatrixHead;
+                 interp != NULL;
+                 interp = interp->nextVrHeld) {
+                Vec3f latePosition;
+                if (interp->owner == NULL ||
+                    !vr_hand_interaction_get_late_held_object_position(
+                        interp->owner,
+                        latePosition
+                    )) {
+                    continue;
+                }
+                Vec3f heldRenderBase;
+                delta_interpolate_vec3f(
+                    heldRenderBase,
+                    interp->owner->header.gfx.prevPos,
+                    interp->owner->header.gfx.pos,
+                    gRenderingDelta
+                );
+                const f32 dx = latePosition[0] - heldRenderBase[0];
+                const f32 dy = latePosition[1] - heldRenderBase[1];
+                const f32 dz = latePosition[2] - heldRenderBase[2];
                 if (interp->usingCamSpace && sCameraNode != NULL) {
-                    interp->interp.m[3][0] += dx * cameraMatrix[0][0] +
-                        dy * cameraMatrix[1][0] + dz * cameraMatrix[2][0];
-                    interp->interp.m[3][1] += dx * cameraMatrix[0][1] +
-                        dy * cameraMatrix[1][1] + dz * cameraMatrix[2][1];
-                    interp->interp.m[3][2] += dx * cameraMatrix[0][2] +
-                        dy * cameraMatrix[1][2] + dz * cameraMatrix[2][2];
+                    interp->interp.m[3][0] +=
+                        dx * cameraMatrix[0][0] +
+                        dy * cameraMatrix[1][0] +
+                        dz * cameraMatrix[2][0];
+                    interp->interp.m[3][1] +=
+                        dx * cameraMatrix[0][1] +
+                        dy * cameraMatrix[1][1] +
+                        dz * cameraMatrix[2][1];
+                    interp->interp.m[3][2] +=
+                        dx * cameraMatrix[0][2] +
+                        dy * cameraMatrix[1][2] +
+                        dz * cameraMatrix[2][2];
                 } else {
                     interp->interp.m[3][0] += dx;
                     interp->interp.m[3][1] += dy;
@@ -3874,10 +3945,10 @@ static void vr_append_controller_hands(
     );
     gSPDisplayList(gDisplayListHead++, obj_sanitize_gfx);
 
-    // The floating gloves render after the normal scene graph, so explicitly
-    // reload the local player's complete palette. This keeps the gloves—and
-    // future VR-only body parts—matched to the player's selected colors even
-    // when another network player's model was rendered most recently.
+    // The floating gloves render after the scene's opaque/alpha geometry but
+    // before its transparent effects. Explicitly reload the local player's
+    // complete palette so the gloves—and future VR-only body parts—stay
+    // matched even when another network player rendered most recently.
     Gfx* localPlayerColors =
         mario_create_local_player_colors_dl();
     if (localPlayerColors != NULL) {
@@ -4043,6 +4114,19 @@ static void geo_process_master_list_sub(struct GraphNodeMasterList *node) {
     }
 
     for (s32 i = 0; i < GFX_NUM_MASTER_LISTS; i++) {
+        // Floating gloves are opaque and late-latched, but historically they
+        // were appended after every transparent object. That made them cover
+        // a nearer translucent Rasengan solely because of command order.
+        // Emit them immediately before the transparent layers instead. Their
+        // normal opaque depth write then lets transparent effects blend and
+        // occlude correctly without making multi-shell spheres self-occlude.
+        if (i == LAYER_TRANSPARENT) {
+            vr_append_controller_hands(
+                enableZBuffer,
+                modeList,
+                mode2List
+            );
+        }
         if ((currList = node->listHeads[i]) != NULL) {
             gDPSetRenderMode(gDisplayListHead++, modeList->modes[i], mode2List->modes[i]);
             while (currList != NULL) {
@@ -4079,11 +4163,6 @@ static void geo_process_master_list_sub(struct GraphNodeMasterList *node) {
             }
         }
     }
-    vr_append_controller_hands(
-        enableZBuffer,
-        modeList,
-        mode2List
-    );
     if (enableZBuffer != 0) {
         gDPPipeSync(gDisplayListHead++);
         gSPClearGeometryMode(gDisplayListHead++, G_ZBUFFER);
@@ -4104,6 +4183,10 @@ static bool vr_hide_local_first_person_mario_part(void) {
 
     const s32 animPart = gCurMarioBodyState->currAnimPart;
     const u32 action = gMarioStates[0].action;
+    const bool ghostButtonPunch =
+        configVrImmersiveGhostPunchArm &&
+        (gPlayer1Controller->buttonDown & B_BUTTON) != 0 &&
+        (action == ACT_PUNCHING || action == ACT_MOVE_PUNCHING);
     const bool hideMountedBody =
         !configVrExperimentalMountedBody &&
         (action == ACT_FLYING ||
@@ -4150,12 +4233,12 @@ static bool vr_hide_local_first_person_mario_part(void) {
         case MARIO_ANIM_PART_LEFT_FOREARM:
         case MARIO_ANIM_PART_RIGHT_ARM:
         case MARIO_ANIM_PART_RIGHT_FOREARM:
-            return !configVrExperimentalArmsMode;
+            return !configVrExperimentalArmsMode && !ghostButtonPunch;
         case MARIO_ANIM_PART_LEFT_HAND:
         case MARIO_ANIM_PART_RIGHT_HAND:
             // The independently tracked floating gloves remain the hands in
             // both normal first person and Arms Mode.
-            return true;
+            return !ghostButtonPunch;
         case MARIO_ANIM_PART_ROOT:
         case MARIO_ANIM_PART_BUTT:
         case MARIO_ANIM_PART_TORSO:
@@ -4194,6 +4277,43 @@ static bool vr_hide_local_first_person_mario_part(void) {
     }
 }
 
+static bool vr_ghost_button_punch_part(void) {
+    if (!sVrFilteringLocalMarioBody ||
+        !configVrImmersiveGhostPunchArm ||
+        gCurMarioBodyState == NULL ||
+        (gPlayer1Controller->buttonDown & B_BUTTON) == 0) {
+        return false;
+    }
+    const u32 action = gMarioStates[0].action;
+    if (action != ACT_PUNCHING && action != ACT_MOVE_PUNCHING) {
+        return false;
+    }
+    const u32 part = gCurMarioBodyState->currAnimPart;
+    return part == MARIO_ANIM_PART_LEFT_ARM ||
+        part == MARIO_ANIM_PART_LEFT_FOREARM ||
+        part == MARIO_ANIM_PART_LEFT_HAND ||
+        part == MARIO_ANIM_PART_RIGHT_ARM ||
+        part == MARIO_ANIM_PART_RIGHT_FOREARM ||
+        part == MARIO_ANIM_PART_RIGHT_HAND;
+}
+
+static Gfx* vr_make_ghost_button_punch_display_list(void* displayList) {
+    Gfx* gfxHead = alloc_display_list(7 * sizeof(*gfxHead));
+    if (gfxHead == NULL) {
+        return NULL;
+    }
+    Gfx* gfx = gfxHead;
+    const u8 opacity = (u8)((MIN(configVrGhostPunchArmOpacity, 100U) * 255U + 50U) / 100U);
+    gDPPipeSync(gfx++);
+    gDPSetAlphaCompare(gfx++, G_AC_DITHER);
+    gDPSetEnvColor(gfx++, 255, 255, 255, opacity);
+    gSPDisplayList(gfx++, displayList);
+    gDPSetEnvColor(gfx++, 255, 255, 255, 255);
+    gDPSetAlphaCompare(gfx++, G_AC_NONE);
+    gSPEndDisplayList(gfx++);
+    return gfxHead;
+}
+
 static void geo_append_display_list(void *displayList, s16 layer) {
     // First-person VR uses the regular animated Mario model for the torso and
     // lower body, but tracked gloves replace its head, arms, and hands. Keep
@@ -4201,6 +4321,16 @@ static void geo_append_display_list(void *displayList, s16 layer) {
     // remain synchronized; only suppress their actual display lists here.
     if (vr_hide_local_first_person_mario_part()) {
         return;
+    }
+
+    if (vr_ghost_button_punch_part()) {
+        Gfx* ghostDisplayList =
+            vr_make_ghost_button_punch_display_list(displayList);
+        if (ghostDisplayList == NULL) {
+            return;
+        }
+        displayList = ghostDisplayList;
+        layer = LAYER_TRANSPARENT;
     }
 
 #ifdef F3DEX_GBI_2
@@ -5316,7 +5446,13 @@ static f32 vr_get_local_mario_torso_alignment(
         }
     }
 
-    return sVrTorsoAlignment;
+    // Keep the former Mario body relationship as an opt-in compatibility
+    // offset without rewriting the player's saved camera-height profile.
+    const f32 previousHeightOffset =
+        configVrPreviousBodyHeight && characterIndex == CT_MARIO
+            ? 20.0f
+            : 0.0f;
+    return sVrTorsoAlignment + previousHeightOffset;
 }
 
 static void vr_adjust_local_mario_body_transform(
@@ -5811,7 +5947,12 @@ static void geo_process_object(struct Object *node) {
           !hidePhysicalClimbBody) ||
          configVrExperimentalTrueFirstPerson ||
          vr_first_person_true_diving_active() ||
-         configVrExperimentalArmsMode);
+        configVrExperimentalArmsMode ||
+        (configVrImmersiveGhostPunchArm &&
+         gPlayer1Controller != NULL &&
+         (gPlayer1Controller->buttonDown & B_BUTTON) != 0 &&
+         (gMarioStates[0].action == ACT_PUNCHING ||
+          gMarioStates[0].action == ACT_MOVE_PUNCHING)));
     const bool hideLocalMarioInVrFirstPerson =
         localMarioInVrFirstPerson &&
         !processLocalMarioVrSkeleton;

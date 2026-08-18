@@ -25,6 +25,7 @@
 #include "pc/djui/djui_theme.h"
 #include "game/skybox.h"
 #include "pc/gfx/gfx_pc.h"
+#include "pc/vr/vr.h"
 #include "include/course_table.h"
 #include "game/level_geo.h"
 #include "game/first_person_cam.h"
@@ -258,7 +259,7 @@ static struct TextureInfo sPowerMeterTexturesInfo[] = {
     { .texture = texture_power_meter_full,           .name = "texture_power_meter_full",           .width = 32, .height = 32, .format = G_IM_FMT_RGBA, .size = G_IM_SIZ_16b },
 };
 
-void hud_render_power_meter(s32 health, f32 x, f32 y, f32 width, f32 height) {
+static void hud_render_power_meter_raw(s32 health, f32 x, f32 y, f32 width, f32 height) {
     djui_hud_render_texture(&sPowerMeterTexturesInfo[0], x, y, width / 64, height / 64);
     djui_hud_render_texture(&sPowerMeterTexturesInfo[1], x + (width - 2) / 2, y, width / 64, height / 64);
     s32 numWedges = MIN(MAX(health >> 8, 0), 8);
@@ -267,7 +268,26 @@ void hud_render_power_meter(s32 health, f32 x, f32 y, f32 width, f32 height) {
     }
 }
 
+void hud_render_power_meter(s32 health, f32 x, f32 y, f32 width, f32 height) {
+    // Modded HUDs frequently use a fixed upper-left power-meter position.
+    // In VR that collides with lives/FPS, so give this HUD-specific API the
+    // same stable top-center placement as the stock meter. The surrounding
+    // VR HUD styling still applies the configured spread and opacity.
+    if (vr_is_active()) {
+        x = ((f32)djui_hud_get_screen_width() - width) * 0.5f;
+    }
+    hud_render_power_meter_raw(health, x, y, width, height);
+}
+
 void hud_render_power_meter_interpolated(s32 health, f32 prevX, f32 prevY, f32 prevWidth, f32 prevHeight, f32 x, f32 y, f32 width, f32 height) {
+    // Lua HUD interpolation is evaluated against the flat-screen frame
+    // transform. In stereo VR that makes custom power meters jump between
+    // incompatible matrices (and visibly flicker near the top of the view).
+    // Render the current sample once through the stable VR HUD plane instead.
+    if (vr_is_active()) {
+        hud_render_power_meter(health, x, y, width, height);
+        return;
+    }
     djui_hud_render_texture_interpolated(&sPowerMeterTexturesInfo[0],
         prevX, prevY, prevWidth / 64, prevHeight / 64,
         x,     y,     width     / 64, height     / 64);
@@ -282,6 +302,20 @@ void hud_render_power_meter_interpolated(s32 health, f32 prevX, f32 prevY, f32 p
             prevX + (prevWidth - 4) / 4, prevY + prevHeight / 4, prevWidth / 64, prevHeight / 64,
             x     + (width - 4)     / 4, y     + height     / 4, width     / 64, height     / 64);
     }
+}
+
+void hud_render_power_meter_interpolated_world(s32 health, f32 prevX, f32 prevY, f32 prevWidth, f32 prevHeight, f32 x, f32 y, f32 width, f32 height) {
+    // Nametag meters are world-space elements and must not be moved to the
+    // HUD center by the modded-HUD compatibility path above.
+    if (vr_is_active()) {
+        hud_render_power_meter_raw(health, x, y, width, height);
+        return;
+    }
+    hud_render_power_meter_interpolated(
+        health,
+        prevX, prevY, prevWidth, prevHeight,
+        x, y, width, height
+    );
 }
 
 s8 hud_get_flash(void) {

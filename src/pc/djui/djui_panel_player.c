@@ -29,6 +29,60 @@ static struct DjuiInputbox* sPalettePresetNameTextBox = NULL;
 
 static struct DjuiRect *sColorRect = NULL;
 
+struct DjuiPaletteQuickColor {
+    const char* name;
+    u8 r;
+    u8 g;
+    u8 b;
+};
+
+static const struct DjuiPaletteQuickColor sPaletteQuickColors[] = {
+    { "Black",    0x00, 0x00, 0x00 },
+    { "Gray",     0x80, 0x80, 0x80 },
+    { "Silver",   0xC0, 0xC0, 0xC0 },
+    { "White",    0xFF, 0xFF, 0xFF },
+    { "Red",      0xC8, 0x00, 0x00 },
+    { "Maroon",   0x80, 0x00, 0x20 },
+    { "Orange",   0xFF, 0x80, 0x00 },
+    { "Brown",    0x7A, 0x42, 0x20 },
+    { "Gold",     0xD4, 0xAF, 0x37 },
+    { "Yellow",   0xFF, 0xE8, 0x20 },
+    { "Lime",     0x80, 0xE8, 0x20 },
+    { "Green",    0x20, 0xA0, 0x40 },
+    { "Teal",     0x00, 0x80, 0x80 },
+    { "Cyan",     0x20, 0xE0, 0xE0 },
+    { "Sky Blue", 0x60, 0xB8, 0xF0 },
+    { "Blue",     0x00, 0x00, 0xC8 },
+    { "Navy",     0x18, 0x28, 0x70 },
+    { "Purple",   0x70, 0x30, 0xA0 },
+    { "Violet",   0xA0, 0x50, 0xD0 },
+    { "Magenta",  0xE0, 0x30, 0xB0 },
+    { "Pink",     0xFF, 0x80, 0xB8 },
+    { "Peach",    0xFF, 0xB0, 0x80 },
+    { "Tan",      0xC8, 0x98, 0x60 },
+    { "Beige",    0xE8, 0xD8, 0xB0 },
+    { "Scarlet",  0xFF, 0x24, 0x00 },
+    { "Coral",    0xFF, 0x7F, 0x50 },
+    { "Amber",    0xFF, 0xBF, 0x00 },
+    { "Mustard",  0xD4, 0xA0, 0x17 },
+    { "Olive",    0x80, 0x80, 0x00 },
+    { "Chartreuse", 0x7F, 0xFF, 0x00 },
+    { "Mint",     0x3E, 0xB4, 0x89 },
+    { "Emerald",  0x00, 0x9B, 0x77 },
+    { "Turquoise", 0x40, 0xE0, 0xD0 },
+    { "Aqua",     0x00, 0xFF, 0xFF },
+    { "Cerulean", 0x00, 0x7B, 0xA7 },
+    { "Royal Blue", 0x41, 0x69, 0xE1 },
+    { "Indigo",   0x4B, 0x00, 0x82 },
+    { "Lavender", 0xB5, 0x7E, 0xDC },
+    { "Plum",     0x8E, 0x45, 0x85 },
+    { "Rose",     0xFF, 0x00, 0x7F },
+    { "Salmon",   0xFA, 0x80, 0x72 },
+    { "Copper",   0xB8, 0x73, 0x33 },
+    { "Bronze",   0xCD, 0x7F, 0x32 },
+    { "Cream",    0xFF, 0xFD, 0xD0 },
+};
+
 struct DjuiText* gDjuiPaletteToggle = NULL;
 
 void djui_panel_player_create(struct DjuiBase* caller);
@@ -133,6 +187,79 @@ static void djui_panel_player_edit_palette_green_changed(UNUSED struct DjuiBase*
 
 static void djui_panel_player_edit_palette_blue_changed(UNUSED struct DjuiBase* caller) {
     djui_panel_player_edit_palette_slider_changed(caller, 2);
+}
+
+static void djui_panel_player_quick_color_selected(struct DjuiBase* caller) {
+    if (caller == NULL || caller->tag < 0 ||
+        caller->tag >= (s64)ARRAY_COUNT(sPaletteQuickColors)) {
+        return;
+    }
+
+    const struct DjuiPaletteQuickColor* color =
+        &sPaletteQuickColors[caller->tag];
+    configPlayerPalette.parts[sCurrentPlayerPart][0] = color->r;
+    configPlayerPalette.parts[sCurrentPlayerPart][1] = color->g;
+    configPlayerPalette.parts[sCurrentPlayerPart][2] = color->b;
+    djui_panel_player_edit_palette_update_sliders();
+    djui_panel_player_edit_palette_update_hex_code_box();
+    djui_panel_player_edit_palette_update_palette_display();
+    djui_panel_menu_back(caller);
+}
+
+static void djui_panel_player_quick_colors_create(struct DjuiBase* caller) {
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create("Color Palette", true);
+    struct DjuiBase* body = djui_three_panel_get_body(panel);
+
+    // Keep one interactable per flow-layout row. The old two-column nested
+    // rows left off-screen buttons with stale navigation coordinates after
+    // scrolling down, so controller navigation could not reliably move or
+    // auto-scroll upward again.
+    for (s32 index = 0;
+         index < (s32)ARRAY_COUNT(sPaletteQuickColors);
+         index++) {
+        const struct DjuiPaletteQuickColor* color =
+            &sPaletteQuickColors[index];
+        struct DjuiButton* button = djui_button_create(
+            body,
+            color->name,
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_player_quick_color_selected
+        );
+        button->base.tag = index;
+        djui_base_set_size(&button->base, 1.0f, 48);
+
+        struct DjuiRect* swatch = djui_rect_create(&button->rect->base);
+        djui_base_set_size_type(
+            &swatch->base,
+            DJUI_SVT_RELATIVE,
+            DJUI_SVT_RELATIVE
+        );
+        djui_base_set_size(&swatch->base, 0.08f, 0.68f);
+        djui_base_set_alignment(
+            &swatch->base,
+            DJUI_HALIGN_LEFT,
+            DJUI_VALIGN_CENTER
+        );
+        djui_base_set_location(&swatch->base, 7.0f, 0.0f);
+        djui_base_set_color(
+            &swatch->base,
+            color->r,
+            color->g,
+            color->b,
+            255
+        );
+        djui_base_set_border_width(&swatch->base, 1);
+        djui_base_set_border_color(&swatch->base, 230, 230, 230, 255);
+    }
+
+    djui_button_create(
+        body,
+        DLANG(MENU, BACK),
+        DJUI_BUTTON_STYLE_BACK,
+        djui_panel_menu_back
+    );
+    djui_panel_add(caller, panel, NULL);
 }
 
 static bool djui_panel_player_edit_palette_preset_name_valid(char* buffer) {
@@ -320,6 +447,13 @@ static void djui_panel_player_edit_palette_create(struct DjuiBase* caller) {
         djui_base_set_color(&rectValue->base, sSliderChannels[0], sSliderChannels[1], sSliderChannels[2], 255);
         djui_base_set_gradient(&rectValue->base, false);
         sColorRect = rectValue;
+
+        djui_button_create(
+            body,
+            "Color Palette",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_player_quick_colors_create
+        );
 
         struct DjuiRect* rect2 = djui_rect_container_create(body, 32);
         {

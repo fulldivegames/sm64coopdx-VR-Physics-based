@@ -8,6 +8,7 @@
 static bool sPoseValid;
 static bool sReferenceValid;
 static bool sRecenterPending = true;
+static bool sPreserveRecenterHeight;
 static float sReferencePosition[3];
 static float sReferenceRotation[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
 static float sHeadPosition[3];
@@ -97,11 +98,14 @@ void quest_vr_bridge_update_views(const float positions[2][3],
         sReferenceRotation[1] = -sinf(yaw * 0.5f);
         sReferenceRotation[2] = 0.0f;
         sReferenceRotation[3] = cosf(yaw * 0.5f);
-        sCalibratedHeadHeight = fabsf(center[1]);
-        if (sCalibratedHeadHeight < 0.75f || sCalibratedHeadHeight > 2.50f)
-            sCalibratedHeadHeight = 1.65f;
+        if (!sPreserveRecenterHeight) {
+            sCalibratedHeadHeight = fabsf(center[1]);
+            if (sCalibratedHeadHeight < 0.75f || sCalibratedHeadHeight > 2.50f)
+                sCalibratedHeadHeight = 1.65f;
+        }
         sReferenceValid = true;
         sRecenterPending = false;
+        sPreserveRecenterHeight = false;
         ++sTrackingOriginGeneration;
     }
     float delta[3] = {
@@ -179,6 +183,12 @@ bool vr_openxr_get_calibrated_head_height(float *height) {
 uint32_t vr_openxr_get_tracking_origin_generation(void) { return sTrackingOriginGeneration; }
 void vr_openxr_request_recenter(void) {
     sRecenterPending = true;
+    sPreserveRecenterHeight = false;
+    sReferenceValid = false;
+}
+void vr_openxr_request_horizontal_recenter(void) {
+    sRecenterPending = true;
+    sPreserveRecenterHeight = sReferenceValid;
     sReferenceValid = false;
 }
 bool vr_openxr_get_controller_state(uint32_t hand, struct VrControllerState *state) {

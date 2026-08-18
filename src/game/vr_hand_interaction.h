@@ -81,5 +81,20 @@ Gfx* geo_vr_fireball_color(
     struct GraphNode* node,
     void* context
 );
+Gfx* geo_vr_rasengan_color(
+    s32 callContext,
+    struct GraphNode* node,
+    void* context
+);
+Gfx* geo_vr_rasen_shuriken_color(
+    s32 callContext,
+    struct GraphNode* node,
+    void* context
+);
+Gfx* geo_vr_rasengan_visual_spin(
+    s32 callContext,
+    struct GraphNode* node,
+    void* context
+);
 
 #endif // VR_HAND_INTERACTION_H

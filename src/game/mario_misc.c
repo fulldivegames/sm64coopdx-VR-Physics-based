@@ -249,8 +249,9 @@ void bhv_unlock_door_star_init(void) {
     gCurrentObject->oUnlockDoorStarYawVel = 0x1000;
     gCurrentObject->oPosX += 30.0f * sins(gMarioState->faceAngle[1] - 0x4000);
     gCurrentObject->oPosY += 160.0f;
-    // Keep the unlock-star presentation at eye level in first-person VR
-    // without changing Mario, the door, the cutscene state, or its timing.
+    // In first-person VR the native third-person presentation places this
+    // cosmetic star around the top of the player's head. Raise only the
+    // unlock-star object; the door cutscene, Mario, and its timing stay intact.
     if (vr_is_active() &&
         configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON) {
         gCurrentObject->oPosY += 120.0f;
@@ -363,7 +364,11 @@ static u8 vr_get_local_mario_body_alpha(void) {
                 rotation[3] * rotation[0] -
                 rotation[1] * rotation[2]
             );
-            const f32 angle = clamp(configVrLookDownTransparencyAngle, 5U, 60U) * (f32)(M_PI / 180.0);
+            const f32 angle = clamp(
+                configVrLookDownTransparencyAngle,
+                5U,
+                60U
+            ) * (f32)(M_PI / 180.0);
             if (forwardY <= -cosf(angle)) {
                 targetAlpha = MIN(targetAlpha, 128);
             }
@@ -861,19 +866,8 @@ static struct PlayerColor geo_mario_get_player_color(
 ) {
     struct PlayerColor color = { 0 };
     struct MarioBodyState* bodyState = &gBodyStates[index];
-    struct PlayerPalette firePalette;
     if (index == 0 && vr_special_moves_fire_flower_active()) {
-        firePalette = *palette;
-        const Color red = { 210, 24, 24 };
-        const Color white = { 255, 255, 255 };
-        const Color brown = { 92, 48, 24 };
-        memcpy(firePalette.parts[PANTS], red, sizeof(Color));
-        memcpy(firePalette.parts[SHIRT], white, sizeof(Color));
-        memcpy(firePalette.parts[GLOVES], white, sizeof(Color));
-        memcpy(firePalette.parts[SHOES], brown, sizeof(Color));
-        memcpy(firePalette.parts[CAP], white, sizeof(Color));
-        memcpy(firePalette.parts[EMBLEM], white, sizeof(Color));
-        palette = &firePalette;
+        palette = player_palette_get_fire_flower();
     }
     for (s32 part = 0; part != PLAYER_PART_MAX; ++part) {
         color.parts[part] = (Lights1) gdSPDefLights1(

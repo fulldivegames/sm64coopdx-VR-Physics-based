@@ -147,6 +147,8 @@ const LevelScript level_main_scripts_entry[] = {
     LOAD_MODEL_FROM_GEO(MODEL_VR_TWIRL_TORNADO,          vr_twirl_tornado_geo),
     LOAD_MODEL_FROM_GEO(MODEL_VR_FIRE_FLOWER,             vr_fire_flower_geo),
     LOAD_MODEL_FROM_GEO(MODEL_VR_FIREBALL,                vr_fireball_geo),
+    LOAD_MODEL_FROM_GEO(MODEL_VR_RASENGAN,                vr_rasengan_geo),
+    LOAD_MODEL_FROM_GEO(MODEL_VR_RASEN_SHURIKEN,          vr_rasen_shuriken_geo),
 
     // CUSTOM MODELS END
 

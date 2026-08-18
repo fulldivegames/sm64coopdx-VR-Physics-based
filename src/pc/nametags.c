@@ -176,7 +176,7 @@ void nametags_render(void) {
             djui_hud_set_color(255, 255, 255, alpha);
             f32 currHealthSize = 90 * nametag->scale;
             f32 prevHealthSize = 90 * e->prevScale;
-            hud_render_power_meter_interpolated(m->health,
+            hud_render_power_meter_interpolated_world(m->health,
                   e->prevPos[0] - (prevHealthSize * 0.5f), prevNametagPosY - 72 *   e->prevScale, prevHealthSize, prevHealthSize,
                 nametag->pos[0] - (currHealthSize * 0.5f), currNametagPosY - 72 * nametag->scale, currHealthSize, currHealthSize
             );

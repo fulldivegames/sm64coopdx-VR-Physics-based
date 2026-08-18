@@ -1,7 +1,11 @@
 #include "dynos.cpp.h"
+#include <array>
+#include <set>
 extern "C" {
 #include "game/moving_texture.h"
 #include "game/hardcoded.h"
+#include "pc/gfx/gfx_cc.h"
+#include "pc/gfx/gfx_pc.h"
 
 void *dynos_swap_cmd(void *cmd) {
     return DynOS_SwapCmd(cmd);
@@ -64,6 +68,72 @@ bool dynos_warp_to_castle(s32 aLevel) {
 
 void dynos_gfx_init(void) {
     DynOS_Gfx_Init();
+}
+
+static void dynos_collect_shader_combiners(
+    GfxData *gfxData,
+    std::set<std::array<u32, 4>> &combiners
+) {
+    if (gfxData == NULL) return;
+
+    for (auto *node : gfxData->mDisplayLists) {
+        if (node == NULL || node->mData == NULL) continue;
+        for (u32 i = 0; i < node->mSize; ++i) {
+            const u32 w0 = (u32)node->mData[i].words.w0;
+            const u32 w1 = (u32)node->mData[i].words.w1;
+            if ((w0 >> 24) != G_SETCOMBINE) continue;
+
+            combiners.insert({
+                color_comb_rgb(
+                    (w0 >> 20) & 0x0f, (w1 >> 28) & 0x0f,
+                    (w0 >> 15) & 0x1f, (w1 >> 15) & 0x07, 0),
+                color_comb_alpha(
+                    (w0 >> 12) & 0x07, (w1 >> 12) & 0x07,
+                    (w0 >> 9) & 0x07, (w1 >> 9) & 0x07, 0),
+                color_comb_rgb(
+                    (w0 >> 5) & 0x0f, (w1 >> 24) & 0x0f,
+                    w0 & 0x1f, (w1 >> 6) & 0x07, 1),
+                color_comb_alpha(
+                    (w1 >> 21) & 0x07, (w1 >> 3) & 0x07,
+                    (w1 >> 18) & 0x07, w1 & 0x07, 1),
+            });
+        }
+    }
+}
+
+void dynos_gfx_warmup_loaded_pack_shaders(void) {
+    std::set<GfxData *> visited;
+    std::set<std::array<u32, 4>> combiners;
+
+    for (s32 i = 0; i < DynOS_Pack_GetCount(); ++i) {
+        PackData *pack = DynOS_Pack_GetFromIndex(i);
+        if (pack == NULL || !pack->mEnabled || !pack->mLoaded) continue;
+        for (auto &entry : pack->mGfxData) {
+            if (entry.second != NULL && visited.insert(entry.second).second) {
+                dynos_collect_shader_combiners(entry.second, combiners);
+            }
+        }
+    }
+
+    for (auto &entry : DynOS_Actor_GetValidActors()) {
+        GfxData *gfxData = entry.second.mGfxData;
+        if (gfxData != NULL && visited.insert(gfxData).second) {
+            dynos_collect_shader_combiners(gfxData, combiners);
+        }
+    }
+
+    u32 warmed = 0;
+    for (const auto &combiner : combiners) {
+        if (warmed >= 64) break;
+        gfx_pc_precomp_shader(
+            combiner[0], combiner[1], combiner[2], combiner[3], 0);
+        gfx_pc_precomp_shader(
+            combiner[0], combiner[1], combiner[2], combiner[3], 1);
+        warmed++;
+    }
+
+    printf("[GFX] Mod/DynOS shader warm-up scanned %u data set(s), found %u combiner(s), and warmed %u.\n",
+           (u32)visited.size(), (u32)combiners.size(), warmed);
 }
 
 int dynos_pack_get_count(void) {

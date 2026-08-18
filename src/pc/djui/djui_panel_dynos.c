@@ -5,8 +5,6 @@
 #include "pc/configfile.h"
 #include "data/dynos.c.h"
 #include "pc/network/network.h"
-#include "djui_panel_main.h"
-#include "djui_panel_options.h"
 #include "game/level_update.h"
 #include "pc/lua/smlua_hooks.h"
 
@@ -15,6 +13,7 @@ static struct DjuiPaginated* sDynosPaginated = NULL;
 static struct DjuiInputbox* sSearchInputbox = NULL;
 
 void djui_panel_dynos_create(struct DjuiBase* caller);
+static void djui_panel_dynos_rebuild_list(struct DjuiBase* caller);
 
 static void djui_panel_dynos_apply(struct DjuiBase* caller) {
     dynos_pack_set_enabled(caller->tag, caller->bTag);
@@ -28,13 +27,11 @@ static void djui_panel_dynos_local_player_model_only(UNUSED struct DjuiBase* cal
 }
 
 static void djui_panel_dynos_refresh(UNUSED struct DjuiBase* base) {
+    // Rescan every supported DynOS path and rebuild the current list in
+    // place. Newly copied packs appear immediately without tearing down the
+    // complete menu stack or requiring an application restart.
     dynos_gfx_init();
-
-    djui_panel_shutdown();
-    gDjuiInMainMenu = true;
-    djui_panel_main_create(NULL);
-    djui_panel_options_create(NULL);
-    djui_panel_dynos_create(NULL);
+    djui_panel_dynos_rebuild_list(NULL);
 }
 
 static void djui_panel_dynos_destroy(UNUSED struct DjuiBase* caller) {
@@ -93,18 +90,16 @@ void djui_panel_dynos_create(struct DjuiBase* caller) {
         djui_base_set_color(&space->base, 0, 0, 0, 0);
 
         djui_checkbox_create(body, DLANG(DYNOS, LOCAL_PLAYER_MODEL_ONLY), &configDynosLocalPlayerModelOnly, djui_panel_dynos_local_player_model_only);
+        struct DjuiRect* rect1 = djui_rect_container_create(body, 45);
+        {
+            struct DjuiButton* button1 = djui_button_left_create(&rect1->base, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK, djui_panel_menu_back);
+            struct DjuiButton* button2 = djui_button_right_create(&rect1->base, DLANG(LOBBIES, REFRESH), DJUI_BUTTON_STYLE_NORMAL, djui_panel_dynos_refresh);
+            djui_base_set_size(&button1->base, 0.485f, 45);
+            djui_base_set_size(&button2->base, 0.485f, 45);
+        }
         if (gNetworkType == NT_NONE) {
-            struct DjuiRect* rect1 = djui_rect_container_create(body, 45);
-            {
-                struct DjuiButton* button1 = djui_button_left_create(&rect1->base, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK, djui_panel_menu_back);
-                struct DjuiButton* button2 = djui_button_right_create(&rect1->base, DLANG(LOBBIES, REFRESH), DJUI_BUTTON_STYLE_NORMAL, djui_panel_dynos_refresh);
-                struct DjuiButton* button3 = djui_button_create(body, DLANG(DYNOS, OPEN_DYNOS_FOLDER), DJUI_BUTTON_STYLE_NORMAL, djui_panel_dynos_open_folder);
-                djui_base_set_size(&button1->base, 0.485f, 45);
-                djui_base_set_size(&button2->base, 0.485f, 45);
-                djui_base_set_size(&button3->base, 1.0f, 45);
-            }
-        } else {
-            djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK, djui_panel_menu_back);
+            struct DjuiButton* button3 = djui_button_create(body, DLANG(DYNOS, OPEN_DYNOS_FOLDER), DJUI_BUTTON_STYLE_NORMAL, djui_panel_dynos_open_folder);
+            djui_base_set_size(&button3->base, 1.0f, 45);
         }
     }
 

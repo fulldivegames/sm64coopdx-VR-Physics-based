@@ -828,10 +828,12 @@ static bool create_swapchains(QuestApp *app) {
 
     const bool ui_full_quality = quest_game_ui_requires_full_quality();
     const bool ultra_foveation = quest_game_ultra_performance_enabled();
+    const bool low_scale_foveation = !ui_full_quality && render_scale <= 80U;
     const unsigned int foveation_index =
         ui_full_quality && app->foveation_profiles[0] != XR_NULL_HANDLE
             ? 0U
-            : ultra_foveation && app->foveation_profiles[2] != XR_NULL_HANDLE
+            : (ultra_foveation || low_scale_foveation) &&
+              app->foveation_profiles[2] != XR_NULL_HANDLE
                 ? 2U : 1U;
     const XrFoveationProfileFB active_foveation =
         app->foveation_profiles[foveation_index];
@@ -1005,10 +1007,18 @@ static void update_foveation_if_needed(QuestApp *app) {
     if (!app->foveation_supported) return;
     const bool ui_full_quality = quest_game_ui_requires_full_quality();
     const bool ultra = quest_game_ultra_performance_enabled();
+    // A smaller eye target removes pixels, but Adreno can still spend most of
+    // the frame shading the center/periphery uniformly. Couple the lower half
+    // of the render-scale slider to high fixed foveation so lowering the scale
+    // produces a real GPU-time reduction, while menus retain their dedicated
+    // full-quality/off profile.
+    const bool low_scale = !ui_full_quality &&
+        app->active_render_scale <= 80U;
     const unsigned int desired =
         ui_full_quality && app->foveation_profiles[0] != XR_NULL_HANDLE
             ? 0U
-            : ultra && app->foveation_profiles[2] != XR_NULL_HANDLE
+            : (ultra || low_scale) &&
+              app->foveation_profiles[2] != XR_NULL_HANDLE
                 ? 2U : 1U;
     if (desired == app->active_foveation_profile) return;
 
