@@ -1892,6 +1892,152 @@ void vr_hand_interaction_update_headset_collider(
     );
 }
 
+static bool vr_hand_interaction_roomscale_action_allowed(
+    struct MarioState* mario
+) {
+    if (mario == NULL ||
+        (mario->action & ACT_FLAG_INTANGIBLE) != 0 ||
+        mario->freeze >= 2 ||
+        vr_hand_interaction_is_physical_climb_active(mario)) {
+        return false;
+    }
+    switch (mario->action & ACT_GROUP_MASK) {
+        case ACT_GROUP_STATIONARY:
+        case ACT_GROUP_MOVING:
+        case ACT_GROUP_AIRBORNE:
+        case ACT_GROUP_SUBMERGED:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void vr_hand_interaction_update_roomscale_body(
+    struct MarioState* mario
+) {
+    if (mario == NULL || mario->marioObj == NULL ||
+        !vr_is_active() ||
+        configVrCameraMode != VR_CAMERA_MODE_FIRST_PERSON) {
+        vr_reset_roomscale_body_tracking();
+        return;
+    }
+    if (!vr_hand_interaction_roomscale_action_allowed(mario)) {
+        return;
+    }
+
+    Vec3f requestedDisplacement;
+    if (!vr_get_roomscale_body_displacement(requestedDisplacement)) {
+        return;
+    }
+    const f32 requestedLength = sqrtf(
+        requestedDisplacement[0] * requestedDisplacement[0] +
+        requestedDisplacement[2] * requestedDisplacement[2]
+    );
+    if (requestedLength < 0.001f) {
+        return;
+    }
+
+    // Limit each gameplay sample while retaining unconsumed room movement.
+    // This prevents a fast headset sample from tunnelling through thin walls;
+    // any remainder is resolved on following samples.
+    const f32 appliedLength = fminf(requestedLength, 36.0f);
+    Vec3f step = {
+        requestedDisplacement[0] * appliedLength / requestedLength,
+        0.0f,
+        requestedDisplacement[2] * appliedLength / requestedLength
+    };
+    const s32 substeps = max((s32)ceilf(appliedLength / 12.0f), 1);
+    step[0] /= (f32)substeps;
+    step[2] /= (f32)substeps;
+
+    Vec3f startPosition;
+    Vec3f resolvedPosition;
+    vec3f_copy(startPosition, mario->pos);
+    vec3f_copy(resolvedPosition, mario->pos);
+    struct Surface* resolvedFloor = mario->floor;
+    f32 resolvedFloorHeight = mario->floorHeight;
+    const bool grounded =
+        (mario->action & (ACT_FLAG_AIR | ACT_FLAG_SWIMMING)) == 0;
+
+    for (s32 substep = 0; substep < substeps; substep++) {
+        Vec3f candidate = {
+            resolvedPosition[0] + step[0],
+            resolvedPosition[1],
+            resolvedPosition[2] + step[2]
+        };
+        struct WallCollisionData lowerWalls = { 0 };
+        struct WallCollisionData upperWalls = { 0 };
+        resolve_and_return_wall_collisions_data(
+            candidate,
+            30.0f,
+            24.0f,
+            &lowerWalls
+        );
+        resolve_and_return_wall_collisions_data(
+            candidate,
+            60.0f,
+            50.0f,
+            &upperWalls
+        );
+
+        struct Surface* floor = NULL;
+        const f32 floorHeight = find_floor(
+            candidate[0],
+            candidate[1] + 100.0f,
+            candidate[2],
+            &floor
+        );
+        struct Surface* ceiling = NULL;
+        const f32 ceilingHeight = find_ceil(
+            candidate[0],
+            candidate[1] - 80.0f,
+            candidate[2],
+            &ceiling
+        );
+        if (floor == NULL ||
+            (grounded && floorHeight > candidate[1] + 100.0f) ||
+            (ceiling != NULL &&
+             ceilingHeight - fmaxf(candidate[1], floorHeight) < 160.0f)) {
+            break;
+        }
+
+        if (grounded && fabsf(floorHeight - candidate[1]) <= 100.0f) {
+            candidate[1] = floorHeight;
+        }
+        vec3f_copy(resolvedPosition, candidate);
+        resolvedFloor = floor;
+        resolvedFloorHeight = floorHeight;
+        if (upperWalls.numWalls > 0) {
+            mario_update_wall(mario, &upperWalls);
+        }
+    }
+
+    Vec3f actualDisplacement = {
+        resolvedPosition[0] - startPosition[0],
+        0.0f,
+        resolvedPosition[2] - startPosition[2]
+    };
+    if (fabsf(actualDisplacement[0]) < 0.001f &&
+        fabsf(actualDisplacement[2]) < 0.001f) {
+        return;
+    }
+
+    vec3f_copy(mario->pos, resolvedPosition);
+    mario->floor = resolvedFloor;
+    mario->floorHeight = resolvedFloorHeight;
+    if (grounded &&
+        resolvedFloor != NULL &&
+        resolvedFloorHeight < mario->pos[1] - 100.0f) {
+        set_mario_action(mario, ACT_FREEFALL, 0);
+    }
+    vec3f_copy(&mario->marioObj->oPosX, mario->pos);
+    vec3f_copy(mario->marioObj->header.gfx.pos, mario->pos);
+    // Preserve normal render interpolation. The matching tracking-space
+    // compensation is interpolated over this same gameplay frame, so the
+    // authoritative hitbox moves now without making the visible body snap.
+    vr_commit_roomscale_body_displacement(actualDisplacement);
+}
+
 bool vr_hand_interaction_validate_headset_damage_contact(
     struct MarioState* mario,
     struct Object* object
@@ -3436,6 +3582,18 @@ static void vr_hand_interaction_commit_physical_climb_offset(
         }
         vec3f_copy(&mario->marioObj->oPosX, mario->pos);
         vec3f_copy(mario->marioObj->header.gfx.pos, mario->pos);
+        // Physical climbing already commits its accumulated camera/HMD
+        // displacement into Mario here. Consume the matching room-scale
+        // tracking remainder so the general body-follow path cannot apply it
+        // a second time on the first frame after release.
+        Vec3f roomscaleDisplacement;
+        if (vr_get_roomscale_body_displacement(
+                roomscaleDisplacement
+            )) {
+            vr_commit_roomscale_body_displacement(
+                roomscaleDisplacement
+            );
+        }
     }
     sVrPhysicalClimbRegrabFrames =
         VR_CLIMB_REGRAB_COOLDOWN_FRAMES;

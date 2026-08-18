@@ -814,6 +814,61 @@ static bool sVrControllerCameraInverseValid = false;
 static u32 sVrControllerCameraInverseTimestamp = 0;
 static f32 sVrControllerCameraInverseDelta = -1.0f;
 static Mat4 sVrControllerCameraInverse;
+static bool sVrRoomscaleBodyTrackingValid = false;
+// Horizontal tracking-space translation already transferred into Mario's
+// gameplay position. Keeping this in tracking space lets artificial camera
+// yaw changes preserve the physical room origin without moving Mario twice.
+static Vec3f sVrRoomscaleConsumedLocal = { 0.0f, 0.0f, 0.0f };
+static Vec3f sVrRoomscaleConsumedLocalPrev = { 0.0f, 0.0f, 0.0f };
+static u32 sVrRoomscaleConsumedTimestamp = 0;
+static f32 sVrRoomscaleWorldFromLocal[2][2] = {
+    { 1.0f, 0.0f },
+    { 0.0f, 1.0f }
+};
+static bool sVrRoomscaleBasisValid = false;
+
+void vr_reset_roomscale_body_tracking(void) {
+    sVrRoomscaleBodyTrackingValid = false;
+    sVrRoomscaleBasisValid = false;
+    vec3f_set(sVrRoomscaleConsumedLocal, 0.0f, 0.0f, 0.0f);
+    vec3f_set(sVrRoomscaleConsumedLocalPrev, 0.0f, 0.0f, 0.0f);
+    sVrRoomscaleConsumedTimestamp = 0;
+}
+
+static void vr_get_roomscale_tracking_compensation(
+    Vec3f compensation
+) {
+    if (compensation == NULL) {
+        return;
+    }
+    if (!sVrRoomscaleBodyTrackingValid) {
+        vec3f_set(compensation, 0.0f, 0.0f, 0.0f);
+        return;
+    }
+    if (gRenderingInterpolated &&
+        sVrRoomscaleConsumedTimestamp == gGlobalTimer) {
+        delta_interpolate_vec3f(
+            compensation,
+            sVrRoomscaleConsumedLocalPrev,
+            sVrRoomscaleConsumedLocal,
+            clamp(gRenderingDelta, 0.0f, 1.0f)
+        );
+    } else {
+        vec3f_copy(compensation, sVrRoomscaleConsumedLocal);
+    }
+}
+
+static void vr_apply_roomscale_tracking_compensation(
+    float position[3]
+) {
+    if (position == NULL || !sVrRoomscaleBodyTrackingValid) {
+        return;
+    }
+    Vec3f compensation;
+    vr_get_roomscale_tracking_compensation(compensation);
+    position[0] -= compensation[0] / 100.0f;
+    position[2] -= compensation[2] / 100.0f;
+}
 
 void vr_invalidate_first_person_tracked_world_cache(void) {
     sVrControllerCameraInverseValid = false;
@@ -828,6 +883,7 @@ void vr_invalidate_first_person_tracked_world_cache(void) {
 }
 
 void vr_reset_first_person_calibration(void) {
+    vr_reset_roomscale_body_tracking();
     sVrFirstPersonAnchorValid = false;
     sVrFirstPersonAnchorTimestamp = 0;
     vec3f_set(sVrFirstPersonAnchorPrev, 0.0f, 0.0f, 0.0f);
@@ -1447,6 +1503,12 @@ static void vr_patch_controller_hand_matrices(uint32_t eyeIndex) {
             right[2] * positionOffsetX +
             up[2] * positionOffsetY +
             backward[2] * (wristToGripOffset + positionOffsetZ);
+        if (sVrRoomscaleBodyTrackingValid) {
+            Vec3f compensation;
+            vr_get_roomscale_tracking_compensation(compensation);
+            matrix[3][0] -= compensation[0];
+            matrix[3][2] -= compensation[2];
+        }
         matrix[3][3] = 1.0f;
 
         // The gameplay collision solver constrains the fist in world space.
@@ -2512,9 +2574,11 @@ static bool vr_calculate_stabilized_headset_world_position(
             cameraPosition,
             cameraFocus,
             forward
-        )) {
+    )) {
         return false;
     }
+
+    vr_apply_roomscale_tracking_compensation(headTranslation);
 
     Mat4 cameraMatrix;
     Mat4 inverseCameraMatrix;
@@ -2600,6 +2664,142 @@ bool vr_get_stabilized_headset_world_position(
             : sVrBodyAnchorSample
     );
     return true;
+}
+
+bool vr_get_roomscale_body_displacement(Vec3f worldDisplacement) {
+    const float worldUnitsPerMeter = 100.0f;
+    float headTranslation[3] = { 0.0f, 0.0f, 0.0f };
+    Vec3f cameraPosition;
+    Vec3f cameraFocus;
+    Vec3f forward;
+
+    if (worldDisplacement == NULL ||
+        !vr_is_active() ||
+        configVrCameraMode != VR_CAMERA_MODE_FIRST_PERSON ||
+        !vr_get_head_translation(headTranslation) ||
+        !vr_get_stabilized_first_person_pose(
+            cameraPosition,
+            cameraFocus,
+            forward
+        )) {
+        vr_reset_roomscale_body_tracking();
+        return false;
+    }
+
+    Vec3f rawLocal = {
+        headTranslation[0] * worldUnitsPerMeter,
+        0.0f,
+        headTranslation[2] * worldUnitsPerMeter
+    };
+    if (!sVrRoomscaleBodyTrackingValid) {
+        vec3f_copy(sVrRoomscaleConsumedLocal, rawLocal);
+        vec3f_copy(sVrRoomscaleConsumedLocalPrev, rawLocal);
+        sVrRoomscaleConsumedTimestamp = gGlobalTimer;
+        sVrRoomscaleBodyTrackingValid = true;
+        vec3f_set(worldDisplacement, 0.0f, 0.0f, 0.0f);
+        return true;
+    }
+
+    Vec3f remainingLocal = {
+        rawLocal[0] - sVrRoomscaleConsumedLocal[0],
+        0.0f,
+        rawLocal[2] - sVrRoomscaleConsumedLocal[2]
+    };
+    const f32 remainingLength = sqrtf(
+        remainingLocal[0] * remainingLocal[0] +
+        remainingLocal[2] * remainingLocal[2]
+    );
+    // Runtime recentering and tracking-origin replacement can jump several
+    // metres in one sample. Adopt that as the new neutral point instead of
+    // teleporting Mario through the level.
+    if (remainingLength > 125.0f) {
+        vec3f_copy(sVrRoomscaleConsumedLocal, rawLocal);
+        vec3f_copy(sVrRoomscaleConsumedLocalPrev, rawLocal);
+        sVrRoomscaleConsumedTimestamp = gGlobalTimer;
+        sVrRoomscaleBasisValid = false;
+        vec3f_set(worldDisplacement, 0.0f, 0.0f, 0.0f);
+        vr_invalidate_first_person_tracked_world_cache();
+        return true;
+    }
+
+    Mat4 cameraMatrix;
+    Mat4 inverseCameraMatrix;
+    vr_build_mode_aware_lookat(
+        cameraMatrix,
+        cameraPosition,
+        cameraFocus,
+        0
+    );
+    mtxf_inverse(inverseCameraMatrix, cameraMatrix);
+    sVrRoomscaleWorldFromLocal[0][0] = inverseCameraMatrix[0][0];
+    sVrRoomscaleWorldFromLocal[0][1] = inverseCameraMatrix[0][2];
+    sVrRoomscaleWorldFromLocal[1][0] = inverseCameraMatrix[2][0];
+    sVrRoomscaleWorldFromLocal[1][1] = inverseCameraMatrix[2][2];
+    sVrRoomscaleBasisValid = true;
+
+    worldDisplacement[0] =
+        remainingLocal[0] * sVrRoomscaleWorldFromLocal[0][0] +
+        remainingLocal[2] * sVrRoomscaleWorldFromLocal[1][0];
+    worldDisplacement[1] = 0.0f;
+    worldDisplacement[2] =
+        remainingLocal[0] * sVrRoomscaleWorldFromLocal[0][1] +
+        remainingLocal[2] * sVrRoomscaleWorldFromLocal[1][1];
+    return true;
+}
+
+void vr_commit_roomscale_body_displacement(
+    const Vec3f worldDisplacement
+) {
+    if (!sVrRoomscaleBodyTrackingValid ||
+        !sVrRoomscaleBasisValid ||
+        worldDisplacement == NULL) {
+        return;
+    }
+
+    const f32 a = sVrRoomscaleWorldFromLocal[0][0];
+    const f32 b = sVrRoomscaleWorldFromLocal[1][0];
+    const f32 c = sVrRoomscaleWorldFromLocal[0][1];
+    const f32 d = sVrRoomscaleWorldFromLocal[1][1];
+    const f32 determinant = a * d - b * c;
+    if (fabsf(determinant) < 0.0001f) {
+        return;
+    }
+    if (sVrRoomscaleConsumedTimestamp != gGlobalTimer) {
+        vec3f_copy(
+            sVrRoomscaleConsumedLocalPrev,
+            sVrRoomscaleConsumedLocal
+        );
+        sVrRoomscaleConsumedTimestamp = gGlobalTimer;
+    }
+    sVrRoomscaleConsumedLocal[0] +=
+        (worldDisplacement[0] * d -
+         b * worldDisplacement[2]) / determinant;
+    sVrRoomscaleConsumedLocal[2] +=
+        (a * worldDisplacement[2] -
+         worldDisplacement[0] * c) / determinant;
+
+    // Room-scale transfer moves Mario's authoritative position and the
+    // tracked world anchor by the same resolved amount. If the render sample
+    // was already requested this gameplay frame, advance only its current
+    // endpoint; retaining the previous endpoint lets normal render-delta
+    // interpolation keep the visible torso smooth at 72/90/120 Hz.
+    if (sVrBodyAnchorSampleValid &&
+        sVrBodyAnchorSampleTimestamp == gGlobalTimer) {
+        sVrBodyAnchorSample[0] += worldDisplacement[0];
+        sVrBodyAnchorSample[2] += worldDisplacement[2];
+    }
+
+    // Controller conversion depends on the current camera transform, so it
+    // must be refreshed. Do not invalidate the body history here: doing so
+    // collapses previous/current to one 30 Hz sample and visibly jitters the
+    // otherwise correctly synchronized body beneath the HMD.
+    sVrControllerCameraInverseValid = false;
+    sVrControllerCameraInverseTimestamp = 0;
+    sVrControllerCameraInverseDelta = -1.0f;
+    for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
+        sVrArmTargetSampleValid[hand] = false;
+        sVrArmTargetSampleTimestamp[hand] = 0;
+    }
 }
 
 static s16 vr_get_stabilized_body_yaw(bool previousFrame) {
@@ -2695,6 +2895,12 @@ bool vr_get_controller_world_fist_raw_from_state(
             backward[2] * positionOffsetZ -
             backward[2] * knuckleOffset
     };
+    if (sVrRoomscaleBodyTrackingValid) {
+        Vec3f compensation;
+        vr_get_roomscale_tracking_compensation(compensation);
+        localPosition[0] -= compensation[0];
+        localPosition[2] -= compensation[2];
+    }
 
     const f32 renderDelta = gRenderingInterpolated
         ? clamp(gRenderingDelta, 0.0f, 1.0f)
@@ -3041,6 +3247,10 @@ static bool vr_build_head_view_matrix(
     } else if (!vr_build_head_rotation_matrix(matrix) ||
                !vr_get_head_translation(headTranslation)) {
         return false;
+    }
+
+    if (!menuScene) {
+        vr_apply_roomscale_tracking_compensation(headTranslation);
     }
 
     if (!menuScene &&
@@ -6083,7 +6293,11 @@ static void geo_process_object(struct Object *node) {
             if (processLocalMarioVrSkeleton) {
                 Vec3f headsetPosition;
                 Vec3f headsetPositionPrev;
-                if (vr_get_stabilized_headset_world_position(
+                Vec3f liveHeadsetPosition;
+                if (vr_calculate_stabilized_headset_world_position(
+                        liveHeadsetPosition
+                    ) &&
+                    vr_get_stabilized_headset_world_position(
                         headsetPosition,
                         false
                     ) &&
@@ -6091,14 +6305,22 @@ static void geo_process_object(struct Object *node) {
                         headsetPositionPrev,
                         true
                     )) {
-                    // Visual-only root pin: keep the complete local body
-                    // directly beneath the tracked HMD in X/Z. Mario's
-                    // gameplay position, velocity, facing, and collision are
-                    // never changed.
-                    renderPosition[0] = headsetPosition[0];
-                    renderPosition[2] = headsetPosition[2];
-                    renderPositionPrev[0] = headsetPositionPrev[0];
-                    renderPositionPrev[2] = headsetPositionPrev[2];
+                    // Preserve normal gameplay interpolation, then add the
+                    // same live HMD correction to both endpoints. This keeps
+                    // stick-driven movement smooth while physical walking
+                    // follows the render-rate headset without a 30 Hz trail.
+                    const f32 liveOffsetX =
+                        liveHeadsetPosition[0] - headsetPosition[0];
+                    const f32 liveOffsetZ =
+                        liveHeadsetPosition[2] - headsetPosition[2];
+                    renderPosition[0] =
+                        headsetPosition[0] + liveOffsetX;
+                    renderPosition[2] =
+                        headsetPosition[2] + liveOffsetZ;
+                    renderPositionPrev[0] =
+                        headsetPositionPrev[0] + liveOffsetX;
+                    renderPositionPrev[2] =
+                        headsetPositionPrev[2] + liveOffsetZ;
                 }
             }
 

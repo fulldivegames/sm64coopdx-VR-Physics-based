@@ -83,6 +83,11 @@ bool vr_get_stabilized_headset_world_position(
     Vec3f worldPosition,
     bool previousFrame
 );
+bool vr_get_roomscale_body_displacement(Vec3f worldDisplacement);
+void vr_commit_roomscale_body_displacement(
+    const Vec3f worldDisplacement
+);
+void vr_reset_roomscale_body_tracking(void);
 void vr_invalidate_first_person_tracked_world_cache(void);
 
 struct GraphNodeInterpData {
