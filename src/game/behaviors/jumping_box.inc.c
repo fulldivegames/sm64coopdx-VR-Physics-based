@@ -75,7 +75,7 @@ void bhv_jumping_box_loop(void) {
             vr_special_moves_spawn_fire_flower_chance(
                 o,
                 &gMarioStates[0],
-                0.25f
+                0.30f
             );
         create_sound_spawner(SOUND_GENERAL_BREAK_BOX);
         obj_explode_and_spawn_coins(46.0f, fireFlower ? 0 : 1);

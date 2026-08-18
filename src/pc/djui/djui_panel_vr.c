@@ -12,7 +12,6 @@
 #include "level_table.h"
 
 static bool sVrMode = false;
-static bool sVrSpawnFireFlowerAction = false;
 
 #define VR_LEVEL_SELECT_ENTRIES(X) \
     X(castle_grounds, "Castle Grounds", LEVEL_CASTLE_GROUNDS) \
@@ -122,11 +121,41 @@ static unsigned int djui_panel_vr_clamp_uint(
 
 static void djui_panel_vr_spawn_fire_flower(struct DjuiBase* caller) {
     (void)caller;
-    if (!sVrSpawnFireFlowerAction) {
-        return;
-    }
-    sVrSpawnFireFlowerAction = false;
     vr_special_moves_spawn_cheat_fire_flower();
+}
+
+static void djui_panel_vr_spawn_wing_cap(UNUSED struct DjuiBase* caller) {
+    vr_special_moves_spawn_cheat_cap(VR_CHEAT_SPAWN_WING_CAP);
+}
+
+static void djui_panel_vr_spawn_vanish_cap(UNUSED struct DjuiBase* caller) {
+    vr_special_moves_spawn_cheat_cap(VR_CHEAT_SPAWN_VANISH_CAP);
+}
+
+static void djui_panel_vr_spawn_metal_cap(UNUSED struct DjuiBase* caller) {
+    vr_special_moves_spawn_cheat_cap(VR_CHEAT_SPAWN_METAL_CAP);
+}
+
+static void djui_panel_vr_spawn_menu_create(struct DjuiBase* caller) {
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create("Spawn Menu", false);
+    struct DjuiBase* body = djui_three_panel_get_body(panel);
+
+    djui_button_create(body, "Wing Cap", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_spawn_wing_cap);
+    djui_button_create(body, "Vanish Cap", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_spawn_vanish_cap);
+    djui_button_create(body, "Metal Cap", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_spawn_metal_cap);
+    djui_button_create(body, "Fire Flower", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_spawn_fire_flower);
+    djui_button_create(
+        body,
+        DLANG(MENU, BACK),
+        DJUI_BUTTON_STYLE_BACK,
+        djui_panel_menu_back
+    );
+    djui_panel_add(caller, panel, NULL);
 }
 
 static void djui_panel_vr_mode_changed(struct DjuiBase* caller) {
@@ -147,9 +176,7 @@ static void djui_panel_vr_camera_defaults(struct DjuiBase* caller) {
     configVrFacingSource = VR_FACING_SOURCE_HEADSET;
     configVrMovementCalibration = 50;
     configVrFov = 100;
-    configVrBrightness = 80;
-    configVrSaturation = 112;
-    configVrContrast = 115;
+    configVrBrightness = 100;
 
     for (unsigned int character = 0;
          character < CT_MAX;
@@ -169,21 +196,13 @@ static void djui_panel_vr_camera_mode_changed(struct DjuiBase* caller) {
 static void djui_panel_vr_performance_defaults(struct DjuiBase* caller) {
     (void)caller;
 
-#ifdef __ANDROID__
-    configVrRenderScale = 80;
-#else
     configVrRenderScale = 100;
-#endif
     configVrShowFps = false;
-    configVrFlameOptimizations = true;
+    configVrFlameOptimizations = false;
     configVrUltraPerformanceMode = false;
-    configVrQuestRefreshRate = 2;
     configVrDisableFog = true;
     configVrDesktopMirror = true;
     configVrDesktopMirrorFps = 60;
-#ifdef __ANDROID__
-    configfile_save(configfile_name());
-#endif
 }
 
 static void djui_panel_vr_ultra_performance_changed(struct DjuiBase* caller) {
@@ -191,13 +210,6 @@ static void djui_panel_vr_ultra_performance_changed(struct DjuiBase* caller) {
     if (configVrUltraPerformanceMode) {
         configVrTwirlTornadoEffect = false;
     }
-}
-
-static void djui_panel_vr_render_scale_changed(struct DjuiBase* caller) {
-    (void)caller;
-#ifdef __ANDROID__
-    configfile_save(configfile_name());
-#endif
 }
 
 static void djui_panel_vr_experimental_defaults(struct DjuiBase* caller) {
@@ -238,13 +250,6 @@ static void djui_panel_vr_controller_defaults(
         VR_CONTROLLER_BINDING_LEFT_SECONDARY;
 }
 
-static void djui_panel_vr_quest_refresh_changed(struct DjuiBase* caller) {
-    (void)caller;
-#ifdef __ANDROID__
-    configfile_save(configfile_name());
-#endif
-}
-
 static void djui_panel_vr_right_trigger_jump_changed(
     UNUSED struct DjuiBase* caller
 ) {
@@ -279,7 +284,7 @@ static void djui_panel_vr_motion_control_defaults(
     configVrPunchSpeed = 150;
     configVrPunchDistance = 20;
     configVrPunchGripThreshold = 35;
-    configVrPunchColliderLength = 250;
+    configVrPunchColliderLength = 275;
     configVrBowserSpinAcceleration = 100;
     configVrBowserMaxSpinSpeed = 100;
 }
@@ -355,7 +360,7 @@ static void djui_panel_vr_immersion_defaults(struct DjuiBase* caller) {
     configVrImmersiveRemovableCap = false;
     configVrImmersiveLookDownTransparency = true;
     configVrImmersiveCarrySpeed = false;
-    configVrImmersiveStarSpawnFocus = true;
+    configVrImmersiveStarSpawnFocus = false;
     configVrImmersiveGhostPunchArm = true;
     configVrExperimentalSideFlipFollow = true;
     configVrExperimentalWallJumpTurn = true;
@@ -403,10 +408,6 @@ static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
     } else if (configVrBrightness > 120) {
         configVrBrightness = 120;
     }
-    configVrSaturation = djui_panel_vr_clamp_uint(
-        configVrSaturation, 50, 150);
-    configVrContrast = djui_panel_vr_clamp_uint(
-        configVrContrast, 50, 150);
     struct DjuiThreePanel* panel =
         djui_panel_menu_create("Camera Settings", false);
 
@@ -504,24 +505,6 @@ static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
             NULL
         );
 
-        djui_slider_create(
-            body,
-            "Color Saturation (%)",
-            &configVrSaturation,
-            50,
-            150,
-            NULL
-        );
-
-        djui_slider_create(
-            body,
-            "Contrast (%)",
-            &configVrContrast,
-            50,
-            150,
-            NULL
-        );
-
         djui_button_create(
             body,
             "Set to Defaults",
@@ -551,11 +534,6 @@ static void djui_panel_vr_performance_create(struct DjuiBase* caller) {
     } else if (configVrDesktopMirrorFps > 60) {
         configVrDesktopMirrorFps = 60;
     }
-#ifdef __ANDROID__
-    if (configVrQuestRefreshRate > 2) {
-        configVrQuestRefreshRate = 2;
-    }
-#endif
 
     struct DjuiThreePanel* panel =
         djui_panel_menu_create("Performance", false);
@@ -570,7 +548,7 @@ static void djui_panel_vr_performance_create(struct DjuiBase* caller) {
             &configVrRenderScale,
             VR_RENDER_SCALE_MIN,
             VR_RENDER_SCALE_MAX,
-            djui_panel_vr_render_scale_changed
+            NULL
         );
 
         djui_checkbox_create(
@@ -594,22 +572,6 @@ static void djui_panel_vr_performance_create(struct DjuiBase* caller) {
             djui_panel_vr_ultra_performance_changed
         );
 
-#ifdef __ANDROID__
-        char* refreshRateChoices[] = {
-            "72 Hz",
-            "90 Hz",
-            "120 Hz"
-        };
-        djui_selectionbox_create(
-            body,
-            "Refresh Rate (May Not Reach Target)",
-            refreshRateChoices,
-            ARRAY_COUNT(refreshRateChoices),
-            &configVrQuestRefreshRate,
-            djui_panel_vr_quest_refresh_changed
-        );
-#endif
-
         djui_checkbox_create(
             body,
             "Disable Fog",
@@ -617,7 +579,6 @@ static void djui_panel_vr_performance_create(struct DjuiBase* caller) {
             NULL
         );
 
-#ifndef __ANDROID__
         djui_checkbox_create(
             body,
             "Desktop View",
@@ -633,7 +594,6 @@ static void djui_panel_vr_performance_create(struct DjuiBase* caller) {
             60,
             NULL
         );
-#endif
 
         djui_button_create(
             body,
@@ -661,6 +621,13 @@ static void djui_panel_vr_experimental_create(struct DjuiBase* caller) {
         djui_three_panel_get_body(panel);
 
     {
+        djui_checkbox_create(
+            body,
+            "Enable First Person in Flat Mode",
+            &configVrExperimentalFlatFirstPerson,
+            NULL
+        );
+
         djui_checkbox_create(
             body,
             "True First Person (Might Cause Sickness)",
@@ -1435,6 +1402,12 @@ static void djui_panel_vr_cheats_create(struct DjuiBase* caller) {
             DJUI_BUTTON_STYLE_NORMAL,
             djui_panel_vr_level_select_create
         );
+        djui_button_create(
+            body,
+            "Spawn Menu",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_vr_spawn_menu_create
+        );
         djui_checkbox_create(
             body,
             "Climb Any Wall or Ceiling",
@@ -1458,13 +1431,6 @@ static void djui_panel_vr_cheats_create(struct DjuiBase* caller) {
             "Free Fly",
             &configVrCheatFreeFly,
             NULL
-        );
-        sVrSpawnFireFlowerAction = false;
-        djui_checkbox_create(
-            body,
-            "Spawn Fire Flower",
-            &sVrSpawnFireFlowerAction,
-            djui_panel_vr_spawn_fire_flower
         );
         djui_checkbox_create(
             body,
@@ -1578,7 +1544,7 @@ static void djui_panel_vr_special_moves_create(
     {
         djui_checkbox_create(
             body,
-            "Fire Flower (50% Item Boxes / 25% Cork Boxes)",
+            "Fire Flower (50% Item Boxes / 30% Cork Boxes)",
             &configVrSpecialFireFlower,
             NULL
         );

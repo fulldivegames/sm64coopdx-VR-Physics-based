@@ -2501,6 +2501,18 @@ void mario_process_interactions(struct MarioState *m) {
                     continue;
                 }
 
+                if (m->playerIndex == 0 &&
+                    interactType == (u32)INTERACT_DAMAGE &&
+                    !vr_hand_interaction_validate_headset_damage_contact(
+                        m,
+                        object
+                    )) {
+                    // Object collision lists are generated before the late
+                    // HMD collider update. Reject a stale damage contact after
+                    // recentering, warping, or fast room-scale movement.
+                    continue;
+                }
+
                 if (object && !(object->oInteractStatus & INT_STATUS_INTERACTED)) {
                     bool allowInteract = true;
                     smlua_call_event_hooks(HOOK_ALLOW_INTERACT, m, object, interactType, &allowInteract);

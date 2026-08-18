@@ -54,7 +54,7 @@ void small_breakable_box_act_move(void) {
             vr_special_moves_spawn_fire_flower_chance(
                 o,
                 &gMarioStates[0],
-                0.25f
+                0.30f
             );
         spawn_mist_particles();
         spawn_triangle_break_particles(20, 138, 0.7f, 3);

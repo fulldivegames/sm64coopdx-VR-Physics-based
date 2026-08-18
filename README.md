@@ -37,7 +37,7 @@ The release is a single APK. Players do not need Git, Android Studio, Gradle, AD
 ### Install the APK
 
 1. Open this repository's [latest release](https://github.com/fulldivegames/sm64coopdx-VR-Standalone-Physics-based/releases/latest).
-2. Download `SM64-Co-Op-DX-VR-Quest-v0.7.1.apk` under **Assets**.
+2. Download `SM64-Co-Op-DX-VR-Quest-v0.7.2.apk` under **Assets**.
 3. Connect the Quest to your computer and allow the USB debugging prompt inside the headset.
 4. Open SideQuest and confirm that the headset indicator is connected.
 5. Click **Install APK file from folder** in SideQuest, choose the downloaded APK, and wait for the install-success message.
@@ -49,7 +49,7 @@ The release is a single APK. Players do not need Git, Android Studio, Gradle, AD
 Updates can be installed over the existing app through SideQuest. Keep the same Android application installed if you want its private ROM/configuration data to remain available. Back up important saves before testing a new release.
 
 > [!IMPORTANT]
-> Install v0.7.1 directly over an existing installation so the private ROM, save, and settings remain available. Do not uninstall the app first.
+> Install v0.7.2 directly over an existing installation so the private ROM, save, and settings remain available. Do not uninstall the app first.
 
 > [!IMPORTANT]
 > The APK contains no ROM and no Nintendo game assets. Do not upload, bundle, or redistribute a ROM with this project. The app validates the unmodified US ROM before importing it into private application storage.
@@ -62,7 +62,7 @@ The standalone build loads compatible SM64 Co-Op DX mods from this easy-to-acces
 /sdcard/SM64VR/mods/
 ```
 
-1. Install or update to v0.7.1 and launch it once. Android opens the **Allow access to manage all files** page; enable access for **SM64 Co-Op DX VR Standalone**. This permission is used for the shared mod, DynOS, palette, and shader-cache folders.
+1. Install or update to v0.7.2 and launch it once. Android opens the **Allow access to manage all files** page; enable access for **SM64 Co-Op DX VR Standalone**. This permission is used for the shared mod, DynOS, palette, and shader-cache folders.
 2. Close and reopen the game once after granting access. The game creates `/sdcard/SM64VR/mods/` automatically.
 3. Download a mod compatible with SM64 Co-Op DX. The official community browser is [mods.sm64coopdx.com](https://mods.sm64coopdx.com/mods/).
 4. Extract the archive. Copy the **extracted mod folder**, not the `.zip`, into `SM64VR/mods` with SideQuest's file manager. The mod files must be directly inside their own folder rather than inside an extra duplicate folder.
@@ -81,7 +81,7 @@ The previous private `Android/data/com.fulldivegames.sm64coopdxvr/files/mods/` l
 
 ### Install DynOS packs
 
-Launch the game once after installing v0.7.1. The game automatically creates:
+Launch the game once after installing v0.7.2. The game automatically creates:
 
 ```text
 /sdcard/SM64VR/dynos/packs/
@@ -103,9 +103,9 @@ Custom palette files can be copied to:
 
 The persistent learned shader cache is stored in `/sdcard/SM64VR/shader-cache/`. It is managed by the game; do not install mods there.
 
-### Mod compatibility in v0.7.1
+### Mod compatibility in v0.7.2
 
-v0.7.1 includes expanded mod discovery, startup, menu, rendering, character-model, DynOS, and palette path compatibility. Character Selector was specifically tested with multiple character packs, including its in-game selection overlay. Multiple extracted DynOS packs are discovered from `dynos/packs`, and shared standalone paths now keep mods, packs, palettes, and shader-cache data accessible outside Android's restricted private-data folder.
+v0.7.2 includes expanded mod discovery, startup, menu, rendering, character-model, DynOS, and palette path compatibility. Character Selector was specifically tested with multiple character packs, including its in-game selection overlay. Multiple extracted DynOS packs are discovered from `dynos/packs`, and shared standalone paths now keep mods, packs, palettes, and shader-cache data accessible outside Android's restricted private-data folder.
 
 Compatibility is not universal. Mods that depend on desktop-native binaries, desktop-only graphics APIs, unsupported keyboard windows, extreme memory use, or assumptions about the original flat camera may still fail. Character packs can also define their own selection rules rather than appearing in the built-in Mario/Luigi/Toad/Wario/Waluigi list. Install one mod at a time when diagnosing a failure and report the exact mod name/version with a crash log when possible.
 
@@ -115,7 +115,7 @@ Known compatibility notes:
 
 - Loading many mods at once can increase startup time and memory use.
 - Render96 currently has known performance issues on standalone.
-- Character Selector's in-game overlay was tested with multiple character packs for v0.7.1, but especially large or incompatible character packs can still cause instability.
+- Character Selector's in-game overlay was tested with multiple character packs for v0.7.2, but especially large or incompatible character packs can still cause instability.
 
 ## Tutorial: controls and how to play
 
@@ -188,13 +188,28 @@ Third Person Mode centers the stereoscopic view on Mario and is intended for con
 
 ### Fire Flower
 
-Fire Flower is enabled by default under **VR > Special Moves**. Supported coin/1-Up item boxes and cork boxes can release a flower. While powered up, close the right glove with Grip, hold Right Trigger to charge an orange fireball, then physically swing and release Trigger to throw it. The normal Attack button fires a quick shot outside first-person mode. Fire Mario's palette and music end with the power-up; **Cheats** also provides **Spawn Fire Flower** and **No Fire Flower Timer**.
+Fire Flower is enabled by default under **VR > Special Moves**. Supported coin/1-Up item boxes have a 50% flower chance and supported cork boxes have a 30% chance. While powered up, close the right glove with Grip, hold Right Trigger to charge an orange fireball, then physically swing and release Trigger to throw it. The normal Attack button fires a quick shot outside first-person mode. Fire Mario's palette and music end with the power-up; **Cheats > Spawn Menu** can create a Fire Flower and **No Fire Flower Timer** keeps the power until a room transition.
 
 ### Rasengan and Rasen-Shuriken
 
 **Rasengan / Rasen-Shuriken** is enabled by default under **Special Moves**. Hold Right Trigger with an open right hand and circle a closed, empty left glove around it until the Rasengan finishes charging. Keep holding Right Trigger to retain it, then touch a supported enemy or breakable box with the sphere. The optional **Rasengan Grip + Trigger** setting replaces the circling gesture.
 
-With a charged Rasengan held, hold the mapped **Special** button—Y/Left Secondary by default—while keeping the hand above the headset when **Rasen-Shuriken Overhead Charge** is enabled. Once charged, physically swing and release Right Trigger to throw it. It flies until it strikes geometry or a supported enemy, then expands into an area-damage sphere. Charge-time sliders are available in **Cheats**. Boss and actor-specific protections still follow the move's built-in rules.
+With a charged Rasengan held, hold the mapped **Special** button—Y/Left Secondary by default—while keeping the hand above the headset when **Rasen-Shuriken Overhead Charge** is enabled. Once charged, physically swing and release Right Trigger to throw it. It flies until it strikes geometry or a supported enemy, then expands into a rotating area-damage sphere for 1.5 seconds and fades over 0.5 seconds. Entering the sphere causes one Bob-omb-strength hit; remaining inside for its complete lifetime causes a second. King Bob-omb and Whomps accept these moves only through their back weak spots, preserve their native multi-hit boss rules, and retain normal grab behavior. Charge-time sliders are available in **Cheats**.
+
+### Level Select and Spawn Menu
+
+Open **Settings > VR > Cheats** while in a game:
+
+- **Level Select** opens a scrollable list of the castle areas, all main courses, secret stages, cap stages, Bowser stages/arenas, and the ending. Courses with missions enter through their normal Act Select path.
+- **Spawn Menu** creates a Wing Cap, Vanish Cap, Metal Cap, or Fire Flower above Mario. Close the menu to let the selected pickup fall into the level.
+
+These are cheats and can bypass normal progression. They do not alter save data unless normal gameplay inside the destination does so.
+
+### Custom color-palette selector
+
+Open the player palette editor and choose **Color Palette** to open the controller-friendly quick selector. It provides 44 distinct named colors, including direct red/blue values, neutrals, skin tones, metallic colors, and extended crayon-style shades. Selecting a color returns to the editor and writes its RGB/hex value into the currently selected character part; Back exits without changing it. Normal RGB sliders and hex editing remain available.
+
+Custom presets remain saved in `/sdcard/SM64VR/palettes/`. The generated **Fireflower** preset controls the temporary Fire Flower outfit, so players can edit that preset to customize their powered-up colors; the previously selected normal palette is restored when the power ends.
 
 ## Comfort, immersion, and visual options
 
@@ -224,7 +239,7 @@ Painting entries use a short white comfort fade. The optional True First Person 
 | HUD Settings | HUD opacity and corner spread |
 | Immersion | Default-on comfort, audio, camera, underwater, cannon, and physical-crouch options |
 | Effects | Twirl tornado visual effect |
-| Cheats | Level Select, climb-any-surface, special-move charge times, flying speed, swimming speed, and running speed |
+| Cheats | Level Select, Spawn Menu, climb-any-surface, special-move charge times, flying speed, swimming speed, and running speed |
 | Experimental | True First Person, True Diving, Arms Mode, and original movement options |
 
 ## Standalone-specific notes
@@ -239,15 +254,28 @@ Painting entries use a short white comfort fade. The optional True First Person 
 - Online co-op has not been comprehensively validated across every player count, mod combination, or network condition.
 - Large Lua mods, model packs, ROM hacks, and texture packs may exceed standalone memory/performance budgets or rely on desktop-only behavior.
 
-## v0.7.1 — Special Moves and Level Select Update
+## v0.7.2 — Boss Combat, Spawn Tools, and Camera Fixes
+
+- Added **Cheats > Spawn Menu** with Wing Cap, Vanish Cap, Metal Cap, and Fire Flower buttons while retaining the complete scrollable Level Select
+- Expanded Rasengan and Rasen-Shuriken interactions across giant Goombas, Pokeys, breakable boxes, Whomps, King Whomp, and King Bob-omb while preserving protected actors and native boss progression
+- Added the persistent Rasen-Shuriken explosion volume: one hit on entry, a second hit only after continuous full-duration exposure, a 1.5-second hold, and a 0.5-second fade
+- Tightened King Bob-omb's physical grab and special-move activation to a back-sized weak spot without changing ordinary Bob-ombs or other normal grabbables; impact visuals still wrap his complete model
+- Added rear Fire Flower damage to King Bob-omb as one native boss hit and stabilized Whomp reactions so attacks cannot leave them trapped in an invalid action
+- Raised and stabilized the first-person camera/body relationship, matched moving torso height to idle height, and kept the previous-height compatibility option
+- Changed **Look Toward Spawned Star** to default off for new and upgraded installs and immediately clears any residual camera blend when disabled
+- Raised cork-box Fire Flower odds to 30%, retained 50% supported item-box odds, and kept the smaller pickup presentation
+- Added the 44-color quick palette selector with reliable controller scrolling, direct RGB/hex application, persistent custom presets, and an editable **Fireflower** power-up palette
+- Kept headset/player damage contact synchronized, narrowed physical anchoring to intended actors, and slightly extended the default punch reach without limiting its slider
+
+## Previous Release Notes
+
+### v0.7.1 — Special Moves and Level Select Update
 
 - Added the default-on **Rasengan / Rasen-Shuriken** special move with physical charging, headset-rate animation, hand contact attacks, physical throwing, collision-triggered area damage, protected-boss rules, and configurable charge controls
 - Added **Cheats > Level Select**, a scrollable in-game list covering the castle, all 15 main courses, Bowser stages and arenas, secret/cap stages, and the ending; normal courses use their native Act Select entry path
 - Kept the corrected first-person Mario body relationship as the default and added **Camera Settings > Use Previous Mario Body Height** for players who prefer the earlier height
 - Improved tracked hand/held-effect interpolation at 72, 90, and 120 Hz while preserving the original 30 Hz gameplay simulation
 - Added and refined color-palette selection, DynOS refresh, modded HUD placement, ghost button-punch presentation, Fire Flower behavior, enemy interactions, and VR camera stability
-
-## Previous Release Notes
 
 ### v0.7.0 — Chat and Fireball Update
 
