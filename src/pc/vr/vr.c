@@ -337,3 +337,11 @@ void vr_request_recenter(void) {
 
     vr_openxr_request_recenter();
 }
+
+void vr_request_horizontal_recenter(void) {
+    if (!sVrActive) {
+        return;
+    }
+
+    vr_openxr_request_horizontal_recenter();
+}

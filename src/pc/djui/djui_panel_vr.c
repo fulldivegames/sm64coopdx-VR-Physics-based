@@ -6,11 +6,79 @@
 
 #include "pc/configfile.h"
 #include "pc/vr/vr.h"
+#include "data/dynos.c.h"
 #include "game/rendering_graph_node.h"
 #include "game/vr_hand_interaction.h"
+#include "level_table.h"
 
 static bool sVrMode = false;
 static bool sVrSpawnFireFlowerAction = false;
+
+#define VR_LEVEL_SELECT_ENTRIES(X) \
+    X(castle_grounds, "Castle Grounds", LEVEL_CASTLE_GROUNDS) \
+    X(castle, "Peach's Castle", LEVEL_CASTLE) \
+    X(castle_courtyard, "Castle Courtyard", LEVEL_CASTLE_COURTYARD) \
+    X(bob, "1 - Bob-omb Battlefield", LEVEL_BOB) \
+    X(wf, "2 - Whomp's Fortress", LEVEL_WF) \
+    X(jrb, "3 - Jolly Roger Bay", LEVEL_JRB) \
+    X(ccm, "4 - Cool, Cool Mountain", LEVEL_CCM) \
+    X(bbh, "5 - Big Boo's Haunt", LEVEL_BBH) \
+    X(hmc, "6 - Hazy Maze Cave", LEVEL_HMC) \
+    X(lll, "7 - Lethal Lava Land", LEVEL_LLL) \
+    X(ssl, "8 - Shifting Sand Land", LEVEL_SSL) \
+    X(ddd, "9 - Dire, Dire Docks", LEVEL_DDD) \
+    X(sl, "10 - Snowman's Land", LEVEL_SL) \
+    X(wdw, "11 - Wet-Dry World", LEVEL_WDW) \
+    X(ttm, "12 - Tall, Tall Mountain", LEVEL_TTM) \
+    X(thi, "13 - Tiny-Huge Island", LEVEL_THI) \
+    X(ttc, "14 - Tick Tock Clock", LEVEL_TTC) \
+    X(rr, "15 - Rainbow Ride", LEVEL_RR) \
+    X(bitdw, "Bowser in the Dark World", LEVEL_BITDW) \
+    X(bowser_1, "Bowser 1 Arena", LEVEL_BOWSER_1) \
+    X(bitfs, "Bowser in the Fire Sea", LEVEL_BITFS) \
+    X(bowser_2, "Bowser 2 Arena", LEVEL_BOWSER_2) \
+    X(bits, "Bowser in the Sky", LEVEL_BITS) \
+    X(bowser_3, "Bowser 3 Arena", LEVEL_BOWSER_3) \
+    X(pss, "The Princess's Secret Slide", LEVEL_PSS) \
+    X(sa, "The Secret Aquarium", LEVEL_SA) \
+    X(cotmc, "Cavern of the Metal Cap", LEVEL_COTMC) \
+    X(totwc, "Tower of the Wing Cap", LEVEL_TOTWC) \
+    X(vcutm, "Vanish Cap Under the Moat", LEVEL_VCUTM) \
+    X(wmotr, "Wing Mario Over the Rainbow", LEVEL_WMOTR) \
+    X(ending, "Ending / Credits", LEVEL_ENDING)
+
+static void djui_panel_vr_warp_to_level(s32 level) {
+    djui_panel_shutdown();
+    dynos_warp_to_level(level, 1, 1);
+}
+
+#define VR_DEFINE_LEVEL_CALLBACK(id, label, level) \
+    static void djui_panel_vr_warp_##id(UNUSED struct DjuiBase* caller) { \
+        djui_panel_vr_warp_to_level(level); \
+    }
+VR_LEVEL_SELECT_ENTRIES(VR_DEFINE_LEVEL_CALLBACK)
+#undef VR_DEFINE_LEVEL_CALLBACK
+
+static void djui_panel_vr_level_select_create(struct DjuiBase* caller) {
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create("Level Select", false);
+    struct DjuiBase* body = djui_three_panel_get_body(panel);
+
+#define VR_CREATE_LEVEL_BUTTON(id, label, level) \
+    djui_button_create( \
+        body, label, DJUI_BUTTON_STYLE_NORMAL, djui_panel_vr_warp_##id \
+    );
+    VR_LEVEL_SELECT_ENTRIES(VR_CREATE_LEVEL_BUTTON)
+#undef VR_CREATE_LEVEL_BUTTON
+
+    djui_button_create(
+        body,
+        DLANG(MENU, BACK),
+        DJUI_BUTTON_STYLE_BACK,
+        djui_panel_menu_back
+    );
+    djui_panel_add(caller, panel, NULL);
+}
 
 static char* sVrControllerBindingChoices[
     VR_CONTROLLER_BINDING_COUNT
@@ -75,6 +143,7 @@ static void djui_panel_vr_camera_defaults(struct DjuiBase* caller) {
     configVrCameraMode = VR_CAMERA_MODE_FIRST_PERSON;
     configVrCameraDistance = 100;
     configVrCameraDepth = VR_CAMERA_DEPTH_CENTER;
+    configVrPreviousBodyHeight = false;
     configVrFacingSource = VR_FACING_SOURCE_HEADSET;
     configVrMovementCalibration = 50;
     configVrFov = 100;
@@ -148,6 +217,8 @@ static void djui_panel_vr_controller_defaults(
         VR_CONTROLLER_BINDING_RIGHT_STICK_CLICK;
     configVrPauseBinding =
         VR_CONTROLLER_BINDING_LEFT_MENU;
+    configVrSpecialBinding =
+        VR_CONTROLLER_BINDING_LEFT_SECONDARY;
 }
 
 static void djui_panel_vr_right_trigger_jump_changed(
@@ -196,6 +267,7 @@ static void djui_panel_vr_model_defaults(struct DjuiBase* caller) {
     configVrHideTorsoWhileCrawling = true;
     configVrFeetOnlyBody = false;
     configVrBodyOpacity = 100;
+    configVrGhostPunchArmOpacity = 25;
     configVrLookDownTransparencyAngle = 25;
     configVrExperimentalMountedBody = false;
     configVrTopPoleFlipBody = false;
@@ -231,6 +303,9 @@ static void djui_panel_vr_cheat_defaults(struct DjuiBase* caller) {
     configVrFlyingSpeed = VR_FLYING_SPEED_DEFAULT;
     configVrSwimmingSpeed = VR_SWIMMING_SPEED_DEFAULT;
     configVrRunningSpeed = VR_RUNNING_SPEED_DEFAULT;
+    configVrFireballChargeTime = 15;
+    configVrRasenganChargeTime = 30;
+    configVrRasenShurikenChargeTime = 20;
 }
 
 static void djui_panel_vr_special_moves_defaults(
@@ -239,6 +314,9 @@ static void djui_panel_vr_special_moves_defaults(
     (void)caller;
     configVrSpecialFireFlower = true;
     configVrSpecialFireFlowerMusic = true;
+    configVrSpecialRasengan = true;
+    configVrSpecialRasenganGripTrigger = false;
+    configVrRasenShurikenOverheadCharge = true;
 }
 
 static void djui_panel_vr_immersion_defaults(struct DjuiBase* caller) {
@@ -254,6 +332,7 @@ static void djui_panel_vr_immersion_defaults(struct DjuiBase* caller) {
     configVrImmersiveLookDownTransparency = true;
     configVrImmersiveCarrySpeed = false;
     configVrImmersiveStarSpawnFocus = true;
+    configVrImmersiveGhostPunchArm = true;
     configVrExperimentalSideFlipFollow = true;
     configVrExperimentalWallJumpTurn = true;
     configVrPhysicalCrouching = true;
@@ -345,6 +424,13 @@ static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
             &configVrCameraDepth,
             0,
             VR_CAMERA_DEPTH_MAX,
+            NULL
+        );
+
+        djui_checkbox_create(
+            body,
+            "Use Previous Mario Body Height",
+            &configVrPreviousBodyHeight,
             NULL
         );
 
@@ -680,6 +766,15 @@ static void djui_panel_vr_controller_settings_create(
             sVrControllerBindingChoices,
             VR_CONTROLLER_BINDING_COUNT,
             &configVrPauseBinding,
+            NULL
+        );
+
+        djui_selectionbox_create(
+            body,
+            "Special Button",
+            sVrControllerBindingChoices,
+            VR_CONTROLLER_BINDING_COUNT,
+            &configVrSpecialBinding,
             NULL
         );
 
@@ -1057,6 +1152,11 @@ static void djui_panel_vr_model_body_settings_create(struct DjuiBase* caller) {
         0U,
         100U
     );
+    configVrGhostPunchArmOpacity = djui_panel_vr_clamp_uint(
+        configVrGhostPunchArmOpacity,
+        0U,
+        100U
+    );
     configVrLookDownTransparencyAngle = djui_panel_vr_clamp_uint(
         configVrLookDownTransparencyAngle,
         5U,
@@ -1118,6 +1218,14 @@ static void djui_panel_vr_model_body_settings_create(struct DjuiBase* caller) {
             body,
             "Body Opacity (%)",
             &configVrBodyOpacity,
+            0,
+            100,
+            NULL
+        );
+        djui_slider_create(
+            body,
+            "Button Punch Arm Opacity (%)",
+            &configVrGhostPunchArmOpacity,
             0,
             100,
             NULL
@@ -1259,6 +1367,12 @@ static void djui_panel_vr_cheats_create(struct DjuiBase* caller) {
         djui_three_panel_get_body(panel);
 
     {
+        djui_button_create(
+            body,
+            "Level Select",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_vr_level_select_create
+        );
         djui_checkbox_create(
             body,
             "Climb Any Wall or Ceiling",
@@ -1294,6 +1408,40 @@ static void djui_panel_vr_cheats_create(struct DjuiBase* caller) {
             body,
             "No Fire Flower Timer",
             &configVrCheatNoFireFlowerTimer,
+            NULL
+        );
+
+        configVrFireballChargeTime = djui_panel_vr_clamp_uint(
+            configVrFireballChargeTime, 5U, 50U
+        );
+        configVrRasenganChargeTime = djui_panel_vr_clamp_uint(
+            configVrRasenganChargeTime, 10U, 80U
+        );
+        configVrRasenShurikenChargeTime = djui_panel_vr_clamp_uint(
+            configVrRasenShurikenChargeTime, 5U, 50U
+        );
+        djui_slider_create(
+            body,
+            "Fireball Charge (0.1 sec)",
+            &configVrFireballChargeTime,
+            5,
+            50,
+            NULL
+        );
+        djui_slider_create(
+            body,
+            "Rasengan Charge (0.1 sec)",
+            &configVrRasenganChargeTime,
+            10,
+            80,
+            NULL
+        );
+        djui_slider_create(
+            body,
+            "Rasen-Shuriken Charge (0.1 sec)",
+            &configVrRasenShurikenChargeTime,
+            5,
+            50,
             NULL
         );
 
@@ -1376,6 +1524,24 @@ static void djui_panel_vr_special_moves_create(
             body,
             "Fire Flower Music",
             &configVrSpecialFireFlowerMusic,
+            NULL
+        );
+        djui_checkbox_create(
+            body,
+            "Rasengan / Rasen-Shuriken",
+            &configVrSpecialRasengan,
+            NULL
+        );
+        djui_checkbox_create(
+            body,
+            "Rasengan Grip + Trigger",
+            &configVrSpecialRasenganGripTrigger,
+            NULL
+        );
+        djui_checkbox_create(
+            body,
+            "Rasen-Shuriken Overhead Charge",
+            &configVrRasenShurikenOverheadCharge,
             NULL
         );
         djui_button_create(
@@ -1468,6 +1634,13 @@ static void djui_panel_vr_immersion_create(struct DjuiBase* caller) {
             body,
             "Look Toward Spawned Stars",
             &configVrImmersiveStarSpawnFocus,
+            NULL
+        );
+
+        djui_checkbox_create(
+            body,
+            "Ghost Arm for Button Punches",
+            &configVrImmersiveGhostPunchArm,
             NULL
         );
 

@@ -116,6 +116,7 @@ static u8 sKeyboardRow;
 static u8 sKeyboardColumn;
 static s8 sKeyboardHeldDirection;
 static u8 sKeyboardHeldFrames;
+static u8 sKeyboardHeldActionFrames;
 static bool sKeyboardShift;
 static bool sKeyboardCaps;
 
@@ -233,6 +234,18 @@ static void djui_keyboard_type_selected(void) {
     }
 }
 
+static bool djui_keyboard_selected_key_repeats(void) {
+    const enum DjuiKeyboardAction action =
+        djui_keyboard_selected_key()->action;
+    // Toggle/exit actions must remain deliberate single presses. Text,
+    // editing, cursor movement, space, tab, and deletion behave like a
+    // physical keyboard while A is held.
+    return action != DJUI_KEY_ESCAPE &&
+           action != DJUI_KEY_CAPS &&
+           action != DJUI_KEY_ENTER &&
+           action != DJUI_KEY_SHIFT;
+}
+
 bool djui_inputbox_onscreen_keyboard_is_active(void) {
     return sKeyboardTarget != NULL &&
            gInteractableFocus == &sKeyboardTarget->base;
@@ -279,7 +292,20 @@ void djui_inputbox_onscreen_keyboard_update(OSContPad* pad, u16 pressed) {
         }
     }
 
-    if (pressed & PAD_BUTTON_A) djui_keyboard_type_selected();
+    if ((pad->button & PAD_BUTTON_A) == 0) {
+        sKeyboardHeldActionFrames = 0;
+    } else if ((pressed & PAD_BUTTON_A) != 0) {
+        sKeyboardHeldActionFrames = 0;
+        djui_keyboard_type_selected();
+    } else if (djui_keyboard_selected_key_repeats()) {
+        if (sKeyboardHeldActionFrames < 255) {
+            ++sKeyboardHeldActionFrames;
+        }
+        if (sKeyboardHeldActionFrames >= 12 &&
+            ((sKeyboardHeldActionFrames - 12) % 3) == 0) {
+            djui_keyboard_type_selected();
+        }
+    }
 }
 
 static const char* djui_keyboard_display_label(
@@ -712,6 +738,7 @@ void djui_inputbox_on_focus_begin(struct DjuiBase* base) {
     sKeyboardColumn = 1;
     sKeyboardHeldDirection = 0;
     sKeyboardHeldFrames = 0;
+    sKeyboardHeldActionFrames = 0;
     sKeyboardShift = false;
     sKeyboardCaps = false;
     // Keep the native desktop text-input path active. Players can type on a
@@ -723,6 +750,7 @@ void djui_inputbox_on_focus_end(UNUSED struct DjuiBase* base) {
     sKeyboardTarget = NULL;
     sKeyboardHeldDirection = 0;
     sKeyboardHeldFrames = 0;
+    sKeyboardHeldActionFrames = 0;
     gWindowApi->stop_text_input();
 }
 

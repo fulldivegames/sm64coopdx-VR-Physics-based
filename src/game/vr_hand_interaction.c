@@ -47,6 +47,8 @@
 #define VR_GRIP_CLOSE_THRESHOLD 0.55f
 #define VR_GRIP_OPEN_THRESHOLD 0.35f
 #define VR_GRAB_EXTRA_REACH 16.0f
+#define VR_OBJECT_GRAB_EXTRA_REACH \
+    (VR_GRAB_EXTRA_REACH + VR_FIST_BASE_RADIUS * 8.0f)
 #define VR_CLIMB_CEILING_EXTRA_REACH 20.0f
 #define VR_CLIMB_NATIVE_SWEEP_SAMPLES 4
 #define VR_CLIMB_SURFACE_EXTRA_REACH 20.0f
@@ -86,13 +88,40 @@
 #define VR_FIRE_FLOWER_DURATION_FRAMES 1800U
 #define VR_FIRE_FLOWER_PICKUP_GRACE_FRAMES 12U
 #define VR_FIREBALL_FORM_DELAY_FRAMES 6U
-#define VR_FIREBALL_FORM_FRAMES 45U
-#define VR_FIREBALL_READY_FRAMES \
-    (VR_FIREBALL_FORM_DELAY_FRAMES + VR_FIREBALL_FORM_FRAMES)
+#define VR_CHARGE_TENTHS_MIN 5U
+#define VR_CHARGE_TENTHS_MAX 80U
 #define VR_FIREBALL_TRIGGER_THRESHOLD 0.55f
 #define VR_FIREBALL_MIN_THROW_SPEED 60.0f
 #define VR_FIREBALL_MAX_LIFETIME 180U
 #define VR_FIREBALL_PROJECTILE_COUNT 8U
+#define VR_RASENGAN_IMPACT_GROW_FRAMES 10U
+#define VR_RASENGAN_IMPACT_MAX_FRAMES 90U
+// Two rotated, double-sided shells contribute four translucent surfaces.
+// Alpha 42 per surface composes to approximately 50% visible opacity.
+#define VR_RASENGAN_MAX_OPACITY 42
+#define VR_RASENGAN_HAND_SCALE 0.1125f
+#define VR_RASENGAN_MODEL_RADIUS 64.0f
+#define VR_RASENGAN_CONTACT_RADIUS 18.0f
+#define VR_RASENGAN_BOBOMB_CARRY_FRAMES 30U
+#define VR_RASENGAN_IMPACT_PADDING 12.0f
+#define VR_RASENGAN_SWIRL_TARGET_RADIANS 18.849556f
+#define VR_RASENGAN_SWIRL_MIN_RADIUS 12.0f
+#define VR_RASENGAN_SWIRL_MAX_RADIUS 280.0f
+#define VR_RASENGAN_SWIRL_MIN_STEP 0.003f
+#define VR_RASENGAN_SWIRL_MAX_STEP 1.20f
+#define VR_RASENGAN_LEFT_GRIP_THRESHOLD 0.45f
+#define VR_RASENGAN_RIGHT_OPEN_THRESHOLD 0.50f
+#define VR_RASENGAN_READY_LIFETIME_FRAMES 180U
+#define VR_RASENGAN_READY_FADE_FRAMES 30U
+#define VR_RASEN_SHURIKEN_READY_LIFETIME_FRAMES 300U
+#define VR_RASEN_SHURIKEN_MAX_FLIGHT_FRAMES 300U
+#define VR_RASEN_SHURIKEN_EXPLOSION_FRAMES 15U
+#define VR_RASEN_SHURIKEN_FLIGHT_SPEED 67.5f
+#define VR_RASEN_SHURIKEN_MIN_THROW_SPEED 55.0f
+#define VR_RASEN_SHURIKEN_EXPLOSION_SCALE \
+    (VR_RASENGAN_HAND_SCALE * 40.0f)
+#define VR_RASEN_SHURIKEN_EXPLOSION_RADIUS \
+    (VR_RASENGAN_MODEL_RADIUS * VR_RASEN_SHURIKEN_EXPLOSION_SCALE)
 
 #define VR_ANCHORABLE_INTERACT_TYPES ( \
     INTERACT_BOUNCE_TOP | \
@@ -260,6 +289,23 @@ static Vec3f
 static bool
     sVrFireballProjectileLaunchBoost[VR_FIREBALL_PROJECTILE_COUNT] = { false };
 static Vec3f sVrFireballRememberedVelocity = { 0.0f, 0.0f, 0.0f };
+static struct Object* sVrRasenganObject = NULL;
+static struct Object* sVrRasenganTarget = NULL;
+static u16 sVrRasenganChargeFrames = 0;
+static u16 sVrRasenganImpactFrames = 0;
+static u16 sVrRasenganReadyLifetimeFrames = 0;
+static Vec3f sVrRasenganImpactVelocity = { 0.0f, 0.0f, 0.0f };
+static Vec3f sVrRasenganPreviousOrbitVector = { 0.0f, 0.0f, 0.0f };
+static bool sVrRasenganPreviousOrbitValid = false;
+static f32 sVrRasenganSwirlRadians = 0.0f;
+static u16 sVrRasenganGestureFrames = 0;
+static u16 sVrRasenShurikenChargeFrames = 0;
+static bool sVrRasenShurikenReady = false;
+static Vec3f sVrRasenganRememberedVelocity = { 0.0f, 0.0f, 0.0f };
+static struct Object* sVrRasenShurikenProjectile = NULL;
+static Vec3f sVrRasenShurikenVelocity = { 0.0f, 0.0f, 0.0f };
+static u16 sVrRasenShurikenProjectileFrames = 0;
+static u16 sVrRasenShurikenExplosionFrames = 0;
 static f32 sVrHeadsetColliderSavedRadius = 50.0f;
 static f32 sVrHeadsetColliderSavedHeight = 160.0f;
 static f32 sVrHeadsetColliderSavedDownOffset = 0.0f;
@@ -285,6 +331,33 @@ struct VrFistSweep {
 };
 
 static f32 vr_hand_interaction_fist_radius(void);
+static bool vr_special_moves_try_rasengan_hit(
+    struct MarioState* mario,
+    u32 hand,
+    const Vec3f velocity,
+    struct Object* object
+);
+
+static u16 vr_special_moves_charge_frames(unsigned int tenths) {
+    tenths = max(VR_CHARGE_TENTHS_MIN,
+        min(tenths, VR_CHARGE_TENTHS_MAX));
+    return (u16)(tenths * 3U);
+}
+
+static u16 vr_special_moves_fireball_ready_frames(void) {
+    return VR_FIREBALL_FORM_DELAY_FRAMES +
+        vr_special_moves_charge_frames(configVrFireballChargeTime);
+}
+
+static u16 vr_special_moves_rasengan_ready_frames(void) {
+    return vr_special_moves_charge_frames(configVrRasenganChargeTime);
+}
+
+static u16 vr_special_moves_rasen_shuriken_ready_frames(void) {
+    return vr_special_moves_charge_frames(
+        configVrRasenShurikenChargeTime
+    );
+}
 
 static f32 vr_hand_interaction_surface_distance(
     const struct Surface* surface,
@@ -1010,7 +1083,9 @@ bool vr_hand_interaction_is_tracked_held_object(
     return object != NULL &&
         ((object == sVrTrackedHeldObject &&
           sVrTrackedHeldGripMask != 0) ||
-         object == sVrFireballChargeObject);
+         object == sVrFireballChargeObject ||
+         (object == sVrRasenganObject &&
+          sVrRasenganTarget == NULL));
 }
 
 bool vr_hand_interaction_blocks_native_held_object_release(
@@ -1055,7 +1130,9 @@ bool vr_hand_interaction_get_late_held_object_position(
 
     struct VrControllerState state;
     Vec3f handPosition;
-    if (object == sVrFireballChargeObject) {
+    if (object == sVrFireballChargeObject ||
+        (object == sVrRasenganObject &&
+         sVrRasenganTarget == NULL)) {
         if (!vr_get_controller_state(VR_CONTROLLER_RIGHT, &state) ||
             !vr_get_controller_world_palm_from_state(
                 VR_CONTROLLER_RIGHT,
@@ -1591,6 +1668,7 @@ static bool vr_hand_interaction_hand_is_behind_heavy_grabbable(
 static bool vr_hand_interaction_grab_overlaps_object(
     const Vec3f handPosition,
     f32 handRadius,
+    f32 extraReach,
     struct Object* object,
     f32* distanceSquared
 );
@@ -1598,6 +1676,7 @@ static bool vr_hand_interaction_grab_overlaps_object(
 static bool vr_hand_interaction_grab_overlaps_object(
     const Vec3f handPosition,
     f32 handRadius,
+    f32 extraReach,
     struct Object* object,
     f32* distanceSquared
 ) {
@@ -1649,9 +1728,9 @@ static bool vr_hand_interaction_grab_overlaps_object(
     const f32 deltaY = handPosition[1] - closestY;
     const f32 deltaZ = handPosition[2] - object->oPosZ;
     const f32 horizontalReach =
-        objectRadius + handRadius + VR_GRAB_EXTRA_REACH;
+        objectRadius + handRadius + extraReach;
     const f32 verticalReach =
-        handRadius + VR_GRAB_EXTRA_REACH;
+        handRadius + extraReach;
 
     if (deltaX * deltaX + deltaZ * deltaZ >
             horizontalReach * horizontalReach ||
@@ -1694,6 +1773,7 @@ static bool vr_hand_interaction_try_collect_cap(
             !vr_hand_interaction_grab_overlaps_object(
                 handPosition,
                 handRadius,
+                VR_GRAB_EXTRA_REACH,
                 object,
                 NULL
             )) {
@@ -1925,6 +2005,7 @@ static struct Object* vr_hand_interaction_find_grab_target(
                 !vr_hand_interaction_grab_overlaps_object(
                     handPosition,
                     handRadius,
+                    VR_OBJECT_GRAB_EXTRA_REACH,
                     object,
                     &distanceSquared
                 )) {
@@ -1978,6 +2059,7 @@ static struct Object* vr_hand_interaction_find_pole_target(
             !vr_hand_interaction_grab_overlaps_object(
                 handPosition,
                 handRadius,
+                VR_GRAB_EXTRA_REACH,
                 pole,
                 &distanceSquared
             )) {
@@ -2978,6 +3060,7 @@ static bool vr_hand_interaction_try_add_physical_climb_hand(
             !vr_hand_interaction_grab_overlaps_object(
                 handPosition,
                 vr_hand_interaction_fist_radius(),
+                VR_GRAB_EXTRA_REACH,
                 sVrPhysicalClimbPole,
                 &distanceSquared
             )) {
@@ -3623,6 +3706,7 @@ static struct Object* vr_hand_interaction_find_anchor_target(
                 !vr_hand_interaction_grab_overlaps_object(
                     handPosition,
                     handRadius,
+                    VR_OBJECT_GRAB_EXTRA_REACH,
                     object,
                     &distanceSquared
                 )) {
@@ -4116,6 +4200,15 @@ static bool vr_hand_interaction_attack_object(
         return false;
     }
 
+    if (vr_special_moves_try_rasengan_hit(
+            mario,
+            hand,
+            velocity,
+            object
+        )) {
+        return true;
+    }
+
     const f32 horizontalSpeedSquared =
         velocity[0] * velocity[0] +
         velocity[2] * velocity[2];
@@ -4514,6 +4607,29 @@ static void vr_special_moves_clear_fireball_charge(void) {
     vec3f_set(sVrFireballRememberedVelocity, 0.0f, 0.0f, 0.0f);
 }
 
+static void vr_special_moves_clear_rasengan(void) {
+    vr_special_moves_delete_object(&sVrRasenganObject);
+    sVrRasenganTarget = NULL;
+    sVrRasenganChargeFrames = 0;
+    sVrRasenganImpactFrames = 0;
+    sVrRasenganReadyLifetimeFrames = 0;
+    vec3f_set(sVrRasenganImpactVelocity, 0.0f, 0.0f, 0.0f);
+    vec3f_set(sVrRasenganPreviousOrbitVector, 0.0f, 0.0f, 0.0f);
+    sVrRasenganPreviousOrbitValid = false;
+    sVrRasenganSwirlRadians = 0.0f;
+    sVrRasenganGestureFrames = 0;
+    sVrRasenShurikenChargeFrames = 0;
+    sVrRasenShurikenReady = false;
+    vec3f_set(sVrRasenganRememberedVelocity, 0.0f, 0.0f, 0.0f);
+}
+
+static void vr_special_moves_clear_rasen_shuriken_projectile(void) {
+    vr_special_moves_delete_object(&sVrRasenShurikenProjectile);
+    vec3f_set(sVrRasenShurikenVelocity, 0.0f, 0.0f, 0.0f);
+    sVrRasenShurikenProjectileFrames = 0;
+    sVrRasenShurikenExplosionFrames = 0;
+}
+
 static void vr_special_moves_clear_fireball_projectile(u32 slot) {
     if (slot >= VR_FIREBALL_PROJECTILE_COUNT) {
         return;
@@ -4667,6 +4783,162 @@ Gfx* geo_vr_fireball_color(
     );
     // Warmer than the stock red flame (255, 50, 0) without becoming yellow.
     gDPSetEnvColor(&displayList[0], 255, 105, 0, alpha);
+    gSPEndDisplayList(&displayList[1]);
+    return displayList;
+}
+
+Gfx* geo_vr_rasengan_color(
+    s32 callContext,
+    struct GraphNode* node,
+    UNUSED void* context
+) {
+    if (callContext != GEO_CONTEXT_RENDER ||
+        gCurGraphNodeObject == NULL) {
+        return NULL;
+    }
+    Gfx* displayList = alloc_display_list(2 * sizeof(Gfx));
+    if (displayList == NULL) {
+        return NULL;
+    }
+    struct Object* object = (struct Object*)gCurGraphNodeObject;
+    struct GraphNodeGenerated* generated =
+        (struct GraphNodeGenerated*)node;
+    generated->fnNode.node.flags =
+        (generated->fnNode.node.flags & 0xFF) |
+        (LAYER_TRANSPARENT << 8);
+    gDPSetEnvColor(
+        &displayList[0],
+        210,
+        235,
+        255,
+        (u8)clamp(object->oOpacity, 0, 255)
+    );
+    gSPEndDisplayList(&displayList[1]);
+    return displayList;
+}
+
+Gfx* geo_vr_rasengan_visual_spin(
+    s32 callContext,
+    struct GraphNode* node,
+    UNUSED void* context
+) {
+    if (callContext != GEO_CONTEXT_RENDER || node == NULL ||
+        node->next == NULL || gCurGraphNodeObject == NULL) {
+        return NULL;
+    }
+
+    struct GraphNodeGenerated* generated =
+        (struct GraphNodeGenerated*)node;
+    struct GraphNodeRotation* rotation =
+        (struct GraphNodeRotation*)node->next;
+    struct Object* object = (struct Object*)gCurGraphNodeObject;
+    f32 speedMultiplier = 1.0f;
+    if (object == sVrRasenShurikenProjectile ||
+        sVrRasenShurikenReady) {
+        speedMultiplier = 2.0f;
+    } else if (sVrRasenShurikenChargeFrames > 0) {
+        const f32 chargeProgress = clamp(
+            (f32)sVrRasenShurikenChargeFrames /
+                (f32)MAX(vr_special_moves_rasen_shuriken_ready_frames(), 1),
+            0.0f,
+            1.0f
+        );
+        speedMultiplier = 1.0f + chargeProgress;
+    }
+
+    // Integrate phase at the headset render cadence. Multiplying absolute
+    // time by a changing charge-speed multiplier produces a large phase jump
+    // and an apparent direction reversal at the ready-state transition.
+    const f32 renderTime = (f32)gGlobalTimer +
+        (gRenderingInterpolated
+            ? clamp(gRenderingDelta, 0.0f, 1.0f)
+            : 0.0f);
+    static f32 sVisualTime = -1.0f;
+    static f32 sPrimaryPhase = 0.0f;
+    static f32 sSecondaryPhase = 0.0f;
+    if (sVisualTime < 0.0f || renderTime < sVisualTime ||
+        renderTime - sVisualTime > 2.0f) {
+        sPrimaryPhase = renderTime * 2304.0f;
+        sSecondaryPhase = renderTime * 1664.0f;
+    } else if (renderTime > sVisualTime) {
+        const f32 elapsed = renderTime - sVisualTime;
+        sPrimaryPhase += elapsed * 2304.0f * speedMultiplier;
+        sSecondaryPhase += elapsed * 1664.0f * speedMultiplier;
+    }
+    sVisualTime = renderTime;
+    const s16 primary = (s16)(s32)sPrimaryPhase;
+    const s16 secondary = (s16)(s32)sSecondaryPhase;
+
+    switch (generated->parameter) {
+        case 0:
+            vec3s_set(rotation->rotation,
+                primary, secondary, (s16)-primary);
+            break;
+        case 1:
+            vec3s_set(rotation->rotation,
+                (s16)-secondary, primary,
+                (s16)(primary + 0x2000));
+            break;
+        case 2:
+            vec3s_set(rotation->rotation,
+                (s16)(0x1000 + secondary), primary,
+                (s16)(primary / 2));
+            break;
+        case 3:
+            vec3s_set(rotation->rotation,
+                (s16)(0x3800 - primary),
+                (s16)(0x1F00 + secondary),
+                (s16)-primary);
+            break;
+        case 4:
+            vec3s_set(rotation->rotation,
+                (s16)(-0x2700 + secondary),
+                (s16)(0x4300 - primary), primary);
+            break;
+        case 5:
+            // Billboard first, then spin the supplied Rasen-Shuriken PNG in
+            // its own plane around the centered Rasengan.
+            vec3s_set(rotation->rotation, 0, 0, primary);
+            break;
+    }
+    return NULL;
+}
+
+Gfx* geo_vr_rasen_shuriken_color(
+    s32 callContext,
+    struct GraphNode* node,
+    UNUSED void* context
+) {
+    if (callContext != GEO_CONTEXT_RENDER || node == NULL ||
+        gCurGraphNodeObject == NULL) {
+        return NULL;
+    }
+
+    Gfx* displayList = alloc_display_list(2 * sizeof(Gfx));
+    if (displayList == NULL) {
+        return NULL;
+    }
+
+    struct GraphNodeGenerated* generated =
+        (struct GraphNodeGenerated*)node;
+    generated->fnNode.node.flags =
+        (generated->fnNode.node.flags & 0xFF) |
+        (LAYER_TRANSPARENT << 8);
+
+    u8 alpha = 255;
+    struct Object* object = (struct Object*)gCurGraphNodeObject;
+    if (object != sVrRasenShurikenProjectile &&
+        !sVrRasenShurikenReady) {
+        const f32 chargeProgress = clamp(
+            (f32)sVrRasenShurikenChargeFrames /
+                (f32)MAX(vr_special_moves_rasen_shuriken_ready_frames(), 1),
+            0.0f,
+            1.0f
+        );
+        alpha = (u8)roundf(chargeProgress * 255.0f);
+    }
+
+    gDPSetEnvColor(&displayList[0], 255, 255, 255, alpha);
     gSPEndDisplayList(&displayList[1]);
     return displayList;
 }
@@ -5105,11 +5377,1065 @@ static void vr_special_moves_update_projectiles(struct MarioState* mario) {
     }
 }
 
+static bool vr_special_moves_rasengan_target_is_protected(
+    struct Object* target
+) {
+    return target == NULL ||
+        obj_has_behavior(target, bhvChainChompChainPart) ||
+        obj_has_behavior(target, bhvBowser) ||
+        obj_has_behavior(target, bhvBowserBodyAnchor) ||
+        obj_has_behavior(target, bhvBowserTailAnchor) ||
+        obj_has_behavior(target, bhvWhompKingBoss) ||
+        obj_has_behavior(target, bhvBigBullyWithMinions) ||
+        obj_has_behavior(target, bhvBigChillBully) ||
+        obj_has_behavior(target, bhvEyerokBoss) ||
+        obj_has_behavior(target, bhvEyerokHand) ||
+        obj_has_behavior(target, bhvWigglerHead) ||
+        obj_has_behavior(target, bhvWigglerBody) ||
+        obj_has_behavior(target, bhvBalconyBigBoo) ||
+        obj_has_behavior(target, bhvMerryGoRoundBigBoo) ||
+        obj_has_behavior(target, bhvGhostHuntBigBoo);
+}
+
+static bool vr_special_moves_rasengan_target_is_eligible(
+    struct MarioState* mario,
+    struct Object* object
+) {
+    if (mario == NULL || object == NULL ||
+        object == mario->marioObj || object == mario->heldObj ||
+        (object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
+        object->oIntangibleTimer != 0) {
+        return false;
+    }
+
+    const u32 enemyTypes = INTERACT_DAMAGE | INTERACT_BULLY |
+        INTERACT_BOUNCE_TOP | INTERACT_BOUNCE_TOP2 |
+        INTERACT_KOOPA | INTERACT_SPINY_WALKING |
+        INTERACT_MR_BLIZZARD | INTERACT_CLAM_OR_BUBBA |
+        INTERACT_BREAKABLE;
+    const bool eligibleType =
+        (object->oInteractType & enemyTypes) != 0 ||
+        obj_has_behavior(object, bhvBobomb) ||
+        obj_has_behavior(object, bhvChuckya) ||
+        obj_has_behavior(object, bhvHeaveHo) ||
+        obj_has_behavior(object, bhvChainChomp) ||
+        obj_has_behavior(object, bhvPokeyBodyPart) ||
+        obj_has_behavior(object, bhvBreakableBox) ||
+        obj_has_behavior(object, bhvBreakableBoxSmall) ||
+        obj_has_behavior(object, bhvJumpingBox) ||
+        obj_has_behavior(object, bhvExclamationBox) ||
+        (obj_has_behavior(object, bhvKingBobomb) &&
+            object->oAction == 2);
+    return eligibleType &&
+        !vr_special_moves_rasengan_target_is_protected(object);
+}
+
+static bool vr_special_moves_rasengan_is_behind_king_bobomb(
+    struct Object* object
+) {
+    if (object == NULL || sVrRasenganObject == NULL) {
+        return false;
+    }
+    const s16 sphereYaw = atan2s(
+        sVrRasenganObject->oPosZ - object->oPosZ,
+        sVrRasenganObject->oPosX - object->oPosX
+    );
+    return abs_angle_diff(sphereYaw, object->oMoveAngleYaw) >= 0x5555;
+}
+
+static struct Object* vr_special_moves_resolve_rasengan_target(
+    struct Object* object
+) {
+    if (object != NULL &&
+        obj_has_behavior(object, bhvPokeyBodyPart) &&
+        object->parentObj != NULL &&
+        obj_has_behavior(object->parentObj, bhvPokey)) {
+        return object->parentObj;
+    }
+    return object;
+}
+
+static void vr_special_moves_get_rasengan_target_bounds(
+    struct Object* target,
+    f32* centerY,
+    f32* radius
+) {
+    if (target == NULL || centerY == NULL || radius == NULL) {
+        return;
+    }
+
+    if (obj_has_behavior(target, bhvPokey)) {
+        f32 bottom = target->oPosY;
+        f32 top = target->oPosY + 80.0f;
+        f32 horizontalRadius = 50.0f;
+        for (s32 listIndex = 0; listIndex < NUM_OBJ_LISTS; listIndex++) {
+            struct ObjectNode* list = &gObjectLists[listIndex];
+            struct ObjectNode* node = list->next;
+            while (node != NULL && node != list) {
+                struct Object* part = (struct Object*)node;
+                node = node->next;
+                if ((part->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
+                    !obj_has_behavior(part, bhvPokeyBodyPart) ||
+                    part->parentObj != target) {
+                    continue;
+                }
+                const f32 partRadius = fmaxf(
+                    fmaxf(part->hitboxRadius, part->hurtboxRadius),
+                    45.0f
+                );
+                const f32 dx = part->oPosX - target->oPosX;
+                const f32 dz = part->oPosZ - target->oPosZ;
+                horizontalRadius = fmaxf(
+                    horizontalRadius,
+                    sqrtf(dx * dx + dz * dz) + partRadius
+                );
+                bottom = fminf(bottom, part->oPosY - 45.0f);
+                top = fmaxf(top, part->oPosY + 65.0f);
+            }
+        }
+        *centerY = (bottom + top) * 0.5f;
+        *radius = fmaxf(horizontalRadius, (top - bottom) * 0.5f);
+        return;
+    }
+
+    const f32 height = fmaxf(
+        fmaxf(target->hitboxHeight, target->hurtboxHeight),
+        80.0f
+    );
+    *centerY = target->oPosY - target->hitboxDownOffset + height * 0.5f;
+    *radius = fmaxf(
+        fmaxf(target->hitboxRadius, target->hurtboxRadius),
+        height * 0.5f
+    );
+}
+
+static void vr_special_moves_rasengan_attack_pokey(
+    struct MarioState* mario,
+    struct Object* pokey
+) {
+    for (s32 listIndex = 0; listIndex < NUM_OBJ_LISTS; listIndex++) {
+        struct ObjectNode* list = &gObjectLists[listIndex];
+        struct ObjectNode* node = list->next;
+        while (node != NULL && node != list) {
+            struct Object* part = (struct Object*)node;
+            node = node->next;
+            if ((part->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
+                !obj_has_behavior(part, bhvPokeyBodyPart) ||
+                part->parentObj != pokey) {
+                continue;
+            }
+            attack_object(mario, part, INT_PUNCH);
+            smlua_call_event_hooks(
+                HOOK_ON_INTERACT,
+                mario,
+                part,
+                part->oInteractType,
+                true
+            );
+            network_send_object(part);
+        }
+    }
+    network_send_object(pokey);
+}
+
+static bool vr_special_moves_try_rasengan_hit(
+    struct MarioState* mario,
+    u32 hand,
+    const Vec3f velocity,
+    struct Object* object
+) {
+    if (!configVrSpecialRasengan || hand != VR_CONTROLLER_RIGHT ||
+        sVrRasenganObject == NULL || sVrRasenganTarget != NULL ||
+        sVrRasenganChargeFrames <
+            vr_special_moves_rasengan_ready_frames() ||
+        !vr_special_moves_rasengan_target_is_eligible(mario, object)) {
+        return false;
+    }
+
+    if (obj_has_behavior(object, bhvKingBobomb) &&
+        !vr_special_moves_rasengan_is_behind_king_bobomb(object)) {
+        return false;
+    }
+
+    sVrRasenganTarget = vr_special_moves_resolve_rasengan_target(object);
+    sVrRasenganImpactFrames = 0;
+    for (u32 axis = 0; axis < 3; axis++) {
+        sVrRasenganImpactVelocity[axis] = velocity[axis];
+    }
+    const f32 horizontalSpeed = sqrtf(
+        velocity[0] * velocity[0] + velocity[2] * velocity[2]
+    );
+    if (horizontalSpeed < 1.0f) {
+        const s16 yaw = vr_get_first_person_view_yaw();
+        sVrRasenganImpactVelocity[0] = sins(yaw) * 120.0f;
+        sVrRasenganImpactVelocity[2] = coss(yaw) * 120.0f;
+    }
+    sVrRasenganTarget->oMoveAngleYaw = atan2s(
+        sVrRasenganImpactVelocity[2],
+        sVrRasenganImpactVelocity[0]
+    );
+    sVrRasenganTarget->oForwardVel = fmaxf(
+        sVrRasenganTarget->oForwardVel,
+        42.0f
+    );
+    sVrRasenganTarget->oVelY = fmaxf(
+        sVrRasenganTarget->oVelY,
+        15.0f
+    );
+    play_sound(
+        SOUND_OBJ2_BOWSER_ROAR,
+        object->header.gfx.cameraToObject
+    );
+    vr_apply_haptic(VR_CONTROLLER_RIGHT, 0.95f, 0.16f, -1.0f);
+    return true;
+}
+
+static bool vr_special_moves_check_rasengan_contact(
+    struct MarioState* mario,
+    const Vec3f velocity
+) {
+    if (mario == NULL || gObjectLists == NULL ||
+        sVrRasenganObject == NULL || sVrRasenganTarget != NULL ||
+        sVrRasenganChargeFrames <
+            vr_special_moves_rasengan_ready_frames() ||
+        sVrRasenShurikenChargeFrames > 0 ||
+        sVrRasenShurikenReady) {
+        return false;
+    }
+
+    const f32 sphereX = sVrRasenganObject->oPosX;
+    const f32 sphereY = sVrRasenganObject->oPosY;
+    const f32 sphereZ = sVrRasenganObject->oPosZ;
+    for (s32 listIndex = 0; listIndex < NUM_OBJ_LISTS; listIndex++) {
+        struct ObjectNode* list = &gObjectLists[listIndex];
+        struct ObjectNode* node = list->next;
+        while (node != NULL && node != list) {
+            struct Object* object = (struct Object*)node;
+            node = node->next;
+            // Most objects in a level are nowhere near the held sphere. This
+            // coarse squared-distance gate avoids behavior and hitbox checks
+            // for those objects without changing close-contact accuracy.
+            const f32 coarseX = sphereX - object->oPosX;
+            const f32 coarseY = sphereY - object->oPosY;
+            const f32 coarseZ = sphereZ - object->oPosZ;
+            if (coarseX * coarseX + coarseZ * coarseZ >
+                    640.0f * 640.0f ||
+                fabsf(coarseY) > 640.0f) {
+                continue;
+            }
+            if (!vr_special_moves_rasengan_target_is_eligible(
+                    mario,
+                    object
+                )) {
+                continue;
+            }
+
+            const f32 objectRadius = fmaxf(
+                object->hitboxRadius,
+                object->hurtboxRadius
+            );
+            const f32 objectHeight = fmaxf(
+                object->hitboxHeight,
+                object->hurtboxHeight
+            );
+            if (objectRadius <= 0.0f || objectHeight <= 0.0f) {
+                continue;
+            }
+            const f32 objectBottom =
+                object->oPosY - object->hitboxDownOffset;
+            const f32 objectTop = objectBottom + objectHeight;
+            const f32 combinedRadius =
+                objectRadius + VR_RASENGAN_CONTACT_RADIUS;
+            const f32 deltaX = sphereX - object->oPosX;
+            const f32 deltaZ = sphereZ - object->oPosZ;
+            if (deltaX * deltaX + deltaZ * deltaZ >
+                    combinedRadius * combinedRadius ||
+                sphereY + VR_RASENGAN_CONTACT_RADIUS < objectBottom ||
+                sphereY - VR_RASENGAN_CONTACT_RADIUS > objectTop) {
+                continue;
+            }
+
+            bool allowInteract = true;
+            smlua_call_event_hooks(
+                HOOK_ALLOW_INTERACT,
+                mario,
+                object,
+                object->oInteractType,
+                &allowInteract
+            );
+            if (allowInteract && vr_special_moves_try_rasengan_hit(
+                    mario,
+                    VR_CONTROLLER_RIGHT,
+                    velocity,
+                    object
+                )) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static void vr_special_moves_update_rasengan_impact(
+    struct MarioState* mario
+) {
+    if (sVrRasenganObject == NULL || sVrRasenganTarget == NULL) {
+        return;
+    }
+    if ((sVrRasenganObject->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
+        (sVrRasenganTarget->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
+        vr_special_moves_clear_rasengan();
+        return;
+    }
+
+    struct Object* target = sVrRasenganTarget;
+    sVrRasenganImpactFrames++;
+    const bool bobombTarget = obj_has_behavior(target, bhvBobomb);
+    const bool chainChompTarget = obj_has_behavior(target, bhvChainChomp);
+    const bool kingBobombTarget = obj_has_behavior(target, bhvKingBobomb);
+    const bool pokeyTarget = obj_has_behavior(target, bhvPokey);
+    const u16 pushFrames = bobombTarget
+        ? VR_RASENGAN_BOBOMB_CARRY_FRAMES
+        : VR_RASENGAN_IMPACT_GROW_FRAMES;
+    if (sVrRasenganImpactFrames <= pushFrames) {
+        const f32 horizontalLength = sqrtf(
+            sVrRasenganImpactVelocity[0] *
+                sVrRasenganImpactVelocity[0] +
+            sVrRasenganImpactVelocity[2] *
+                sVrRasenganImpactVelocity[2]
+        );
+        if (horizontalLength > 0.001f) {
+            const f32 pushX =
+                sVrRasenganImpactVelocity[0] /
+                horizontalLength * 12.0f;
+            const f32 pushZ =
+                sVrRasenganImpactVelocity[2] /
+                horizontalLength * 12.0f;
+            target->oPosX += pushX;
+            target->oPosZ += pushZ;
+            target->oVelX = pushX;
+            target->oVelZ = pushZ;
+            target->header.gfx.pos[0] = target->oPosX;
+            target->header.gfx.pos[2] = target->oPosZ;
+        }
+    }
+    f32 targetCenterY = target->oPosY;
+    f32 targetRadius = 40.0f;
+    vr_special_moves_get_rasengan_target_bounds(
+        target,
+        &targetCenterY,
+        &targetRadius
+    );
+    sVrRasenganObject->oPosX = target->oPosX;
+    sVrRasenganObject->oPosY = targetCenterY;
+    sVrRasenganObject->oPosZ = target->oPosZ;
+    // Per-render GeoLayout rotation supplies headset-rate visual motion.
+    // Keep the simulation transform neutral so a 30 Hz parent rotation does
+    // not introduce a visible hitch underneath it.
+    sVrRasenganObject->oFaceAnglePitch = 0;
+    sVrRasenganObject->oFaceAngleYaw = 0;
+    sVrRasenganObject->oFaceAngleRoll = 0;
+    const f32 growth = clamp(
+        (f32)sVrRasenganImpactFrames /
+            (f32)VR_RASENGAN_IMPACT_GROW_FRAMES,
+        0.0f,
+        1.0f
+    );
+    const f32 enclosingScale = fmaxf(
+        VR_RASENGAN_HAND_SCALE,
+        (targetRadius + VR_RASENGAN_IMPACT_PADDING) /
+            VR_RASENGAN_MODEL_RADIUS
+    );
+    obj_scale(
+        sVrRasenganObject,
+        VR_RASENGAN_HAND_SCALE +
+            growth * (enclosingScale - VR_RASENGAN_HAND_SCALE)
+    );
+    sVrRasenganObject->oOpacity = VR_RASENGAN_MAX_OPACITY;
+    obj_update_gfx_pos_and_angle(sVrRasenganObject);
+
+    if (sVrRasenganImpactFrames <= VR_RASENGAN_IMPACT_GROW_FRAMES) {
+        target->oMoveAngleYaw = atan2s(
+            sVrRasenganImpactVelocity[2],
+            sVrRasenganImpactVelocity[0]
+        );
+        target->oForwardVel = fmaxf(target->oForwardVel, 42.0f);
+        target->oVelY = fmaxf(target->oVelY, 10.0f);
+        if (!bobombTarget &&
+            sVrRasenganImpactFrames == VR_RASENGAN_IMPACT_GROW_FRAMES) {
+            mario->interactObj = target;
+            if (pokeyTarget) {
+                vr_special_moves_rasengan_attack_pokey(mario, target);
+            } else if (kingBobombTarget) {
+                // Use King Bob-omb's native thrown action so landing removes
+                // exactly one health point and preserves his three-hit fight.
+                target->oAction = 4;
+                target->oSubAction = 0;
+                target->oMoveFlags &= ~OBJ_MOVE_MASK_ON_GROUND;
+                target->oForwardVel = fmaxf(target->oForwardVel, 52.0f);
+                target->oVelY = fmaxf(target->oVelY, 35.0f);
+            } else {
+                const bool breakableTarget =
+                    obj_has_behavior(target, bhvBreakableBox) ||
+                    obj_has_behavior(target, bhvBreakableBoxSmall) ||
+                    obj_has_behavior(target, bhvJumpingBox);
+                if (breakableTarget) {
+                    vr_special_moves_spawn_fire_flower_chance(
+                        target,
+                        mario,
+                        0.25f
+                    );
+                }
+                attack_object(mario, target, INT_PUNCH);
+                target->oInteractStatus |= INT_STATUS_TOUCHED_BOB_OMB;
+                if (!chainChompTarget && !breakableTarget &&
+                    !obj_has_behavior(target, bhvExclamationBox)) {
+                    target->oHealth = 0;
+                }
+            }
+            smlua_call_event_hooks(
+                HOOK_ON_INTERACT,
+                mario,
+                target,
+                target->oInteractType,
+                true
+            );
+            network_send_object(target);
+            if (kingBobombTarget || pokeyTarget) {
+                vr_special_moves_clear_rasengan();
+                return;
+            }
+        }
+    }
+    if (bobombTarget &&
+        sVrRasenganImpactFrames == VR_RASENGAN_BOBOMB_CARRY_FRAMES) {
+        // Carry the Bob-omb inside the expanding sphere for one second, then
+        // hand control back to its native explosion path. This preserves its
+        // coin/respawner/network behavior without detonating on first touch.
+        mario->interactObj = target;
+        target->oBobombFuseLit = 1;
+        target->oAction = BOBOMB_ACT_EXPLODE;
+        target->oPrevAction = BOBOMB_ACT_EXPLODE;
+        target->oTimer = 5;
+        target->oInteractStatus |= INT_STATUS_TOUCHED_BOB_OMB;
+        smlua_call_event_hooks(
+            HOOK_ON_INTERACT,
+            mario,
+            target,
+            target->oInteractType,
+            true
+        );
+        network_send_object(target);
+        vr_special_moves_clear_rasengan();
+        return;
+    }
+    if (sVrRasenganImpactFrames >= VR_RASENGAN_IMPACT_MAX_FRAMES) {
+        vr_special_moves_clear_rasengan();
+    }
+}
+
+static void vr_special_moves_rasen_shuriken_damage_area(
+    struct MarioState* mario,
+    struct Object* explosion
+) {
+    if (mario == NULL || explosion == NULL || gObjectLists == NULL) {
+        return;
+    }
+    const f32 radius = VR_RASEN_SHURIKEN_EXPLOSION_RADIUS;
+    for (s32 listIndex = 0; listIndex < NUM_OBJ_LISTS; listIndex++) {
+        struct ObjectNode* list = &gObjectLists[listIndex];
+        struct ObjectNode* node = list->next;
+        while (node != NULL && node != list) {
+            struct Object* object = (struct Object*)node;
+            node = node->next;
+            if (object == explosion ||
+                !vr_special_moves_rasengan_target_is_eligible(
+                    mario,
+                    object
+                ) ||
+                obj_has_behavior(object, bhvKingBobomb)) {
+                continue;
+            }
+            const f32 objectRadius = fmaxf(
+                fmaxf(object->hitboxRadius, object->hurtboxRadius),
+                20.0f
+            );
+            const f32 objectHeight = fmaxf(
+                fmaxf(object->hitboxHeight, object->hurtboxHeight),
+                40.0f
+            );
+            const f32 dx = object->oPosX - explosion->oPosX;
+            const f32 dz = object->oPosZ - explosion->oPosZ;
+            const f32 bottom = object->oPosY - object->hitboxDownOffset;
+            const f32 top = bottom + objectHeight;
+            if (dx * dx + dz * dz >
+                    (radius + objectRadius) *
+                    (radius + objectRadius) ||
+                explosion->oPosY + radius < bottom ||
+                explosion->oPosY - radius > top) {
+                continue;
+            }
+
+            if (obj_has_behavior(object, bhvPokeyBodyPart) &&
+                object->parentObj != NULL &&
+                obj_has_behavior(object->parentObj, bhvPokey)) {
+                vr_special_moves_rasengan_attack_pokey(
+                    mario,
+                    object->parentObj
+                );
+                continue;
+            }
+            if (obj_has_behavior(object, bhvBreakableBox) ||
+                obj_has_behavior(object, bhvBreakableBoxSmall) ||
+                obj_has_behavior(object, bhvJumpingBox)) {
+                vr_special_moves_spawn_fire_flower_chance(
+                    object,
+                    mario,
+                    0.25f
+                );
+            }
+            mario->interactObj = object;
+            attack_object(mario, object, INT_PUNCH);
+            object->oInteractStatus |= INT_STATUS_TOUCHED_BOB_OMB;
+            if (!obj_has_behavior(object, bhvChainChomp) &&
+                (object->oInteractType & INTERACT_BREAKABLE) == 0) {
+                object->oHealth = max(object->oHealth - 3, 0);
+            }
+            smlua_call_event_hooks(
+                HOOK_ON_INTERACT,
+                mario,
+                object,
+                object->oInteractType,
+                true
+            );
+            network_send_object(object);
+        }
+    }
+}
+
+static void vr_special_moves_rasen_shuriken_explode(
+    struct MarioState* mario
+) {
+    if (sVrRasenShurikenProjectile == NULL ||
+        sVrRasenShurikenExplosionFrames != 0) {
+        return;
+    }
+    sVrRasenShurikenExplosionFrames = 1;
+    vec3f_set(sVrRasenShurikenVelocity, 0.0f, 0.0f, 0.0f);
+    obj_set_model(sVrRasenShurikenProjectile, MODEL_VR_RASENGAN);
+    obj_scale(
+        sVrRasenShurikenProjectile,
+        VR_RASEN_SHURIKEN_EXPLOSION_SCALE
+    );
+    sVrRasenShurikenProjectile->oOpacity = VR_RASENGAN_MAX_OPACITY;
+    play_sound(
+        SOUND_GENERAL2_BOBOMB_EXPLOSION,
+        sVrRasenShurikenProjectile->header.gfx.cameraToObject
+    );
+    vr_special_moves_rasen_shuriken_damage_area(
+        mario,
+        sVrRasenShurikenProjectile
+    );
+}
+
+static bool vr_special_moves_rasen_shuriken_hits_enemy(
+    struct MarioState* mario,
+    struct Object* projectile
+) {
+    if (mario == NULL || projectile == NULL || gObjectLists == NULL) {
+        return false;
+    }
+    for (s32 listIndex = 0; listIndex < NUM_OBJ_LISTS; listIndex++) {
+        struct ObjectNode* list = &gObjectLists[listIndex];
+        struct ObjectNode* node = list->next;
+        while (node != NULL && node != list) {
+            struct Object* object = (struct Object*)node;
+            node = node->next;
+            if (!vr_special_moves_rasengan_target_is_eligible(
+                    mario,
+                    object
+                ) ||
+                obj_has_behavior(object, bhvKingBobomb)) {
+                continue;
+            }
+            const f32 objectRadius = fmaxf(
+                fmaxf(object->hitboxRadius, object->hurtboxRadius),
+                20.0f
+            ) + 20.0f;
+            const f32 objectHeight = fmaxf(
+                fmaxf(object->hitboxHeight, object->hurtboxHeight),
+                40.0f
+            );
+            const f32 dx = projectile->oPosX - object->oPosX;
+            const f32 dz = projectile->oPosZ - object->oPosZ;
+            const f32 bottom = object->oPosY - object->hitboxDownOffset;
+            if (dx * dx + dz * dz <= objectRadius * objectRadius &&
+                projectile->oPosY + 20.0f >= bottom &&
+                projectile->oPosY - 20.0f <= bottom + objectHeight) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static void vr_special_moves_update_rasen_shuriken_projectile(
+    struct MarioState* mario
+) {
+    struct Object* projectile = sVrRasenShurikenProjectile;
+    if (projectile == NULL) {
+        return;
+    }
+    if ((projectile->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
+        ++sVrRasenShurikenProjectileFrames >
+            VR_RASEN_SHURIKEN_MAX_FLIGHT_FRAMES) {
+        vr_special_moves_clear_rasen_shuriken_projectile();
+        return;
+    }
+    if (sVrRasenShurikenExplosionFrames != 0) {
+        projectile->oFaceAnglePitch = 0;
+        projectile->oFaceAngleYaw = 0;
+        projectile->oFaceAngleRoll = 0;
+        obj_update_gfx_pos_and_angle(projectile);
+        if (++sVrRasenShurikenExplosionFrames >
+            VR_RASEN_SHURIKEN_EXPLOSION_FRAMES) {
+            vr_special_moves_clear_rasen_shuriken_projectile();
+        }
+        return;
+    }
+
+    Vec3f nextPosition = {
+        projectile->oPosX + sVrRasenShurikenVelocity[0],
+        projectile->oPosY + sVrRasenShurikenVelocity[1],
+        projectile->oPosZ + sVrRasenShurikenVelocity[2]
+    };
+    bool hitGeometry = false;
+    struct WallCollisionData wallData = { 0 };
+    Vec3f wallPosition;
+    vec3f_copy(wallPosition, nextPosition);
+    resolve_and_return_wall_collisions_data(
+        wallPosition,
+        0.0f,
+        18.0f,
+        &wallData
+    );
+    if (wallData.numWalls > 0) {
+        hitGeometry = true;
+        vec3f_copy(nextPosition, wallPosition);
+    }
+    struct Surface* floor = NULL;
+    const f32 floorHeight = find_floor(
+        nextPosition[0],
+        nextPosition[1] + 30.0f,
+        nextPosition[2],
+        &floor
+    );
+    if (floor != NULL && nextPosition[1] <= floorHeight + 18.0f) {
+        nextPosition[1] = floorHeight + 18.0f;
+        hitGeometry = true;
+    }
+    struct Surface* ceiling = NULL;
+    const f32 ceilingHeight = find_ceil(
+        nextPosition[0],
+        nextPosition[1] - 30.0f,
+        nextPosition[2],
+        &ceiling
+    );
+    if (ceiling != NULL && nextPosition[1] >= ceilingHeight - 18.0f) {
+        nextPosition[1] = ceilingHeight - 18.0f;
+        hitGeometry = true;
+    }
+    vec3f_copy(&projectile->oPosX, nextPosition);
+    projectile->oFaceAnglePitch = 0;
+    projectile->oFaceAngleYaw = 0;
+    projectile->oFaceAngleRoll = 0;
+    obj_update_gfx_pos_and_angle(projectile);
+    if (hitGeometry ||
+        vr_special_moves_rasen_shuriken_hits_enemy(mario, projectile)) {
+        vr_special_moves_rasen_shuriken_explode(mario);
+    }
+}
+
+static void vr_special_moves_launch_rasen_shuriken(
+    struct MarioState* mario,
+    const Vec3f position,
+    const Vec3f velocity
+) {
+    if (mario == NULL || mario->marioObj == NULL ||
+        sVrRasenShurikenProjectile != NULL) {
+        return;
+    }
+    sVrRasenShurikenProjectile = spawn_object(
+        mario->marioObj,
+        MODEL_VR_RASEN_SHURIKEN,
+        bhvStaticObject
+    );
+    if (sVrRasenShurikenProjectile == NULL) {
+        return;
+    }
+    for (u32 axis = 0; axis < 3; axis++) {
+        (&sVrRasenShurikenProjectile->oPosX)[axis] = position[axis];
+    }
+    sVrRasenShurikenProjectile->oOpacity = VR_RASENGAN_MAX_OPACITY;
+    obj_scale(sVrRasenShurikenProjectile, VR_RASENGAN_HAND_SCALE);
+
+    const f32 speed = sqrtf(
+        velocity[0] * velocity[0] +
+        velocity[1] * velocity[1] +
+        velocity[2] * velocity[2]
+    );
+    if (speed > 0.001f) {
+        for (u32 axis = 0; axis < 3; axis++) {
+            sVrRasenShurikenVelocity[axis] =
+                velocity[axis] / speed *
+                VR_RASEN_SHURIKEN_FLIGHT_SPEED;
+        }
+    } else {
+        const s16 yaw = vr_get_first_person_view_yaw();
+        sVrRasenShurikenVelocity[0] =
+            sins(yaw) * VR_RASEN_SHURIKEN_FLIGHT_SPEED;
+        sVrRasenShurikenVelocity[1] = 0.0f;
+        sVrRasenShurikenVelocity[2] =
+            coss(yaw) * VR_RASEN_SHURIKEN_FLIGHT_SPEED;
+    }
+    sVrRasenShurikenProjectileFrames = 0;
+    sVrRasenShurikenExplosionFrames = 0;
+    play_sound(
+        SOUND_OBJ_FLAME_BLOWN,
+        sVrRasenShurikenProjectile->header.gfx.cameraToObject
+    );
+    vr_apply_haptic(VR_CONTROLLER_RIGHT, 0.8f, 0.12f, -1.0f);
+}
+
+static bool vr_special_moves_update_rasengan_hand(
+    struct MarioState* mario,
+    const struct VrControllerState* state,
+    const Vec3f position,
+    const Vec3f velocity,
+    bool handBusy,
+    const struct VrControllerState* leftState,
+    const Vec3f leftPosition,
+    bool leftPositionValid,
+    bool leftHandBusy
+) {
+    if (!configVrSpecialRasengan || !vr_is_active() || mario == NULL ||
+        vr_special_moves_fire_flower_active()) {
+        vr_special_moves_clear_rasengan();
+        return false;
+    }
+    if (sVrRasenganTarget != NULL) {
+        return false;
+    }
+
+    const u16 readyFrames = vr_special_moves_rasengan_ready_frames();
+    const u16 shurikenReadyFrames =
+        vr_special_moves_rasen_shuriken_ready_frames();
+    const bool rightTriggerPressed = state != NULL &&
+        state->trigger >= VR_FIREBALL_TRIGGER_THRESHOLD;
+    const bool rightGripPressed = state != NULL &&
+        state->squeeze >= VR_GRIP_CLOSE_THRESHOLD;
+    const bool rightHandOpen = state != NULL &&
+        state->squeeze <= VR_RASENGAN_RIGHT_OPEN_THRESHOLD;
+    const bool leftGripPressed = leftState != NULL &&
+        leftState->squeeze >= VR_RASENGAN_LEFT_GRIP_THRESHOLD;
+    const bool swirlGestureHeld = !handBusy && !leftHandBusy &&
+        leftPositionValid && rightTriggerPressed &&
+        rightHandOpen && leftGripPressed;
+    const bool gripTriggerGestureHeld = !handBusy &&
+        rightTriggerPressed && rightGripPressed;
+    const bool gestureHeld = configVrSpecialRasenganGripTrigger
+        ? gripTriggerGestureHeld
+        : swirlGestureHeld;
+    const bool wasReady =
+        sVrRasenganChargeFrames >= readyFrames;
+    const bool retainChargedRasengan = wasReady &&
+        !handBusy && rightTriggerPressed;
+
+    if (wasReady && !rightTriggerPressed &&
+        sVrRasenShurikenReady && sVrRasenganObject != NULL) {
+        const f32 throwSpeedSq =
+            sVrRasenganRememberedVelocity[0] *
+                sVrRasenganRememberedVelocity[0] +
+            sVrRasenganRememberedVelocity[1] *
+                sVrRasenganRememberedVelocity[1] +
+            sVrRasenganRememberedVelocity[2] *
+                sVrRasenganRememberedVelocity[2];
+        if (throwSpeedSq >=
+            VR_RASEN_SHURIKEN_MIN_THROW_SPEED *
+                VR_RASEN_SHURIKEN_MIN_THROW_SPEED) {
+            vr_special_moves_launch_rasen_shuriken(
+                mario,
+                &sVrRasenganObject->oPosX,
+                sVrRasenganRememberedVelocity
+            );
+        }
+        vr_special_moves_clear_rasengan();
+        return false;
+    }
+
+    if (gestureHeld && !wasReady) {
+        if (sVrRasenganGestureFrames < readyFrames) {
+            sVrRasenganGestureFrames++;
+        }
+        if (configVrSpecialRasenganGripTrigger) {
+            sVrRasenganSwirlRadians = fminf(
+                sVrRasenganSwirlRadians +
+                    VR_RASENGAN_SWIRL_TARGET_RADIANS /
+                        (f32)readyFrames,
+                VR_RASENGAN_SWIRL_TARGET_RADIANS
+            );
+        } else {
+            Vec3f orbitVector;
+            for (u32 axis = 0; axis < 3; axis++) {
+                orbitVector[axis] =
+                    leftPosition[axis] - position[axis];
+            }
+            const f32 orbitRadius = sqrtf(
+                orbitVector[0] * orbitVector[0] +
+                orbitVector[1] * orbitVector[1] +
+                orbitVector[2] * orbitVector[2]
+            );
+            if (orbitRadius >= VR_RASENGAN_SWIRL_MIN_RADIUS &&
+                orbitRadius <= VR_RASENGAN_SWIRL_MAX_RADIUS) {
+                if (sVrRasenganPreviousOrbitValid) {
+                    const f32 previousRadius = sqrtf(
+                        sVrRasenganPreviousOrbitVector[0] *
+                            sVrRasenganPreviousOrbitVector[0] +
+                        sVrRasenganPreviousOrbitVector[1] *
+                            sVrRasenganPreviousOrbitVector[1] +
+                        sVrRasenganPreviousOrbitVector[2] *
+                            sVrRasenganPreviousOrbitVector[2]
+                    );
+                    if (previousRadius > 0.001f) {
+                        Vec3f previousUnit;
+                        Vec3f currentUnit;
+                        for (u32 axis = 0; axis < 3; axis++) {
+                            previousUnit[axis] =
+                                sVrRasenganPreviousOrbitVector[axis] /
+                                previousRadius;
+                            currentUnit[axis] =
+                                orbitVector[axis] / orbitRadius;
+                        }
+                        const f32 dot = clamp(
+                            previousUnit[0] * currentUnit[0] +
+                            previousUnit[1] * currentUnit[1] +
+                            previousUnit[2] * currentUnit[2],
+                            -1.0f,
+                            1.0f
+                        );
+                        const f32 angularStep = acosf(dot);
+                        if (angularStep >=
+                                VR_RASENGAN_SWIRL_MIN_STEP &&
+                            angularStep <=
+                                VR_RASENGAN_SWIRL_MAX_STEP) {
+                            sVrRasenganSwirlRadians = fminf(
+                                sVrRasenganSwirlRadians + angularStep,
+                                VR_RASENGAN_SWIRL_TARGET_RADIANS
+                            );
+                        }
+                    }
+                }
+                vec3f_copy(
+                    sVrRasenganPreviousOrbitVector,
+                    orbitVector
+                );
+                sVrRasenganPreviousOrbitValid = true;
+            } else {
+                sVrRasenganPreviousOrbitValid = false;
+            }
+        }
+
+        const f32 motionProgress = clamp(
+            sVrRasenganSwirlRadians /
+                VR_RASENGAN_SWIRL_TARGET_RADIANS,
+            0.0f,
+            1.0f
+        );
+        const f32 timeProgress = clamp(
+            (f32)sVrRasenganGestureFrames / (f32)readyFrames,
+            0.0f,
+            1.0f
+        );
+        const f32 chargeProgress = fminf(
+            motionProgress,
+            timeProgress
+        );
+        sVrRasenganChargeFrames = (u16)min(
+            (u32)(chargeProgress *
+                (f32)readyFrames + 0.5f),
+            readyFrames
+        );
+        if (sVrRasenganObject == NULL) {
+            sVrRasenganObject = spawn_object(
+                mario->marioObj,
+                MODEL_VR_RASENGAN,
+                bhvStaticObject
+            );
+            if (sVrRasenganObject != NULL) {
+                sVrRasenganObject->oInteractType = 0;
+                vr_apply_haptic(
+                    VR_CONTROLLER_RIGHT,
+                    0.22f,
+                    0.05f,
+                    -1.0f
+                );
+            }
+        }
+    } else if (!retainChargedRasengan &&
+               sVrRasenganTarget == NULL &&
+               (sVrRasenganObject != NULL ||
+                sVrRasenganSwirlRadians > 0.0f)) {
+        vr_special_moves_clear_rasengan();
+        return false;
+    }
+
+    if (sVrRasenganChargeFrames >= readyFrames) {
+        const bool specialHeld = mario->controller != NULL &&
+            (mario->controller->buttonDown & Y_BUTTON) != 0;
+        bool overheadAllowed = true;
+        if (configVrRasenShurikenOverheadCharge &&
+            !sVrRasenShurikenReady) {
+            Vec3f headPosition;
+            overheadAllowed =
+                vr_get_stabilized_headset_world_position(
+                    headPosition,
+                    false
+                ) && position[1] >= headPosition[1] + 12.0f;
+        }
+        if (specialHeld && rightTriggerPressed && overheadAllowed &&
+            !sVrRasenShurikenReady) {
+            if (sVrRasenShurikenChargeFrames == 0 &&
+                sVrRasenganObject != NULL) {
+                obj_set_model(
+                    sVrRasenganObject,
+                    MODEL_VR_RASEN_SHURIKEN
+                );
+            }
+            if (sVrRasenShurikenChargeFrames < shurikenReadyFrames) {
+                sVrRasenShurikenChargeFrames++;
+            }
+            if (sVrRasenShurikenChargeFrames >= shurikenReadyFrames) {
+                sVrRasenShurikenReady = true;
+                sVrRasenganReadyLifetimeFrames = 0;
+                vr_apply_haptic(
+                    VR_CONTROLLER_RIGHT,
+                    0.7f,
+                    0.12f,
+                    -1.0f
+                );
+            }
+        } else if (!specialHeld && !sVrRasenShurikenReady &&
+            sVrRasenShurikenChargeFrames > 0) {
+            sVrRasenShurikenChargeFrames = 0;
+            if (sVrRasenganObject != NULL) {
+                obj_set_model(sVrRasenganObject, MODEL_VR_RASENGAN);
+            }
+        }
+
+        const u16 lifetimeFrames = sVrRasenShurikenReady
+            ? VR_RASEN_SHURIKEN_READY_LIFETIME_FRAMES
+            : VR_RASENGAN_READY_LIFETIME_FRAMES;
+        // Starting the Rasen-Shuriken charge freezes the remaining Rasengan
+        // hold time. Lowering the hand may pause the overhead charge too, but
+        // the original timer stays frozen until Special is released; an
+        // incomplete charge then resumes from exactly where it stopped.
+        const bool shurikenChargeInProgress =
+            !sVrRasenShurikenReady && specialHeld &&
+            sVrRasenShurikenChargeFrames > 0;
+        if (!shurikenChargeInProgress &&
+            sVrRasenganReadyLifetimeFrames <
+            lifetimeFrames) {
+            sVrRasenganReadyLifetimeFrames++;
+        }
+        if (sVrRasenganReadyLifetimeFrames >=
+            lifetimeFrames) {
+            vr_special_moves_clear_rasengan();
+            return false;
+        }
+    }
+
+    if (sVrRasenganObject != NULL) {
+        Vec3f palmPosition;
+        if (!vr_get_controller_world_palm_from_state(
+                VR_CONTROLLER_RIGHT,
+                state,
+                palmPosition
+            )) {
+            for (u32 axis = 0; axis < 3; axis++) {
+                palmPosition[axis] = position[axis];
+            }
+        }
+        vec3f_copy(&sVrRasenganObject->oPosX, palmPosition);
+        const f32 progress = clamp(
+            (f32)sVrRasenganChargeFrames / (f32)readyFrames,
+            0.0f,
+            1.0f
+        );
+        const u16 lifetimeFrames = sVrRasenShurikenReady
+            ? VR_RASEN_SHURIKEN_READY_LIFETIME_FRAMES
+            : VR_RASENGAN_READY_LIFETIME_FRAMES;
+        f32 lifetimeFade = 1.0f;
+        if (sVrRasenganReadyLifetimeFrames >
+            lifetimeFrames -
+                VR_RASENGAN_READY_FADE_FRAMES) {
+            lifetimeFade =
+                (f32)(lifetimeFrames -
+                    sVrRasenganReadyLifetimeFrames) /
+                (f32)VR_RASENGAN_READY_FADE_FRAMES;
+        }
+        sVrRasenganObject->oOpacity = (s32)(
+            (18.0f + progress *
+                (VR_RASENGAN_MAX_OPACITY - 18.0f)) *
+            lifetimeFade
+        );
+        obj_scale(
+            sVrRasenganObject,
+            VR_RASENGAN_HAND_SCALE *
+                (0.08f + progress * 0.92f)
+        );
+        sVrRasenganObject->oFaceAnglePitch = 0;
+        sVrRasenganObject->oFaceAngleYaw = 0;
+        sVrRasenganObject->oFaceAngleRoll = 0;
+        obj_update_gfx_pos_and_angle(sVrRasenganObject);
+        sVrRasenganObject->header.gfx.skipInterpolationTimestamp =
+            gGlobalTimer;
+
+        if (wasReady || sVrRasenganChargeFrames >= readyFrames) {
+            const f32 speedSq = velocity[0] * velocity[0] +
+                velocity[1] * velocity[1] +
+                velocity[2] * velocity[2];
+            const f32 rememberedSq =
+                sVrRasenganRememberedVelocity[0] *
+                    sVrRasenganRememberedVelocity[0] +
+                sVrRasenganRememberedVelocity[1] *
+                    sVrRasenganRememberedVelocity[1] +
+                sVrRasenganRememberedVelocity[2] *
+                    sVrRasenganRememberedVelocity[2];
+            if (speedSq >= rememberedSq *
+                VR_THROW_VELOCITY_MEMORY *
+                VR_THROW_VELOCITY_MEMORY) {
+                for (u32 axis = 0; axis < 3; axis++) {
+                    sVrRasenganRememberedVelocity[axis] = velocity[axis];
+                }
+            } else {
+                vec3f_mul(
+                    sVrRasenganRememberedVelocity,
+                    VR_THROW_VELOCITY_MEMORY
+                );
+            }
+        }
+    }
+    return gestureHeld || retainChargedRasengan ||
+        sVrRasenganObject != NULL;
+}
+
 static bool vr_special_moves_try_quick_fireball(
     struct MarioState* mario
 ) {
     if (mario == NULL || mario->marioObj == NULL ||
         (mario->input & INPUT_B_PRESSED) == 0 ||
+        (vr_is_active() &&
+         configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON) ||
         !vr_special_moves_fire_flower_active() ||
         mario->heldObj != NULL || sVrTrackedHeldObject != NULL ||
         sVrFireballChargeObject != NULL ||
@@ -5200,6 +6526,11 @@ static bool vr_special_moves_update_fireball_hand(
     const Vec3f velocity,
     bool handBusy
 ) {
+    const u16 readyFrames = vr_special_moves_fireball_ready_frames();
+    const u16 formFrames = max(
+        1U,
+        (u32)readyFrames - VR_FIREBALL_FORM_DELAY_FRAMES
+    );
     const bool triggerPressed = state != NULL &&
         state->trigger >= VR_FIREBALL_TRIGGER_THRESHOLD;
     const bool gripPressed = state != NULL &&
@@ -5216,7 +6547,7 @@ static bool vr_special_moves_update_fireball_hand(
         const u16 previousFrames = sVrFireballChargeFrames;
         sVrFireballChargeFrames = (u16)min(
             sVrFireballChargeFrames + 1U,
-            VR_FIREBALL_READY_FRAMES
+            readyFrames
         );
 
         // Grip may be held before or after the trigger. The charge is driven
@@ -5258,7 +6589,7 @@ static bool vr_special_moves_update_fireball_hand(
             const f32 progress = clamp(
                 (f32)(sVrFireballChargeFrames -
                     VR_FIREBALL_FORM_DELAY_FRAMES) /
-                    (f32)VR_FIREBALL_FORM_FRAMES,
+                    (f32)formFrames,
                 0.0f,
                 1.0f
             );
@@ -5302,8 +6633,8 @@ static bool vr_special_moves_update_fireball_hand(
                 );
             }
         }
-        if (previousFrames < VR_FIREBALL_READY_FRAMES &&
-            sVrFireballChargeFrames >= VR_FIREBALL_READY_FRAMES) {
+        if (previousFrames < readyFrames &&
+            sVrFireballChargeFrames >= readyFrames) {
             vr_apply_haptic(
                 VR_CONTROLLER_RIGHT,
                 0.42f,
@@ -5319,7 +6650,7 @@ static bool vr_special_moves_update_fireball_hand(
             sVrFireballRememberedVelocity[1] * sVrFireballRememberedVelocity[1] +
             sVrFireballRememberedVelocity[2] * sVrFireballRememberedVelocity[2];
         if (sVrFireballChargeObject != NULL &&
-            sVrFireballChargeFrames >= VR_FIREBALL_READY_FRAMES &&
+            sVrFireballChargeFrames >= readyFrames &&
             speedSq >= VR_FIREBALL_MIN_THROW_SPEED * VR_FIREBALL_MIN_THROW_SPEED) {
             const u32 slot =
                 vr_special_moves_allocate_fireball_projectile();
@@ -5364,6 +6695,10 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         return;
     }
 
+    if (!configVrSpecialRasengan || !vr_is_active()) {
+        vr_special_moves_clear_rasen_shuriken_projectile();
+    }
+
     if (!configVrSpecialFireFlower || !vr_is_active() ||
         !vr_special_moves_fire_flower_online_allowed() ||
         (sVrFireFlowerPowered &&
@@ -5380,6 +6715,13 @@ void vr_hand_interaction_update(struct MarioState* mario) {
     }
     vr_special_moves_update_pickups(mario);
     vr_special_moves_update_projectiles(mario);
+    vr_special_moves_update_rasen_shuriken_projectile(mario);
+    if ((!configVrSpecialRasengan ||
+         vr_special_moves_fire_flower_active()) &&
+        sVrRasenganObject != NULL) {
+        vr_special_moves_clear_rasengan();
+    }
+    vr_special_moves_update_rasengan_impact(mario);
     vr_special_moves_try_quick_fireball(mario);
     vr_hand_interaction_apply_carry_speed(mario);
 
@@ -5413,6 +6755,9 @@ void vr_hand_interaction_update(struct MarioState* mario) {
     if (!trackingAvailable) {
         if (sVrFireballChargeObject != NULL) {
             vr_special_moves_clear_fireball_charge();
+        }
+        if (sVrRasenganObject != NULL) {
+            vr_special_moves_clear_rasengan();
         }
         if (sVrInteractionTrackingActive ||
             sVrTrackedHeldObject != NULL ||
@@ -5556,6 +6901,28 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         }
     }
 
+    struct VrControllerState rasenganLeftState = { 0 };
+    Vec3f rasenganLeftPosition = { 0.0f, 0.0f, 0.0f };
+    bool rasenganLeftPositionValid = false;
+    bool rasenganLeftHandBusy = true;
+    struct VrControllerState rasenganRightPreview = { 0 };
+    const bool rasenganRightPreviewValid =
+        vr_get_controller_state(
+            VR_CONTROLLER_RIGHT,
+            &rasenganRightPreview
+        );
+    const bool rasenganRightGestureReady =
+        configVrSpecialRasengan &&
+        !vr_special_moves_fire_flower_active() &&
+        rasenganRightPreviewValid &&
+        rasenganRightPreview.trigger >=
+            VR_FIREBALL_TRIGGER_THRESHOLD &&
+        (configVrSpecialRasenganGripTrigger
+            ? rasenganRightPreview.squeeze >=
+                VR_GRIP_CLOSE_THRESHOLD
+            : rasenganRightPreview.squeeze <=
+                VR_RASENGAN_RIGHT_OPEN_THRESHOLD);
+
     for (u32 hand = 0;
          hand < VR_CONTROLLER_COUNT;
          hand++) {
@@ -5617,6 +6984,44 @@ void vr_hand_interaction_update(struct MarioState* mario) {
             sVrTrackedHootHand == hand ||
             sVrTrackedAnchorHand == hand ||
             (sVrBowserGripMask & (u8)(1U << hand)) != 0;
+        if (hand == VR_CONTROLLER_LEFT) {
+            rasenganLeftState = state;
+            vec3f_copy(rasenganLeftPosition, position);
+            rasenganLeftPositionValid = positionValid;
+            rasenganLeftHandBusy = fireballHandBusy;
+        }
+        bool handIsChargingRasengan = false;
+        if (hand == VR_CONTROLLER_LEFT) {
+            handIsChargingRasengan =
+                !configVrSpecialRasenganGripTrigger &&
+                rasenganRightGestureReady &&
+                positionValid && !fireballHandBusy &&
+                state.squeeze >= VR_RASENGAN_LEFT_GRIP_THRESHOLD;
+        } else if (hand == VR_CONTROLLER_RIGHT && positionValid) {
+            handIsChargingRasengan =
+                vr_special_moves_update_rasengan_hand(
+                    mario,
+                    &state,
+                    position,
+                    velocity,
+                    fireballHandBusy,
+                &rasenganLeftState,
+                rasenganLeftPosition,
+                rasenganLeftPositionValid,
+                rasenganLeftHandBusy
+            );
+            if (handIsChargingRasengan) {
+                vr_special_moves_check_rasengan_contact(
+                    mario,
+                    velocity
+                );
+            }
+        }
+        if (hand == VR_CONTROLLER_RIGHT && !positionValid &&
+            sVrRasenganObject != NULL &&
+            sVrRasenganTarget == NULL) {
+            vr_special_moves_clear_rasengan();
+        }
         const bool handIsChargingFireball =
             hand == VR_CONTROLLER_RIGHT && positionValid &&
             vr_special_moves_update_fireball_hand(
@@ -5624,8 +7029,10 @@ void vr_hand_interaction_update(struct MarioState* mario) {
                 &state,
                 position,
                 velocity,
-                fireballHandBusy
+                fireballHandBusy || handIsChargingRasengan
             );
+        const bool handIsChargingSpecialMove =
+            handIsChargingRasengan || handIsChargingFireball;
         if (handIsHoldingVrItem) {
             sVrMotionDivePairFrames[hand] = 0;
         }
@@ -5721,7 +7128,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
             }
         } else if (canStartInteraction &&
                    !handIsHoldingVrItem &&
-                   !handIsChargingFireball &&
+                   !handIsChargingSpecialMove &&
                    sVrGripPressed[hand] &&
                    positionValid &&
                    climbPositionValid) {
@@ -5807,7 +7214,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
             vr_consume_physical_punch(hand);
         const bool handIsHoldingObject =
             handIsHoldingCap ||
-            handIsChargingFireball ||
+            handIsChargingSpecialMove ||
             (sVrTrackedHeldGripMask & (u8)(1U << hand)) != 0 ||
             sVrPhysicalClimbHands[hand] ||
             sVrTrackedHootHand == hand ||

@@ -33,6 +33,7 @@ bool vr_openxr_get_head_translation(float translation[3]);
 bool vr_openxr_get_calibrated_head_height(float* height);
 uint32_t vr_openxr_get_tracking_origin_generation(void);
 void vr_openxr_request_recenter(void);
+void vr_openxr_request_horizontal_recenter(void);
 bool vr_openxr_get_controller_state(
     uint32_t handIndex,
     struct VrControllerState* state

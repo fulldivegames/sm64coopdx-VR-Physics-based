@@ -812,11 +812,13 @@ static u32 sVrTorsoAlignmentCharacterTimestamp = 0;
 static f32 sVrTorsoAlignment = 0.0f;
 static bool sVrControllerCameraInverseValid = false;
 static u32 sVrControllerCameraInverseTimestamp = 0;
+static f32 sVrControllerCameraInverseDelta = -1.0f;
 static Mat4 sVrControllerCameraInverse;
 
 void vr_invalidate_first_person_tracked_world_cache(void) {
     sVrControllerCameraInverseValid = false;
     sVrControllerCameraInverseTimestamp = 0;
+    sVrControllerCameraInverseDelta = -1.0f;
     sVrBodyAnchorSampleValid = false;
     sVrBodyAnchorSampleTimestamp = 0;
     for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
@@ -845,6 +847,7 @@ void vr_reset_first_person_calibration(void) {
     sVrCameraYawSample = 0;
     sVrControllerCameraInverseValid = false;
     sVrControllerCameraInverseTimestamp = 0;
+    sVrControllerCameraInverseDelta = -1.0f;
 
     sVrHeadRotationMatrixValid = false;
     sVrBodyAnchorSampleValid = false;
@@ -934,7 +937,9 @@ void vr_handle_camera_mode_change(void) {
         // Third person is composed around Mario by the normal game camera.
         // Rebase the headset once on entry so a first-person room-space lean
         // or yaw offset cannot leave Mario permanently to one side.
-        vr_request_recenter();
+        // Recenter horizontal room position/yaw for third person without
+        // silently replacing the player's calibrated standing/seated height.
+        vr_request_horizontal_recenter();
     }
 }
 
@@ -2678,17 +2683,41 @@ bool vr_get_controller_world_fist_raw_from_state(
             backward[2] * knuckleOffset
     };
 
+    const f32 renderDelta = gRenderingInterpolated
+        ? clamp(gRenderingDelta, 0.0f, 1.0f)
+        : -1.0f;
     if (!sVrControllerCameraInverseValid ||
-        sVrControllerCameraInverseTimestamp != gGlobalTimer) {
+        sVrControllerCameraInverseTimestamp != gGlobalTimer ||
+        sVrControllerCameraInverseDelta != renderDelta) {
         Mat4 cameraMatrix;
+        Vec3f cameraPos;
+        Vec3f cameraFocus;
+        if (gRenderingInterpolated) {
+            delta_interpolate_vec3f(
+                cameraPos,
+                sCameraNode->prevPos,
+                sCameraNode->pos,
+                renderDelta
+            );
+            delta_interpolate_vec3f(
+                cameraFocus,
+                sCameraNode->prevFocus,
+                sCameraNode->focus,
+                renderDelta
+            );
+        } else {
+            vec3f_copy(cameraPos, sCameraNode->pos);
+            vec3f_copy(cameraFocus, sCameraNode->focus);
+        }
         vr_build_game_camera_matrix(
             cameraMatrix,
-            sCameraNode->pos,
-            sCameraNode->focus,
+            cameraPos,
+            cameraFocus,
             sCameraNode->roll
         );
         mtxf_inverse(sVrControllerCameraInverse, cameraMatrix);
         sVrControllerCameraInverseTimestamp = gGlobalTimer;
+        sVrControllerCameraInverseDelta = renderDelta;
         sVrControllerCameraInverseValid = true;
     }
 
@@ -3490,13 +3519,7 @@ void patch_mtx_vr_shared(void) {
         configVrMotionControllerInput) {
         vr_patch_controller_hand_matrices(0);
 
-        struct MtxInterp *heldInterp = sVrHeldMatrixHead;
-        Vec3f latePosition;
-        if (heldInterp != NULL &&
-            vr_hand_interaction_get_late_held_object_position(
-                heldInterp->owner,
-                latePosition
-            )) {
+        if (sVrHeldMatrixHead != NULL) {
             Vec3f cameraPos;
             Vec3f cameraFocus;
             Mat4 cameraMatrix;
@@ -3521,19 +3544,32 @@ void patch_mtx_vr_shared(void) {
                 );
             }
 
-            Vec3f heldRenderBase;
-            delta_interpolate_vec3f(
-                heldRenderBase,
-                heldInterp->owner->header.gfx.prevPos,
-                heldInterp->owner->header.gfx.pos,
-                gRenderingDelta
-            );
-            const f32 dx = latePosition[0] - heldRenderBase[0];
-            const f32 dy = latePosition[1] - heldRenderBase[1];
-            const f32 dz = latePosition[2] - heldRenderBase[2];
-            for (struct MtxInterp *interp = heldInterp;
+            // Sample and patch every attachment independently. Besides being
+            // correct when multiple render layers/attachments are present,
+            // this keeps the visual root on the latest predicted OpenXR hand
+            // pose at the headset refresh rate. Gameplay state and release
+            // velocity remain on the native simulation tick.
+            for (struct MtxInterp *interp = sVrHeldMatrixHead;
                  interp != NULL;
                  interp = interp->nextVrHeld) {
+                Vec3f latePosition;
+                if (interp->owner == NULL ||
+                    !vr_hand_interaction_get_late_held_object_position(
+                        interp->owner,
+                        latePosition
+                    )) {
+                    continue;
+                }
+                Vec3f heldRenderBase;
+                delta_interpolate_vec3f(
+                    heldRenderBase,
+                    interp->owner->header.gfx.prevPos,
+                    interp->owner->header.gfx.pos,
+                    gRenderingDelta
+                );
+                const f32 dx = latePosition[0] - heldRenderBase[0];
+                const f32 dy = latePosition[1] - heldRenderBase[1];
+                const f32 dz = latePosition[2] - heldRenderBase[2];
                 if (interp->usingCamSpace && sCameraNode != NULL) {
                     interp->interp.m[3][0] +=
                         dx * cameraMatrix[0][0] +
@@ -3909,10 +3945,10 @@ static void vr_append_controller_hands(
     );
     gSPDisplayList(gDisplayListHead++, obj_sanitize_gfx);
 
-    // The floating gloves render after the normal scene graph, so explicitly
-    // reload the local player's complete palette. This keeps the gloves—and
-    // future VR-only body parts—matched to the player's selected colors even
-    // when another network player's model was rendered most recently.
+    // The floating gloves render after the scene's opaque/alpha geometry but
+    // before its transparent effects. Explicitly reload the local player's
+    // complete palette so the gloves—and future VR-only body parts—stay
+    // matched even when another network player rendered most recently.
     Gfx* localPlayerColors =
         mario_create_local_player_colors_dl();
     if (localPlayerColors != NULL) {
@@ -4078,6 +4114,19 @@ static void geo_process_master_list_sub(struct GraphNodeMasterList *node) {
     }
 
     for (s32 i = 0; i < GFX_NUM_MASTER_LISTS; i++) {
+        // Floating gloves are opaque and late-latched, but historically they
+        // were appended after every transparent object. That made them cover
+        // a nearer translucent Rasengan solely because of command order.
+        // Emit them immediately before the transparent layers instead. Their
+        // normal opaque depth write then lets transparent effects blend and
+        // occlude correctly without making multi-shell spheres self-occlude.
+        if (i == LAYER_TRANSPARENT) {
+            vr_append_controller_hands(
+                enableZBuffer,
+                modeList,
+                mode2List
+            );
+        }
         if ((currList = node->listHeads[i]) != NULL) {
             gDPSetRenderMode(gDisplayListHead++, modeList->modes[i], mode2List->modes[i]);
             while (currList != NULL) {
@@ -4114,11 +4163,6 @@ static void geo_process_master_list_sub(struct GraphNodeMasterList *node) {
             }
         }
     }
-    vr_append_controller_hands(
-        enableZBuffer,
-        modeList,
-        mode2List
-    );
     if (enableZBuffer != 0) {
         gDPPipeSync(gDisplayListHead++);
         gSPClearGeometryMode(gDisplayListHead++, G_ZBUFFER);
@@ -4139,6 +4183,10 @@ static bool vr_hide_local_first_person_mario_part(void) {
 
     const s32 animPart = gCurMarioBodyState->currAnimPart;
     const u32 action = gMarioStates[0].action;
+    const bool ghostButtonPunch =
+        configVrImmersiveGhostPunchArm &&
+        (gPlayer1Controller->buttonDown & B_BUTTON) != 0 &&
+        (action == ACT_PUNCHING || action == ACT_MOVE_PUNCHING);
     const bool hideMountedBody =
         !configVrExperimentalMountedBody &&
         (action == ACT_FLYING ||
@@ -4185,12 +4233,12 @@ static bool vr_hide_local_first_person_mario_part(void) {
         case MARIO_ANIM_PART_LEFT_FOREARM:
         case MARIO_ANIM_PART_RIGHT_ARM:
         case MARIO_ANIM_PART_RIGHT_FOREARM:
-            return !configVrExperimentalArmsMode;
+            return !configVrExperimentalArmsMode && !ghostButtonPunch;
         case MARIO_ANIM_PART_LEFT_HAND:
         case MARIO_ANIM_PART_RIGHT_HAND:
             // The independently tracked floating gloves remain the hands in
             // both normal first person and Arms Mode.
-            return true;
+            return !ghostButtonPunch;
         case MARIO_ANIM_PART_ROOT:
         case MARIO_ANIM_PART_BUTT:
         case MARIO_ANIM_PART_TORSO:
@@ -4229,6 +4277,43 @@ static bool vr_hide_local_first_person_mario_part(void) {
     }
 }
 
+static bool vr_ghost_button_punch_part(void) {
+    if (!sVrFilteringLocalMarioBody ||
+        !configVrImmersiveGhostPunchArm ||
+        gCurMarioBodyState == NULL ||
+        (gPlayer1Controller->buttonDown & B_BUTTON) == 0) {
+        return false;
+    }
+    const u32 action = gMarioStates[0].action;
+    if (action != ACT_PUNCHING && action != ACT_MOVE_PUNCHING) {
+        return false;
+    }
+    const u32 part = gCurMarioBodyState->currAnimPart;
+    return part == MARIO_ANIM_PART_LEFT_ARM ||
+        part == MARIO_ANIM_PART_LEFT_FOREARM ||
+        part == MARIO_ANIM_PART_LEFT_HAND ||
+        part == MARIO_ANIM_PART_RIGHT_ARM ||
+        part == MARIO_ANIM_PART_RIGHT_FOREARM ||
+        part == MARIO_ANIM_PART_RIGHT_HAND;
+}
+
+static Gfx* vr_make_ghost_button_punch_display_list(void* displayList) {
+    Gfx* gfxHead = alloc_display_list(7 * sizeof(*gfxHead));
+    if (gfxHead == NULL) {
+        return NULL;
+    }
+    Gfx* gfx = gfxHead;
+    const u8 opacity = (u8)((MIN(configVrGhostPunchArmOpacity, 100U) * 255U + 50U) / 100U);
+    gDPPipeSync(gfx++);
+    gDPSetAlphaCompare(gfx++, G_AC_DITHER);
+    gDPSetEnvColor(gfx++, 255, 255, 255, opacity);
+    gSPDisplayList(gfx++, displayList);
+    gDPSetEnvColor(gfx++, 255, 255, 255, 255);
+    gDPSetAlphaCompare(gfx++, G_AC_NONE);
+    gSPEndDisplayList(gfx++);
+    return gfxHead;
+}
+
 static void geo_append_display_list(void *displayList, s16 layer) {
     // First-person VR uses the regular animated Mario model for the torso and
     // lower body, but tracked gloves replace its head, arms, and hands. Keep
@@ -4236,6 +4321,16 @@ static void geo_append_display_list(void *displayList, s16 layer) {
     // remain synchronized; only suppress their actual display lists here.
     if (vr_hide_local_first_person_mario_part()) {
         return;
+    }
+
+    if (vr_ghost_button_punch_part()) {
+        Gfx* ghostDisplayList =
+            vr_make_ghost_button_punch_display_list(displayList);
+        if (ghostDisplayList == NULL) {
+            return;
+        }
+        displayList = ghostDisplayList;
+        layer = LAYER_TRANSPARENT;
     }
 
 #ifdef F3DEX_GBI_2
@@ -5351,7 +5446,13 @@ static f32 vr_get_local_mario_torso_alignment(
         }
     }
 
-    return sVrTorsoAlignment;
+    // Keep the former Mario body relationship as an opt-in compatibility
+    // offset without rewriting the player's saved camera-height profile.
+    const f32 previousHeightOffset =
+        configVrPreviousBodyHeight && characterIndex == CT_MARIO
+            ? 20.0f
+            : 0.0f;
+    return sVrTorsoAlignment + previousHeightOffset;
 }
 
 static void vr_adjust_local_mario_body_transform(
@@ -5846,7 +5947,12 @@ static void geo_process_object(struct Object *node) {
           !hidePhysicalClimbBody) ||
          configVrExperimentalTrueFirstPerson ||
          vr_first_person_true_diving_active() ||
-         configVrExperimentalArmsMode);
+        configVrExperimentalArmsMode ||
+        (configVrImmersiveGhostPunchArm &&
+         gPlayer1Controller != NULL &&
+         (gPlayer1Controller->buttonDown & B_BUTTON) != 0 &&
+         (gMarioStates[0].action == ACT_PUNCHING ||
+          gMarioStates[0].action == ACT_MOVE_PUNCHING)));
     const bool hideLocalMarioInVrFirstPerson =
         localMarioInVrFirstPerson &&
         !processLocalMarioVrSkeleton;

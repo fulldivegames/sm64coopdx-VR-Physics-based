@@ -22,7 +22,7 @@
 #define VR_CAMERA_HEIGHT_MAX 1000U
 #define VR_CAMERA_HEIGHT_LEGACY_CENTER 500U
 #define VR_CAMERA_HAT_INSET 2U
-#define VR_HEAD_ATTACHMENT_HEIGHT_MARIO   155U
+#define VR_HEAD_ATTACHMENT_HEIGHT_MARIO   135U
 #define VR_HEAD_ATTACHMENT_HEIGHT_LUIGI   171U
 #define VR_HEAD_ATTACHMENT_HEIGHT_TOAD     83U
 #define VR_HEAD_ATTACHMENT_HEIGHT_WALUIGI 208U
@@ -144,6 +144,7 @@ extern unsigned int configVrCameraMode;
 extern unsigned int configVrCameraDistance;
 extern unsigned int configVrCameraHeight;
 extern unsigned int configVrCameraDepth;
+extern bool         configVrPreviousBodyHeight;
 unsigned int* config_vr_camera_height_for_character(
     unsigned int characterIndex
 );
@@ -177,6 +178,7 @@ extern unsigned int configVrCrouchBinding;
 extern unsigned int configVrLBinding;
 extern unsigned int configVrRBinding;
 extern unsigned int configVrPauseBinding;
+extern unsigned int configVrSpecialBinding;
 extern bool         configVrPhysicalPunching;
 extern bool         configVrPhysicalGrabbing;
 extern bool         configVrPhysicalClimbing;
@@ -190,6 +192,12 @@ extern bool         configVrCheatFreeFly;
 extern bool         configVrCheatNoFireFlowerTimer;
 extern bool         configVrSpecialFireFlower;
 extern bool         configVrSpecialFireFlowerMusic;
+extern bool         configVrSpecialRasengan;
+extern bool         configVrSpecialRasenganGripTrigger;
+extern bool         configVrRasenShurikenOverheadCharge;
+extern unsigned int configVrFireballChargeTime;
+extern unsigned int configVrRasenganChargeTime;
+extern unsigned int configVrRasenShurikenChargeTime;
 extern unsigned int configVrFlyingSpeed;
 extern unsigned int configVrSwimmingSpeed;
 extern unsigned int configVrRunningSpeed;
@@ -203,6 +211,7 @@ extern bool         configVrImmersiveRemovableCap;
 extern bool         configVrImmersiveLookDownTransparency;
 extern bool         configVrImmersiveCarrySpeed;
 extern bool         configVrImmersiveStarSpawnFocus;
+extern bool         configVrImmersiveGhostPunchArm;
 extern bool         configVrMovementOverhaul;
 extern bool         configVrMarioPunchSound;
 extern bool         configVrMotionControlledDive;
@@ -231,6 +240,7 @@ extern bool         configVrFirstPersonBody;
 extern bool         configVrHideTorsoWhileCrawling;
 extern bool         configVrFeetOnlyBody;
 extern unsigned int configVrBodyOpacity;
+extern unsigned int configVrGhostPunchArmOpacity;
 extern unsigned int configVrLookDownTransparencyAngle;
 extern unsigned int configVrTorsoHeight;
 extern unsigned int configVrLegHeight;

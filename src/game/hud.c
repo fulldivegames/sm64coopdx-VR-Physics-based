@@ -888,6 +888,10 @@ void render_hud(void) {
         gMarioStates[0].action == ACT_IN_CANNON &&
         gCurrentArea != NULL &&
         gCurrentArea->camera != NULL;
+    // The VR FPS counter is owned by the VR HUD, not by a level or Lua mod's
+    // choice to hide the native game HUD. Keep the render pass alive for it.
+    const bool vrFpsActive = vr_is_active() && configVrShowFps &&
+        !gDjuiInMainMenu;
 
     if (hudDisplayFlags == HUD_DISPLAY_NONE) {
         sPowerMeterHUD.animation = POWER_METER_HIDDEN;
@@ -897,7 +901,8 @@ void render_hud(void) {
     if (hudDisplayFlags == HUD_DISPLAY_NONE &&
         !faceStuckBlackout &&
         !underwaterFilter &&
-        !cannonHudActive) {
+        !cannonHudActive &&
+        !vrFpsActive) {
         return;
     }
     {
@@ -963,7 +968,7 @@ void render_hud(void) {
         if (hudDisplayFlags & HUD_DISPLAY_FLAG_LIVES && showHud) {
             render_hud_mario_lives();
         }
-        if (showHud) {
+        if (vrFpsActive) {
             render_vr_hud_fps();
         }
 

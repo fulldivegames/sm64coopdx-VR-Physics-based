@@ -619,5 +619,7 @@
 #define MODEL_VR_TWIRL_TORNADO            0xF8 // vr_twirl_tornado_geo
 #define MODEL_VR_FIRE_FLOWER               0xF9 // vr_fire_flower_geo
 #define MODEL_VR_FIREBALL                  0xFA // vr_fireball_geo
+#define MODEL_VR_RASENGAN                  0xFB // vr_rasengan_geo
+#define MODEL_VR_RASEN_SHURIKEN             0xFC // vr_rasen_shuriken_geo
 
 #endif // MODEL_IDS_H

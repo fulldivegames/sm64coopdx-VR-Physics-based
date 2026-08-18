@@ -188,6 +188,7 @@ static XrQuaternionf sHeadOrientationReference = { 0 };
 static XrVector3f sHeadPositionReference = { 0 };
 static bool sHeadOrientationReferenceValid = false;
 static bool sVrEnterRecenterPending = false;
+static bool sPreserveRecenterHeight = false;
 static bool sTrackingOriginRecenterPending = false;
 static XrTime sTrackingOriginRecenterTime = 0;
 static uint32_t sTrackingOriginGeneration = 0;
@@ -3556,13 +3557,16 @@ bool vr_openxr_begin_frame(void) {
         sHeadPositionReference.x =
             (sViews[0].pose.position.x +
              sViews[1].pose.position.x) * 0.5f;
-        sHeadPositionReference.y =
-            (sViews[0].pose.position.y +
-             sViews[1].pose.position.y) * 0.5f;
+        if (!sPreserveRecenterHeight) {
+            sHeadPositionReference.y =
+                (sViews[0].pose.position.y +
+                 sViews[1].pose.position.y) * 0.5f;
+        }
         sHeadPositionReference.z =
             (sViews[0].pose.position.z +
              sViews[1].pose.position.z) * 0.5f;
         sHeadOrientationReferenceValid = true;
+        sPreserveRecenterHeight = false;
 
         printf(
             "[VR] Headset origin centered for camera "
@@ -3800,6 +3804,14 @@ void vr_openxr_request_recenter(void) {
     // Keep this pending across instance startup/session creation. It is
     // consumed only after OpenXR supplies a valid pose in the FOCUSED state.
     sVrEnterRecenterPending = true;
+    sPreserveRecenterHeight = false;
+    sHeadOrientationReferenceValid = false;
+    sCachedTrackingValid = false;
+}
+
+void vr_openxr_request_horizontal_recenter(void) {
+    sVrEnterRecenterPending = true;
+    sPreserveRecenterHeight = sHeadOrientationReferenceValid;
     sHeadOrientationReferenceValid = false;
     sCachedTrackingValid = false;
 }
@@ -4078,6 +4090,9 @@ uint32_t vr_openxr_get_tracking_origin_generation(void) {
 }
 
 void vr_openxr_request_recenter(void) {
+}
+
+void vr_openxr_request_horizontal_recenter(void) {
 }
 
 bool vr_openxr_get_controller_state(

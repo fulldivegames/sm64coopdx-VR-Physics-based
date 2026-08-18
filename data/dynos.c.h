@@ -27,6 +27,7 @@ bool dynos_warp_to_castle(s32 aLevel);
 
 // -- dynos packs -- //
 void dynos_gfx_init(void);
+void dynos_gfx_warmup_loaded_pack_shaders(void);
 int dynos_pack_get_count(void);
 const char* dynos_pack_get_name(s32 index);
 bool dynos_pack_get_enabled(s32 index);

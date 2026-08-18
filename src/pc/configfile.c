@@ -90,6 +90,7 @@ unsigned int configVrCameraMode                   = VR_CAMERA_MODE_FIRST_PERSON;
 unsigned int configVrCameraDistance               = 100;
 unsigned int configVrCameraHeight                 = VR_CAMERA_HEIGHT_DEFAULT_MARIO;
 unsigned int configVrCameraDepth                  = VR_CAMERA_DEPTH_CENTER;
+bool         configVrPreviousBodyHeight           = false;
 static unsigned int sConfigVrCameraHeightLuigi    = VR_CAMERA_HEIGHT_DEFAULT_LUIGI;
 static unsigned int sConfigVrCameraHeightToad     = VR_CAMERA_HEIGHT_DEFAULT_TOAD;
 static unsigned int sConfigVrCameraHeightWaluigi  = VR_CAMERA_HEIGHT_DEFAULT_WALUIGI;
@@ -105,6 +106,12 @@ bool         configVrFlameOptimizations           = false;
 bool         configVrUltraPerformanceMode         = false;
 bool         configVrSpecialFireFlower             = true;
 bool         configVrSpecialFireFlowerMusic        = true;
+bool         configVrSpecialRasengan               = true;
+bool         configVrSpecialRasenganGripTrigger    = false;
+bool         configVrRasenShurikenOverheadCharge   = true;
+unsigned int configVrFireballChargeTime            = 15;
+unsigned int configVrRasenganChargeTime            = 30;
+unsigned int configVrRasenShurikenChargeTime       = 20;
 bool         configVrDisableFog                   = true;
 bool         configVrDesktopMirror                = true;
 unsigned int configVrDesktopMirrorFps             = 60;
@@ -121,6 +128,7 @@ unsigned int configVrCrouchBinding                = VR_CONTROLLER_BINDING_LEFT_T
 unsigned int configVrLBinding                     = VR_CONTROLLER_BINDING_LEFT_STICK_CLICK;
 unsigned int configVrRBinding                     = VR_CONTROLLER_BINDING_RIGHT_STICK_CLICK;
 unsigned int configVrPauseBinding                 = VR_CONTROLLER_BINDING_LEFT_MENU;
+unsigned int configVrSpecialBinding               = VR_CONTROLLER_BINDING_LEFT_SECONDARY;
 bool         configVrPhysicalPunching             = true;
 bool         configVrPhysicalGrabbing             = true;
 bool         configVrPhysicalClimbing             = true;
@@ -145,6 +153,7 @@ bool         configVrImmersiveRemovableCap        = false;
 bool         configVrImmersiveLookDownTransparency = true;
 bool         configVrImmersiveCarrySpeed          = false;
 bool         configVrImmersiveStarSpawnFocus       = true;
+bool         configVrImmersiveGhostPunchArm        = true;
 bool         configVrMovementOverhaul             = false;
 bool         configVrMarioPunchSound              = true;
 bool         configVrMotionControlledDive         = true;
@@ -174,6 +183,7 @@ bool         configVrFirstPersonBody              = true;
 bool         configVrHideTorsoWhileCrawling       = true;
 bool         configVrFeetOnlyBody                 = false;
 unsigned int configVrBodyOpacity                  = 100;
+unsigned int configVrGhostPunchArmOpacity         = 25;
 unsigned int configVrLookDownTransparencyAngle    = 25;
 unsigned int configVrTorsoHeight                  = 100;
 unsigned int configVrLegHeight                    = 100;
@@ -431,6 +441,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_camera_height_wario",         .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrCameraHeightWario},
     {.name = "vr_camera_height_version",       .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrCameraHeightVersion},
     {.name = "vr_camera_depth",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrCameraDepth},
+    {.name = "vr_previous_body_height",        .type = CONFIG_TYPE_BOOL, .boolValue = &configVrPreviousBodyHeight},
     {.name = "vr_movement_calibration",        .type = CONFIG_TYPE_UINT, .uintValue = &configVrMovementCalibration},
     {.name = "vr_facing_source",               .type = CONFIG_TYPE_UINT, .uintValue = &configVrFacingSource},
     {.name = "vr_fov",                         .type = CONFIG_TYPE_UINT, .uintValue = &configVrFov},
@@ -441,6 +452,12 @@ static const struct ConfigOption options[] = {
     {.name = "vr_ultra_performance_mode",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrUltraPerformanceMode},
     {.name = "vr_special_fire_flower",          .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialFireFlower},
     {.name = "vr_special_fire_flower_music",    .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialFireFlowerMusic},
+    {.name = "vr_special_rasengan",             .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialRasengan},
+    {.name = "vr_special_rasengan_grip_trigger",.type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialRasenganGripTrigger},
+    {.name = "vr_rasen_shuriken_overhead_charge",.type = CONFIG_TYPE_BOOL, .boolValue = &configVrRasenShurikenOverheadCharge},
+    {.name = "vr_fireball_charge_time",          .type = CONFIG_TYPE_UINT, .uintValue = &configVrFireballChargeTime},
+    {.name = "vr_rasengan_charge_time",          .type = CONFIG_TYPE_UINT, .uintValue = &configVrRasenganChargeTime},
+    {.name = "vr_rasen_shuriken_charge_time",    .type = CONFIG_TYPE_UINT, .uintValue = &configVrRasenShurikenChargeTime},
     {.name = "vr_disable_fog",                  .type = CONFIG_TYPE_BOOL, .boolValue = &configVrDisableFog},
     {.name = "vr_desktop_mirror",              .type = CONFIG_TYPE_BOOL, .boolValue = &configVrDesktopMirror},
     {.name = "vr_desktop_mirror_fps",          .type = CONFIG_TYPE_UINT, .uintValue = &configVrDesktopMirrorFps},
@@ -457,6 +474,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_l_binding",                   .type = CONFIG_TYPE_UINT, .uintValue = &configVrLBinding},
     {.name = "vr_r_binding",                   .type = CONFIG_TYPE_UINT, .uintValue = &configVrRBinding},
     {.name = "vr_pause_binding",               .type = CONFIG_TYPE_UINT, .uintValue = &configVrPauseBinding},
+    {.name = "vr_special_binding",             .type = CONFIG_TYPE_UINT, .uintValue = &configVrSpecialBinding},
     {.name = "vr_physical_punching",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrPhysicalPunching},
     {.name = "vr_physical_grabbing",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrPhysicalGrabbing},
     {.name = "vr_physical_climbing",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrPhysicalClimbing},
@@ -481,6 +499,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_immersive_look_down_transparency", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveLookDownTransparency},
     {.name = "vr_immersive_carry_speed",         .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveCarrySpeed},
     {.name = "vr_immersive_star_spawn_focus",    .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveStarSpawnFocus},
+    {.name = "vr_immersive_ghost_punch_arm",     .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveGhostPunchArm},
     {.name = "vr_mario_punch_sound",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMarioPunchSound},
     {.name = "vr_motion_controlled_dive",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControlledDive},
     {.name = "vr_motion_controlled_ground_dive",.type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControlledGroundDive},
@@ -509,6 +528,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_hide_torso_while_crawling",   .type = CONFIG_TYPE_BOOL, .boolValue = &configVrHideTorsoWhileCrawling},
     {.name = "vr_feet_only_body",              .type = CONFIG_TYPE_BOOL, .boolValue = &configVrFeetOnlyBody},
     {.name = "vr_body_opacity",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrBodyOpacity},
+    {.name = "vr_ghost_punch_arm_opacity",     .type = CONFIG_TYPE_UINT, .uintValue = &configVrGhostPunchArmOpacity},
     {.name = "vr_look_down_transparency_angle", .type = CONFIG_TYPE_UINT, .uintValue = &configVrLookDownTransparencyAngle},
     {.name = "vr_torso_height",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrTorsoHeight},
     {.name = "vr_leg_height",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrLegHeight},

@@ -14,7 +14,7 @@
 </p>
 
 > [!IMPORTANT]
-> The current public release is **v0.7.0**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur.
+> The current public release is **v0.7.1**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur.
 
 SM64 Co-Op DX VR currently targets 64-bit Windows, OpenGL, and OpenXR. It keeps the original game's flat-screen mode and multiplayer foundation while adding native stereoscopic rendering, 6DoF tracking, VR-aware cameras, remappable motion-controller input, physical interactions, comfort options, and extensive calibration settings.
 
@@ -82,7 +82,7 @@ The lower-left corner of the main menu shows the installed VR version and checks
 The Windows release keeps the normal SM64 Co-Op DX mod layout inside the extracted game folder:
 
 ```text
-SM64-Co-Op-DX-VR-Windows-v0.7.0/
+SM64-Co-Op-DX-VR-Windows-v0.7.1/
 ├── mods/
 ├── dynos/
 │   └── packs/
@@ -198,6 +198,18 @@ Third Person Mode centers the stereoscopic VR view on Mario and is intended for 
 
 **True Diving** applies the animated dive attachment only during a dive. Both options can cause discomfort or motion sickness and are disabled by default.
 
+## Power-ups and special moves
+
+### Fire Flower
+
+Fire Flower is enabled by default under **VR > Special Moves**. Supported coin/1-Up item boxes and cork boxes can release a flower. While powered up, close the right glove with Grip, hold Right Trigger to charge an orange fireball, then physically swing and release Trigger to throw it. The normal Attack button fires a quick shot outside first-person mode. Fire Mario's palette and music end with the power-up; **Cheats** also provides **Spawn Fire Flower** and **No Fire Flower Timer**.
+
+### Rasengan and Rasen-Shuriken
+
+**Rasengan / Rasen-Shuriken** is enabled by default under **Special Moves**. Hold Right Trigger with an open right hand and circle a closed, empty left glove around it until the Rasengan finishes charging. Keep holding Right Trigger to retain it, then touch a supported enemy or breakable box with the sphere. The optional **Rasengan Grip + Trigger** setting replaces the circling gesture.
+
+With a charged Rasengan held, hold the mapped **Special** button—Left Secondary by default—while keeping the hand above the headset when **Rasen-Shuriken Overhead Charge** is enabled. Once charged, physically swing and release Right Trigger to throw it. It flies until it strikes geometry or a supported enemy, then expands into an area-damage sphere. Charge-time sliders are available in **Cheats**. Boss and actor-specific protections still follow the move's built-in rules.
+
 ## Core VR features
 
 - Native stereoscopic OpenXR rendering with separate runtime-sized eye swapchains
@@ -239,7 +251,7 @@ The headset remains free inside the cannon. With the default Aim Direction Cone 
 
 | Submenu | Main controls |
 | --- | --- |
-| Camera Settings | Camera mode, third-person distance, character-specific first-person height, forward/back placement, headset/left-hand/right-hand facing source, facing calibration, FOV, and brightness |
+| Camera Settings | Camera mode, third-person distance, character-specific first-person height, forward/back placement, previous Mario body height, headset/left-hand/right-hand facing source, facing calibration, FOV, and brightness |
 | Controller Settings | Motion-controller input, movement/camera stick selection, action mappings, optional trigger punching, and optional Right Trigger Jump |
 | Motion Control Settings | Physical punches, physical grabbing, physical climbing, standard grabbing/climbing, swing release, motion dives, jump turning, punch thresholds, collider length, and Bowser tuning |
 | Model Settings | Body and Hand pages; torso/legs, optional feet-only view, crawl, ledge, pole-flip, and mounted-action visibility, body placement, glove size, rotation, and position |
@@ -247,7 +259,7 @@ The headset remains free inside the cannon. With the default Aim Direction Cone 
 | HUD Settings | HUD opacity and corner spread |
 | Immersion | Crouch/sand camera, face-stuck blackout, cannon cone, 3D sound, ledge camera, underwater filter, side-flip follow, wall-jump turn, and physical crouching |
 | Effects | Twirl Tornado Effect |
-| Cheats | Climb Any Wall or Ceiling plus flying, swimming, and running speed controls |
+| Cheats | Level Select, Climb Any Wall or Ceiling, special-move charge times, and flying/swimming/running speed controls |
 | Experimental | Flat first person, True First Person, True Diving (Camera Effect), Arms Mode, and original Mario movement |
 
 Every VR submenu includes **Set to Defaults**.
@@ -269,7 +281,17 @@ v0.6.27 expands compatibility around mod discovery, Lua HUD/menu presentation, c
 
 Compatibility is not universal. Mods that replace camera, player action, input, HUD, rendering, collision, or character geometry can conflict with VR behavior. Install one at a time when troubleshooting and report the exact mod name/version, headset/runtime, and reproduction steps. A mod working in normal SM64 Co-Op DX does not guarantee that every first-person physical interaction will behave correctly.
 
-## v0.7.0 — Chat and Fireball Update
+## v0.7.1 — Special Moves and Level Select Update
+
+- Added the default-on **Rasengan / Rasen-Shuriken** special move with physical charging, headset-rate animation, hand contact attacks, physical throwing, collision-triggered area damage, protected-boss rules, and configurable charge controls
+- Added **Cheats > Level Select**, a scrollable in-game list covering the castle, all 15 main courses, Bowser stages and arenas, secret/cap stages, and the ending; normal courses use their native Act Select entry path
+- Kept the corrected first-person Mario body relationship as the default and added **Camera Settings > Use Previous Mario Body Height** for players who prefer the earlier height
+- Improved tracked hand/held-effect interpolation at 72, 90, and 120 Hz while preserving the original 30 Hz gameplay simulation
+- Added and refined color-palette selection, DynOS refresh, modded HUD placement, ghost button-punch presentation, Fire Flower behavior, enemy interactions, and VR camera stability
+
+## Previous Release Notes
+
+### v0.7.0 — Chat and Fireball Update
 
 - Added a controller-friendly in-game Chat HUD with retained recent messages, an anchored on-screen keyboard, Enter-to-send behavior, and reliable B/Back navigation
 - Added a **Players** HUD directly below Chat, showing connected player names, locations, and ping; press B to return
@@ -280,8 +302,6 @@ Compatibility is not universal. Mods that replace camera, player action, input, 
 - Expanded fireball collision coverage, including Chain Chomp and Mr. Blizzard. Mr. Blizzard explodes, disappears, and respawns after 30 seconds
 - Replaced the VR Act Select 3D stars with readable overlay stars, revealing completed missions and the next available mission in sequence
 - Continued high-resolution presentation fixes for the keyboard, main-menu logo, update text, Chat, and VR menu overlays
-
-## Previous Release Notes
 
 ### v0.6.27 — Co-op and Keyboards Update
 
