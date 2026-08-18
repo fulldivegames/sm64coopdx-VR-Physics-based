@@ -5,11 +5,7 @@
 
 // Public release version for the VR fork. Keep this separate from
 // SM64COOPDX_VERSION because the latter is part of multiplayer compatibility.
-#if defined(__ANDROID__)
-#define SM64COOPDX_VR_VERSION "v0.7.2"
-#else
-#define SM64COOPDX_VR_VERSION "v0.4.0"
-#endif
+#define SM64COOPDX_VR_VERSION "v0.7.3"
 
 // internal version
 #define VERSION_TEXT "v"
@@ -35,13 +31,7 @@
 #define GAME_NAME "sm64coopdx-intl"
 #define WINDOW_NAME "Super Mario 64 Coop Deluxe (INTL)"
 #else
-#ifdef __ANDROID__
-// Keep public standalone lobbies separate. Private CoopNet rooms explicitly
-// use the desktop namespace so matching Quest and PC builds can cross-play.
-#define GAME_NAME "sm64coop-android"
-#else
 #define GAME_NAME "sm64coopdx"
-#endif
 #define WINDOW_NAME "SM64 Co-Op DX VR"
 #endif
 

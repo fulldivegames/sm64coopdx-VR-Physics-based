@@ -20,6 +20,7 @@
 #include "platform_displacement.h"
 #include "profiler.h"
 #include "rendering_graph_node.h"
+#include "vr_hand_interaction.h"
 #include "spawn_object.h"
 #include "first_person_cam.h"
 #include "engine/math_util.h"
@@ -718,6 +719,13 @@ void update_objects(UNUSED s32 unused) {
     //! If the platform object unloaded and a different object took its place,
     //  displacement could be applied incorrectly
     apply_mario_platform_displacement();
+
+    // Transfer horizontal room-scale HMD movement into the authoritative
+    // local Mario position before collision pairs are built. Doing this in
+    // Mario's later interaction pass leaves enemy contacts one gameplay tick
+    // behind the player's real position (most obvious when a Goomba walks
+    // underneath the headset).
+    vr_hand_interaction_update_roomscale_body(gMarioState);
 
     // Detect which objects are intersecting
     cycleCounts[3] = get_clock_difference(cycleCounts[0]);
