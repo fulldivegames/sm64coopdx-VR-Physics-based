@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>PC VR edition</strong> &nbsp;|&nbsp;
-  <a href="https://github.com/fulldivegames/sm64coopdx-VR-Standalone"><strong>Quest standalone edition</strong></a>
+  <a href="https://github.com/fulldivegames/sm64coopdx-VR-Standalone-Physics-based"><strong>Quest standalone edition</strong></a>
 </p>
 
 <h1 align="center">sm64coopdx-VR (Physics-based)</h1>
@@ -36,7 +36,7 @@ The current PC build has been tested most often on a Meta Quest 3 through Virtua
 
 ### First-time setup
 
-1. Open the [latest verified release](https://github.com/fulldivegames/sm64coopdx-VR/releases/latest).
+1. Open the [latest verified release](https://github.com/fulldivegames/sm64coopdx-VR-Physics-based/releases/latest).
 2. Under **Assets**, download the Windows ZIP named similar to `SM64-Co-Op-DX-VR-Windows-vX.Y.Z.zip`.
 3. Right-click the downloaded ZIP, select **Extract All**, and extract the complete archive to a normal writable folder. Do not run the game from inside the ZIP.
 4. Start the software used by your headset, then make sure the OpenXR runtime you intend to use is active. For example, select Virtual Desktop's OpenXR runtime before launching the game if you use Virtual Desktop.
@@ -380,7 +380,7 @@ Players should use the release ZIP. Build from source only when modifying or tes
 Open an **MSYS2 MinGW64** terminal, then run:
 
 ```sh
-git clone --branch vr https://github.com/fulldivegames/sm64coopdx-VR.git
+git clone --branch vr https://github.com/fulldivegames/sm64coopdx-VR-Physics-based.git
 cd sm64coopdx-VR
 make -j
 ```
