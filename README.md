@@ -28,7 +28,7 @@ The release is a single APK. Players do not need Git, Android Studio, Gradle, AD
 
 ### Requirements
 
-- Meta Quest 3 (the only tested standalone headset)
+- Meta Quest 3 (Quest 2 untested by me, but should run fairly well. There are also performance options!)
 - Developer Mode enabled for the headset
 - [SideQuest](https://sidequestvr.com/setup-howto) installed on a computer
 - A USB data cable or an already configured SideQuest wireless connection
