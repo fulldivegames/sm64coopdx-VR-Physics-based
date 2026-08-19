@@ -484,6 +484,14 @@ void init_mario_after_warp(void) {
 
     if (gCurrentArea) {
         reset_camera(gCurrentArea->camera);
+        // Loading/instant warps replace the game-camera basis. In VR, align
+        // that new basis once to the destination spawn direction so the HMD
+        // does not emerge facing 180 degrees away from the intended path.
+        vr_request_first_person_camera_yaw_alignment(
+            gMarioState != NULL
+                ? gMarioState->faceAngle[1]
+                : gPlayerSpawnInfos[0].startAngle[1]
+        );
         if (sWarpDest.type == WARP_TYPE_SAME_AREA && gCurrentArea->camera->mode == CAMERA_MODE_NEWCAM) {
             // When we warp to a level in the same area, the camera mode never has the chance
             // to reset. This is bad if our camera mode is newcam, since when init cam is called
@@ -646,6 +654,11 @@ void warp_credits(void) {
 
     if (gCurrentArea) {
         reset_camera(gCurrentArea->camera);
+        vr_request_first_person_camera_yaw_alignment(
+            gMarioState != NULL
+                ? gMarioState->faceAngle[1]
+                : gPlayerSpawnInfos[0].startAngle[1]
+        );
     }
 
     sWarpDest.type = WARP_TYPE_NOT_WARPING;
@@ -1863,6 +1876,11 @@ s32 init_level(void) {
 
         if (gCurrentArea != NULL) {
             reset_camera(gCurrentArea->camera);
+            vr_request_first_person_camera_yaw_alignment(
+                gMarioState != NULL
+                    ? gMarioState->faceAngle[1]
+                    : gPlayerSpawnInfos[0].startAngle[1]
+            );
 
             if (gCurrDemoInput != NULL) {
                 set_mario_action(gMarioState, ACT_IDLE, 0);

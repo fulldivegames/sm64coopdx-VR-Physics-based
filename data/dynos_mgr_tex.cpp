@@ -305,19 +305,33 @@ void DynOS_Tex_Update() {
 
 static DataNode<TexData> *DynOS_Tex_RetrieveNode(void *aPtr) {
     {
-        auto _LuaOverrideTexture = DynosOverrideLuaTextures()[(const Texture*)aPtr];
-        if (_LuaOverrideTexture && _LuaOverrideTexture->node) {
-            return _LuaOverrideTexture->node;
+        auto &_LuaOverrideTextures = DynosOverrideLuaTextures();
+        auto _LuaTextureIt = _LuaOverrideTextures.find(
+            (const Texture*)aPtr
+        );
+        if (_LuaTextureIt != _LuaOverrideTextures.end() &&
+            _LuaTextureIt->second &&
+            _LuaTextureIt->second->node) {
+            return _LuaTextureIt->second->node;
         }
-        auto _LuaOverrideTexData = DynosOverrideLuaTexData()[(DataNode<TexData>*)aPtr];
-        if (_LuaOverrideTexData && _LuaOverrideTexData->node) {
-            return _LuaOverrideTexData->node;
+
+        auto &_LuaOverrideData = DynosOverrideLuaTexData();
+        auto _LuaDataIt = _LuaOverrideData.find(
+            (DataNode<TexData>*)aPtr
+        );
+        if (_LuaDataIt != _LuaOverrideData.end() &&
+            _LuaDataIt->second &&
+            _LuaDataIt->second->node) {
+            return _LuaDataIt->second->node;
         }
     }
 
-    auto _Override = DynosOverrideTextures()[(const Texture*)aPtr];
-    if (_Override && _Override->node) {
-        return _Override->node;
+    auto &_Overrides = DynosOverrideTextures();
+    auto _OverrideIt = _Overrides.find((const Texture*)aPtr);
+    if (_OverrideIt != _Overrides.end() &&
+        _OverrideIt->second &&
+        _OverrideIt->second->node) {
+        return _OverrideIt->second->node;
     }
 
     auto& _ValidTextures = DynosValidTextures();
