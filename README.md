@@ -14,7 +14,7 @@
 </p>
 
 > [!WARNING]
-> This is an active, vibe-coded fan project. The standalone edition has been tested on **Meta Quest 3 only**. It has **not been tested on Quest 2 by me**, and neither edition has been tested across every multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur. If you have any performance issues on default settings in the base game, a reset usually fixes things
+> This is an active, vibe-coded, yet polished fan project. The standalone edition has been tested on **Meta Quest 3 only**. It has **not been tested on Quest 2 by me**, and neither edition has been tested across every multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur. If you have any performance issues on default settings in the base game, a reset usually fixes things (You should be getting a stable 120 FPS on Quest 3 in most if not all base game maps)
 
 > [!WARNING]
 > Standalone co-op, Chat, and its VR keyboard are still experimental. Text or other menu elements may occasionally appear blurry or visually incorrect; restarting the app or headset usually clears these issues. Co-op can also produce minor visual bugs. Large lobbies may reduce performance, and gameplay-changing server mods can cause visual problems, broken behavior, or crashes. Disconnecting may recover the session; otherwise, fully restart the game. Controller keyboard text chat is available; the microphone button currently does not provide working speech recognition and is still being developed.
