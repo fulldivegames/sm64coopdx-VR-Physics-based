@@ -104,6 +104,8 @@
 #define VR_HAMMER_MIN_HORIZONTAL_SPEED 38.0f
 #define VR_HAMMER_MAX_HORIZONTAL_SPEED 72.0f
 #define VR_HAMMER_LAUNCH_ARC_BIAS 8.0f
+#define VR_HAMMER_VOLLEY_SPACING 32.0f
+#define VR_HAMMER_CONTACT_PADDING 32.0f
 #define VR_HAMMER_PICKUP_GRAVITY 0.65f
 #define VR_HAMMER_PICKUP_FALL_SPEED 7.0f
 #define VR_RASENGAN_IMPACT_GROW_FRAMES 10U
@@ -297,6 +299,7 @@ static bool
 static Vec3f sVrFireballRememberedVelocity = { 0.0f, 0.0f, 0.0f };
 static bool sVrHammerSuitPowered = false;
 static u16 sVrHammerSuitTimer = 0;
+static u16 sVrHammerSuitMusicTimer = 0;
 static s16 sVrHammerSuitLevel = -1;
 static s16 sVrHammerSuitArea = -1;
 static struct Object* sVrHammerSuitShellObject = NULL;
@@ -1143,6 +1146,7 @@ bool vr_hand_interaction_is_tracked_held_object(
         ((object == sVrTrackedHeldObject &&
           sVrTrackedHeldGripMask != 0) ||
          object == sVrFireballChargeObject ||
+         object == sVrHammerChargeObject ||
          (object == sVrRasenganObject &&
           sVrRasenganTarget == NULL));
 }
@@ -1189,6 +1193,23 @@ bool vr_hand_interaction_get_late_held_object_position(
 
     struct VrControllerState state;
     Vec3f handPosition;
+    if (object == sVrHammerChargeObject) {
+        if (!vr_get_controller_state(VR_CONTROLLER_RIGHT, &state) ||
+            !vr_get_controller_world_fist_from_state(
+                VR_CONTROLLER_RIGHT,
+                &state,
+                handPosition,
+                NULL
+            )) {
+            vec3f_copy(position, &object->oPosX);
+            return true;
+        }
+        handPosition[1] += 2.0f *
+            (f32)clamp(configVrGloveSize, 25U, 250U) / 70.0f;
+        vec3f_copy(position, handPosition);
+        return true;
+    }
+
     if (object == sVrFireballChargeObject ||
         (object == sVrRasenganObject &&
          sVrRasenganTarget == NULL)) {
@@ -1249,6 +1270,14 @@ bool vr_hand_interaction_apply_held_object_transform(
         sVrTrackedHeldPreviousPosition
     );
     vec3f_copy(object->header.gfx.pos, sVrTrackedHeldPosition);
+    // A physically held actor is positioned entirely by the tracked hand.
+    // Clear residual native velocity so its behavior cannot tug the gameplay
+    // root between hand updates; release velocity still comes from the
+    // controller sample stored by vr_hand_interaction_update_held_position.
+    object->oVelX = 0.0f;
+    object->oVelY = 0.0f;
+    object->oVelZ = 0.0f;
+    object->oForwardVel = 0.0f;
     // Gameplay stays at the native simulation rate. Rendering interpolates
     // the object's animation normally, then late-patches its root transform
     // to the newest tracked hand pose once per submitted OpenXR frame.
@@ -4969,8 +4998,13 @@ static void vr_special_moves_clear_hammer_projectile(u32 slot) {
 }
 
 static void vr_special_moves_reset_hammer_suit(void) {
+    if (sVrHammerSuitMusicTimer > 0 &&
+        (gMarioStates[0].flags & MARIO_SPECIAL_CAPS) == 0) {
+        stop_cap_music();
+    }
     sVrHammerSuitPowered = false;
     sVrHammerSuitTimer = 0;
+    sVrHammerSuitMusicTimer = 0;
     vr_special_moves_delete_object(&sVrHammerSuitShellObject);
     vr_special_moves_clear_hammer_charge();
     for (u32 slot = 0; slot < VR_HAMMER_PROJECTILE_COUNT; slot++) {
@@ -5683,9 +5717,44 @@ bool vr_special_moves_grant_hammer_suit(void) {
     vr_special_moves_reset_power();
     sVrHammerSuitPowered = true;
     sVrHammerSuitTimer = VR_HAMMER_SUIT_DURATION_FRAMES;
+    sVrHammerSuitMusicTimer = VR_HAMMER_SUIT_DURATION_FRAMES;
     sVrHammerSuitLevel = gCurrLevelNum;
     sVrHammerSuitArea = gCurrAreaIndex;
+    if ((gMarioStates[0].flags &
+         (MARIO_METAL_CAP | MARIO_VANISH_CAP)) == 0) {
+        play_cap_music(
+            SEQUENCE_ARGS(4, gLevelValues.wingCapSequence)
+        );
+    }
     return true;
+}
+
+static void vr_special_moves_update_hammer_suit_music(
+    struct MarioState* mario
+) {
+    if (!sVrHammerSuitPowered || sVrHammerSuitMusicTimer == 0 ||
+        mario == NULL) {
+        return;
+    }
+
+    const u32 specialCaps = mario->flags & MARIO_SPECIAL_CAPS;
+    // Metal and Vanish Cap own the cap-music channel. Wing Cap and Hammer
+    // Suit both use Powerful Mario, so replaying this sequence only keeps the
+    // existing shared track alive instead of starting an overlapping copy.
+    if ((specialCaps & (MARIO_METAL_CAP | MARIO_VANISH_CAP)) == 0 &&
+        (sVrHammerSuitMusicTimer > 60 ||
+         (specialCaps & MARIO_WING_CAP) != 0)) {
+        play_cap_music(
+            SEQUENCE_ARGS(4, gLevelValues.wingCapSequence)
+        );
+    }
+
+    sVrHammerSuitMusicTimer--;
+    if (specialCaps == 0 && sVrHammerSuitMusicTimer == 60) {
+        fadeout_cap_music();
+    } else if (specialCaps == 0 && sVrHammerSuitMusicTimer == 0) {
+        stop_cap_music();
+    }
 }
 
 bool vr_special_moves_spawn_cheat_hammer_suit(void) {
@@ -6049,10 +6118,14 @@ static bool vr_special_moves_projectile_hits_enemy(
                 &targetHeight
             );
             const f32 targetTop = targetBottom + targetHeight;
-            const f32 radius = fmaxf(contactRadius, 35.0f) + 24.0f;
+            const f32 contactPadding = hammerImpact
+                ? VR_HAMMER_CONTACT_PADDING
+                : 24.0f;
+            const f32 radius = fmaxf(contactRadius, 35.0f) +
+                contactPadding;
             if (dx * dx + dz * dz > radius * radius ||
-                projectile->oPosY < targetBottom - 24.0f ||
-                projectile->oPosY > targetTop + 24.0f) {
+                projectile->oPosY < targetBottom - contactPadding ||
+                projectile->oPosY > targetTop + contactPadding) {
                 continue;
             }
 
@@ -6801,11 +6874,19 @@ static void vr_special_moves_launch_hammer_volley(
     // of letting the projectile float like the Rasen-Shuriken.
     baseVelocity[1] += VR_HAMMER_LAUNCH_ARC_BIAS;
 
-    static const s16 sVolleyYawOffsets[VR_HAMMER_VOLLEY_COUNT] = {
-        -0x180,
-        0,
-        0x180
-    };
+    Vec3f throwDirection;
+    const f32 throwMagnitude = sqrtf(
+        baseVelocity[0] * baseVelocity[0] +
+        baseVelocity[1] * baseVelocity[1] +
+        baseVelocity[2] * baseVelocity[2]
+    );
+    if (throwMagnitude > 0.001f) {
+        for (u32 axis = 0; axis < 3; axis++) {
+            throwDirection[axis] = baseVelocity[axis] / throwMagnitude;
+        }
+    } else {
+        vec3f_set(throwDirection, 0.0f, 0.0f, 1.0f);
+    }
     for (u32 volley = 0; volley < VR_HAMMER_VOLLEY_COUNT; volley++) {
         const u32 slot = vr_special_moves_allocate_hammer_projectile();
         struct Object* projectile = spawn_object(
@@ -6817,24 +6898,28 @@ static void vr_special_moves_launch_hammer_volley(
             continue;
         }
         sVrHammerProjectiles[slot] = projectile;
-        projectile->oPosX = position[0];
-        projectile->oPosY = position[1];
-        projectile->oPosZ = position[2];
+        // Arrange the volley along the throw path—front to back—rather than
+        // fanning it left and right. This preserves precise aiming while
+        // keeping all three hammers visually distinct at release.
+        const f32 forwardOffset =
+            ((f32)VR_HAMMER_VOLLEY_COUNT - 1.0f - (f32)volley) *
+            VR_HAMMER_VOLLEY_SPACING;
+        projectile->oPosX = position[0] +
+            throwDirection[0] * forwardOffset;
+        projectile->oPosY = position[1] +
+            throwDirection[1] * forwardOffset;
+        projectile->oPosZ = position[2] +
+            throwDirection[2] * forwardOffset;
         projectile->oInteractType = 0;
         projectile->oFaceAnglePitch = (s16)(volley * 0x2800);
         projectile->oFaceAngleRoll = (s16)(volley * 0x1800);
         obj_scale(projectile, 0.58f);
         obj_update_gfx_pos_and_angle(projectile);
 
-        const s16 yawOffset = sVolleyYawOffsets[volley];
-        const f32 baseX = baseVelocity[0];
-        const f32 baseZ = baseVelocity[2];
-        sVrHammerProjectileVelocity[slot][0] =
-            baseX * coss(yawOffset) + baseZ * sins(yawOffset);
+        sVrHammerProjectileVelocity[slot][0] = baseVelocity[0];
         sVrHammerProjectileVelocity[slot][1] =
             baseVelocity[1] + (1 - (s32)volley) * 2.0f;
-        sVrHammerProjectileVelocity[slot][2] =
-            baseZ * coss(yawOffset) - baseX * sins(yawOffset);
+        sVrHammerProjectileVelocity[slot][2] = baseVelocity[2];
         sVrHammerProjectileLifetime[slot] = 0;
     }
     play_sound(
@@ -6884,7 +6969,7 @@ static void vr_special_moves_update_hammer_projectiles(
             .y = projectile->oPosY,
             .z = projectile->oPosZ,
             .offsetY = 0.0f,
-            .radius = 18.0f,
+            .radius = 24.0f,
         };
         if (find_wall_collisions(&wall) > 0) {
             hitGeometry = true;
@@ -7932,30 +8017,34 @@ static bool vr_special_moves_update_hammer_hand(
             }
         }
         if (sVrHammerChargeObject != NULL) {
-            Vec3f palmPosition;
-            if (!vr_get_controller_world_palm_from_state(
-                    VR_CONTROLLER_RIGHT,
-                    state,
-                    palmPosition
-                )) {
-                for (u32 axis = 0; axis < 3; axis++) {
-                    palmPosition[axis] = position[axis];
-                }
-            }
-            vec3f_copy(&sVrHammerChargeObject->oPosX, palmPosition);
+            const f32 gloveScale =
+                (f32)clamp(configVrGloveSize, 25U, 250U) / 70.0f;
+            const f32 hammerGloveScale = clamp(
+                0.75f + gloveScale * 0.25f,
+                0.85f,
+                1.50f
+            );
+            // The hammer model's origin sits inside its handle. Center that
+            // origin in the closed fist so the fingers wrap around the shaft,
+            // then grow the hammer outward from that exact grip point.
+            sVrHammerChargeObject->oPosX = position[0];
+            sVrHammerChargeObject->oPosY = position[1] +
+                2.0f * gloveScale;
+            sVrHammerChargeObject->oPosZ = position[2];
             const f32 progress = clamp(
                 (f32)sVrHammerChargeFrames /
                     (f32)VR_HAMMER_CHARGE_FRAMES,
                 0.0f,
                 1.0f
             );
-            sVrHammerChargeObject->oFaceAnglePitch = 0x2000;
+            sVrHammerChargeObject->oFaceAnglePitch = 0;
             sVrHammerChargeObject->oFaceAngleYaw =
                 vr_get_first_person_view_yaw();
-            sVrHammerChargeObject->oFaceAngleRoll = -0x1800;
-            // Keep the handle seated inside the glove instead of growing a
-            // full projectile-sized hammer across Mario's hand.
-            obj_scale(sVrHammerChargeObject, 0.12f + progress * 0.12f);
+            sVrHammerChargeObject->oFaceAngleRoll = 0;
+            obj_scale(
+                sVrHammerChargeObject,
+                hammerGloveScale * (0.02f + progress * 0.22f)
+            );
             obj_update_gfx_pos_and_angle(sVrHammerChargeObject);
             sVrHammerChargeObject->header.gfx.skipInterpolationTimestamp =
                 gGlobalTimer;
@@ -8054,6 +8143,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         vr_special_moves_reset_hammer_suit();
     }
     vr_special_moves_update_fire_flower_music(mario);
+    vr_special_moves_update_hammer_suit_music(mario);
     if (sVrFireFlowerPowered &&
         !configVrCheatNoFireFlowerTimer &&
         sVrFireFlowerTimer > 0 &&
