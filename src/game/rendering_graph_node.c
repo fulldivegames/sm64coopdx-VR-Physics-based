@@ -1557,6 +1557,32 @@ static void vr_patch_controller_hand_matrices(uint32_t eyeIndex) {
     }
 }
 
+static bool vr_get_controller_hand_attachment_matrix(
+    u32 hand,
+    Mat4 matrix
+) {
+    if (matrix == NULL || hand >= VR_CONTROLLER_COUNT ||
+        sVrControllerHandMatrices[hand] == NULL) {
+        return false;
+    }
+    mtxf_copy(matrix, sVrControllerHandMatrices[hand]->m);
+    return true;
+}
+
+static void vr_get_controller_fist_from_hand_matrix(
+    Mat4 handMatrix,
+    Vec3f fistPosition
+) {
+    // The rendered glove begins at its wrist and extends along local +X.
+    // This point is centered inside the closed fingers and therefore follows
+    // the exact same predicted OpenXR pose as the visible glove.
+    const f32 wristToFistModelUnits = 68.0f;
+    for (u32 axis = 0; axis < 3; axis++) {
+        fistPosition[axis] = handMatrix[3][axis] +
+            handMatrix[0][axis] * wristToFistModelUnits;
+    }
+}
+
 static bool vr_first_person_true_diving_active(void) {
     return vr_is_active() &&
         configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
@@ -3794,9 +3820,86 @@ void patch_mtx_vr_shared(void) {
             for (struct MtxInterp *interp = sVrHeldMatrixHead;
                  interp != NULL;
                  interp = interp->nextVrHeld) {
+                if (interp->owner == NULL) {
+                    continue;
+                }
+
+                if (vr_hand_interaction_is_hammer_charge_object(
+                        interp->owner)) {
+                    Mat4 handMatrix;
+                    if (vr_get_controller_hand_attachment_matrix(
+                            VR_CONTROLLER_RIGHT,
+                            handMatrix)) {
+                        Vec3f localPosition = { 68.0f, 0.0f, 0.0f };
+                        Vec3s localRotation = { 0, 0, 0 };
+                        Mat4 hammerMatrix;
+                        mtxf_rotate_zxy_and_translate(
+                            hammerMatrix,
+                            localPosition,
+                            localRotation
+                        );
+                        const f32 handModelScale = 0.20f *
+                            (f32)clamp(
+                                configVrGloveSize,
+                                25U,
+                                250U
+                            ) / 100.0f;
+                        const f32 relativeScale =
+                            interp->owner->header.gfx.scale[0] /
+                            fmaxf(handModelScale, 0.001f);
+                        Vec3f hammerScale = {
+                            relativeScale,
+                            relativeScale,
+                            relativeScale
+                        };
+                        mtxf_scale_vec3f(
+                            hammerMatrix,
+                            hammerMatrix,
+                            hammerScale
+                        );
+                        mtxf_mul(
+                            interp->interp.m,
+                            hammerMatrix,
+                            handMatrix
+                        );
+                        continue;
+                    }
+                }
+
+                const u32 heldHand =
+                    vr_hand_interaction_get_tracked_held_hand(
+                        interp->owner
+                    );
+                if (heldHand < VR_CONTROLLER_COUNT) {
+                    Mat4 handMatrix;
+                    if (vr_get_controller_hand_attachment_matrix(
+                            heldHand,
+                            handMatrix)) {
+                        Vec3f fistPosition;
+                        vr_get_controller_fist_from_hand_matrix(
+                            handMatrix,
+                            fistPosition
+                        );
+                        const f32 objectHeight = fmaxf(
+                            interp->owner->hitboxHeight,
+                            interp->owner->hurtboxHeight
+                        );
+                        const f32 centerOffset = clamp(
+                            objectHeight * 0.5f -
+                                interp->owner->hitboxDownOffset,
+                            0.0f,
+                            80.0f
+                        );
+                        interp->interp.m[3][0] = fistPosition[0];
+                        interp->interp.m[3][1] =
+                            fistPosition[1] - centerOffset;
+                        interp->interp.m[3][2] = fistPosition[2];
+                        continue;
+                    }
+                }
+
                 Vec3f latePosition;
-                if (interp->owner == NULL ||
-                    !vr_hand_interaction_get_late_held_object_position(
+                if (!vr_hand_interaction_get_late_held_object_position(
                         interp->owner,
                         latePosition
                     )) {

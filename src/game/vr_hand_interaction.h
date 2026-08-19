@@ -51,6 +51,12 @@ bool vr_hand_interaction_apply_held_object_transform(
 bool vr_hand_interaction_is_tracked_held_object(
     struct Object* object
 );
+bool vr_hand_interaction_is_hammer_charge_object(
+    struct Object* object
+);
+u32 vr_hand_interaction_get_tracked_held_hand(
+    struct Object* object
+);
 bool vr_hand_interaction_blocks_native_held_object_release(
     struct MarioState* mario
 );

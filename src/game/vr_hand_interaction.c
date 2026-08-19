@@ -104,7 +104,7 @@
 #define VR_HAMMER_MIN_HORIZONTAL_SPEED 38.0f
 #define VR_HAMMER_MAX_HORIZONTAL_SPEED 72.0f
 #define VR_HAMMER_LAUNCH_ARC_BIAS 8.0f
-#define VR_HAMMER_VOLLEY_SPACING 32.0f
+#define VR_HAMMER_VOLLEY_SPACING 96.0f
 #define VR_HAMMER_CONTACT_PADDING 32.0f
 #define VR_HAMMER_PICKUP_GRAVITY 0.65f
 #define VR_HAMMER_PICKUP_FALL_SPEED 7.0f
@@ -1149,6 +1149,23 @@ bool vr_hand_interaction_is_tracked_held_object(
          object == sVrHammerChargeObject ||
          (object == sVrRasenganObject &&
           sVrRasenganTarget == NULL));
+}
+
+bool vr_hand_interaction_is_hammer_charge_object(
+    struct Object* object
+) {
+    return object != NULL && object == sVrHammerChargeObject;
+}
+
+u32 vr_hand_interaction_get_tracked_held_hand(
+    struct Object* object
+) {
+    if (object == NULL || object != sVrTrackedHeldObject ||
+        sVrTrackedHeldGripMask == 0 ||
+        sVrTrackedHeldHand >= VR_CONTROLLER_COUNT) {
+        return VR_CONTROLLER_COUNT;
+    }
+    return sVrTrackedHeldHand;
 }
 
 bool vr_hand_interaction_blocks_native_held_object_release(
@@ -5900,6 +5917,18 @@ static void vr_special_moves_update_hammer_suit_shell(
         sVrHammerSuitShellObject->oInteractType = 0;
     }
 
+    // The shell is an independent object, so preserve its prior attachment
+    // transform before following Mario. Letting the ordinary render
+    // interpolator blend these matching samples keeps it locked to Mario's
+    // back instead of visibly stepping at the 30 Hz simulation rate.
+    vec3f_copy(
+        sVrHammerSuitShellObject->header.gfx.prevPos,
+        sVrHammerSuitShellObject->header.gfx.pos
+    );
+    vec3s_copy(
+        sVrHammerSuitShellObject->header.gfx.prevAngle,
+        sVrHammerSuitShellObject->header.gfx.angle
+    );
     const s16 yaw = mario->faceAngle[1];
     sVrHammerSuitShellObject->oPosX =
         mario->pos[0] - sins(yaw) * 8.0f;
@@ -5911,8 +5940,6 @@ static void vr_special_moves_update_hammer_suit_shell(
     sVrHammerSuitShellObject->oFaceAngleRoll = 0;
     obj_scale(sVrHammerSuitShellObject, 0.44f);
     obj_update_gfx_pos_and_angle(sVrHammerSuitShellObject);
-    sVrHammerSuitShellObject->header.gfx.skipInterpolationTimestamp =
-        gGlobalTimer;
 }
 
 static bool vr_special_moves_point_is_behind_target(
