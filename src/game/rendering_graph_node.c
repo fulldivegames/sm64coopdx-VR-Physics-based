@@ -759,6 +759,8 @@ static bool sVrCameraYawSampleValid = false;
 static u32 sVrCameraYawSampleTimestamp = 0;
 static s16 sVrCameraYawSamplePrev = 0;
 static s16 sVrCameraYawSample = 0;
+static bool sVrPendingCameraYawAlignment = false;
+static s16 sVrPendingCameraYawTarget = 0;
 static unsigned int sVrLastCameraMode = VR_CAMERA_MODE_COUNT;
 static bool sVrHeadRotationMatrixValid = false;
 static float sVrHeadRotationQuaternion[4] = { 0 };
@@ -901,6 +903,8 @@ void vr_reset_first_person_calibration(void) {
     sVrCameraYawSampleTimestamp = 0;
     sVrCameraYawSamplePrev = 0;
     sVrCameraYawSample = 0;
+    sVrPendingCameraYawAlignment = false;
+    sVrPendingCameraYawTarget = 0;
     sVrControllerCameraInverseValid = false;
     sVrControllerCameraInverseTimestamp = 0;
     sVrControllerCameraInverseDelta = -1.0f;
@@ -1200,6 +1204,11 @@ bool vr_align_first_person_camera_yaw(s16 worldYaw) {
     sVrCameraYawSamplePrev = sampledYaw;
     sVrCameraYawSample = sampledYaw;
     return true;
+}
+
+void vr_request_first_person_camera_yaw_alignment(s16 worldYaw) {
+    sVrPendingCameraYawTarget = worldYaw;
+    sVrPendingCameraYawAlignment = true;
 }
 
 void vr_adjust_first_person_camera_direction(Vec3f direction) {
@@ -3423,6 +3432,16 @@ static void reset_mtx(void) {
 
 void patch_mtx_before(void) {
     vr_handle_camera_mode_change();
+    // A newly loaded area does not have a usable HMD/camera basis while its
+    // warp is being initialized. Apply the requested destination direction
+    // here, on the first rendered frame where tracking is valid, instead of
+    // aligning against stale data from the previous room.
+    if (sVrPendingCameraYawAlignment &&
+        vr_align_first_person_camera_yaw(
+            sVrPendingCameraYawTarget
+        )) {
+        sVrPendingCameraYawAlignment = false;
+    }
     sVrHeadTrackedAudioEnabledForFrame =
         configVrImmersive3dSound &&
         configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&

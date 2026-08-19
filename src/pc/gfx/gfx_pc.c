@@ -1513,6 +1513,29 @@ static void gfx_calc_and_set_viewport(const Vp_t *viewport) {
 
 static void gfx_sp_movemem(uint8_t index, uint16_t offset, const void* data) {
     if (!data) { return; }
+#if UINTPTR_MAX > UINT32_MAX
+    // Gfx commands can outlive transient generated display-list data across
+    // an area transition. Android also places an allocator tag in the top
+    // byte, so validate the untagged 48-bit virtual address before the copy.
+    // A malformed MOVEMEM must not turn a one-frame visual fault into a hard
+    // renderer crash (the repeated JRB door crash reached this exact path).
+    uintptr_t address = (uintptr_t)data;
+#ifdef __ANDROID__
+    address &= UINT64_C(0x00FFFFFFFFFFFFFF);
+#endif
+    if (address < 4096 ||
+        address > UINT64_C(0x0000FFFFFFFFFFFF)) {
+        static bool warnedInvalidMoveMem = false;
+        if (!warnedInvalidMoveMem) {
+            fprintf(stderr,
+                "[GFX] Ignoring invalid MOVEMEM pointer 0x%" PRIxPTR
+                ".\n",
+                (uintptr_t)data);
+            warnedInvalidMoveMem = true;
+        }
+        return;
+    }
+#endif
     switch (index) {
         case G_MV_VIEWPORT:
             gfx_calc_and_set_viewport((const Vp_t *) data);

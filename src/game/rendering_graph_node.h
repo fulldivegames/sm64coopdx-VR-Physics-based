@@ -51,6 +51,7 @@ void vr_reset_first_person_calibration(void);
 void vr_handle_camera_mode_change(void);
 void vr_adjust_first_person_camera_direction(Vec3f direction);
 bool vr_align_first_person_camera_yaw(s16 worldYaw);
+void vr_request_first_person_camera_yaw_alignment(s16 worldYaw);
 s16 vr_get_first_person_action_turn_yaw(void);
 bool vr_get_controller_world_fist(
     u32 handIndex,

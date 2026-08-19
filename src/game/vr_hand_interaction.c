@@ -47,6 +47,7 @@
 #define VR_GRIP_CLOSE_THRESHOLD 0.55f
 #define VR_GRIP_OPEN_THRESHOLD 0.35f
 #define VR_GRAB_EXTRA_REACH 16.0f
+#define VR_JRB_SPIKE_GRAB_EXTRA_REACH 56.0f
 #define VR_OBJECT_GRAB_EXTRA_REACH \
     (VR_GRAB_EXTRA_REACH + VR_FIST_BASE_RADIUS * 8.0f)
 #define VR_CLIMB_CEILING_EXTRA_REACH 20.0f
@@ -2252,6 +2253,15 @@ static bool vr_hand_interaction_climb_is_occupied(void) {
         sVrBowserGripMask != 0;
 }
 
+static f32 vr_hand_interaction_pole_extra_reach(
+    struct Object* pole
+) {
+    return gCurrLevelNum == LEVEL_JRB &&
+        pole != NULL && obj_has_behavior(pole, bhvPoleGrabbing)
+            ? VR_JRB_SPIKE_GRAB_EXTRA_REACH
+            : VR_GRAB_EXTRA_REACH;
+}
+
 static struct Object* vr_hand_interaction_find_pole_target(
     struct MarioState* mario,
     const Vec3f handPosition
@@ -2274,13 +2284,15 @@ static struct Object* vr_hand_interaction_find_pole_target(
         node = node->next;
 
         f32 distanceSquared;
+        const f32 extraReach =
+            vr_hand_interaction_pole_extra_reach(pole);
         if ((pole->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
             pole->oIntangibleTimer != 0 ||
             (pole->oInteractType & INTERACT_POLE) == 0 ||
             !vr_hand_interaction_grab_overlaps_object(
                 handPosition,
                 handRadius,
-                VR_GRAB_EXTRA_REACH,
+                extraReach,
                 pole,
                 &distanceSquared
             )) {
@@ -3281,7 +3293,9 @@ static bool vr_hand_interaction_try_add_physical_climb_hand(
             !vr_hand_interaction_grab_overlaps_object(
                 handPosition,
                 vr_hand_interaction_fist_radius(),
-                VR_GRAB_EXTRA_REACH,
+                vr_hand_interaction_pole_extra_reach(
+                    sVrPhysicalClimbPole
+                ),
                 sVrPhysicalClimbPole,
                 &distanceSquared
             )) {
