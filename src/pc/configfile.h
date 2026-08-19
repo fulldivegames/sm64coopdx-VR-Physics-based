@@ -200,6 +200,7 @@ extern bool         configVrCheatFreeFly;
 extern bool         configVrCheatNoFireFlowerTimer;
 extern bool         configVrSpecialFireFlower;
 extern bool         configVrSpecialFireFlowerMusic;
+extern bool         configVrSpecialHammerSuit;
 extern bool         configVrSpecialRasengan;
 extern bool         configVrSpecialRasenganGripTrigger;
 extern bool         configVrRasenShurikenOverheadCharge;

@@ -95,6 +95,17 @@
 #define VR_FIREBALL_MIN_THROW_SPEED 60.0f
 #define VR_FIREBALL_MAX_LIFETIME 180U
 #define VR_FIREBALL_PROJECTILE_COUNT 8U
+#define VR_HAMMER_SUIT_DURATION_FRAMES 1800U
+#define VR_HAMMER_CHARGE_FRAMES 30U
+#define VR_HAMMER_PROJECTILE_COUNT 12U
+#define VR_HAMMER_VOLLEY_COUNT 3U
+#define VR_HAMMER_MAX_LIFETIME 150U
+#define VR_HAMMER_GRAVITY 1.75f
+#define VR_HAMMER_MIN_HORIZONTAL_SPEED 38.0f
+#define VR_HAMMER_MAX_HORIZONTAL_SPEED 72.0f
+#define VR_HAMMER_LAUNCH_ARC_BIAS 8.0f
+#define VR_HAMMER_PICKUP_GRAVITY 0.65f
+#define VR_HAMMER_PICKUP_FALL_SPEED 7.0f
 #define VR_RASENGAN_IMPACT_GROW_FRAMES 10U
 #define VR_RASENGAN_IMPACT_MAX_FRAMES 90U
 // Two rotated, double-sided shells contribute four translucent surfaces.
@@ -284,6 +295,26 @@ static Vec3f
 static bool
     sVrFireballProjectileLaunchBoost[VR_FIREBALL_PROJECTILE_COUNT] = { false };
 static Vec3f sVrFireballRememberedVelocity = { 0.0f, 0.0f, 0.0f };
+static bool sVrHammerSuitPowered = false;
+static u16 sVrHammerSuitTimer = 0;
+static s16 sVrHammerSuitLevel = -1;
+static s16 sVrHammerSuitArea = -1;
+static struct Object* sVrHammerSuitShellObject = NULL;
+static struct Object* sVrHammerSuitPickupObject = NULL;
+static f32 sVrHammerSuitPickupVelocityY = 0.0f;
+static bool sVrHammerSuitPickupLanded = false;
+static struct Object* sVrHammerChargeObject = NULL;
+static u16 sVrHammerChargeFrames = 0;
+static Vec3f sVrHammerRememberedVelocity = { 0.0f, 0.0f, 0.0f };
+static struct Object* sVrHammerProjectiles[VR_HAMMER_PROJECTILE_COUNT] = {
+    NULL
+};
+static Vec3f sVrHammerProjectileVelocity[VR_HAMMER_PROJECTILE_COUNT] = {
+    { 0.0f, 0.0f, 0.0f }
+};
+static u16 sVrHammerProjectileLifetime[VR_HAMMER_PROJECTILE_COUNT] = {
+    0
+};
 static struct Object* sVrRasenganObject = NULL;
 static struct Object* sVrRasenganTarget = NULL;
 static u16 sVrRasenganChargeFrames = 0;
@@ -4917,6 +4948,55 @@ static u32 vr_special_moves_allocate_fireball_projectile(void) {
     return oldestSlot;
 }
 
+static void vr_special_moves_clear_hammer_charge(void) {
+    vr_special_moves_delete_object(&sVrHammerChargeObject);
+    sVrHammerChargeFrames = 0;
+    vec3f_set(sVrHammerRememberedVelocity, 0.0f, 0.0f, 0.0f);
+}
+
+static void vr_special_moves_clear_hammer_projectile(u32 slot) {
+    if (slot >= VR_HAMMER_PROJECTILE_COUNT) {
+        return;
+    }
+    vr_special_moves_delete_object(&sVrHammerProjectiles[slot]);
+    vec3f_set(
+        sVrHammerProjectileVelocity[slot],
+        0.0f,
+        0.0f,
+        0.0f
+    );
+    sVrHammerProjectileLifetime[slot] = 0;
+}
+
+static void vr_special_moves_reset_hammer_suit(void) {
+    sVrHammerSuitPowered = false;
+    sVrHammerSuitTimer = 0;
+    vr_special_moves_delete_object(&sVrHammerSuitShellObject);
+    vr_special_moves_clear_hammer_charge();
+    for (u32 slot = 0; slot < VR_HAMMER_PROJECTILE_COUNT; slot++) {
+        vr_special_moves_clear_hammer_projectile(slot);
+    }
+}
+
+static u32 vr_special_moves_allocate_hammer_projectile(void) {
+    u32 oldestSlot = 0;
+    u16 oldestLifetime = 0;
+    for (u32 slot = 0; slot < VR_HAMMER_PROJECTILE_COUNT; slot++) {
+        struct Object* projectile = sVrHammerProjectiles[slot];
+        if (projectile == NULL ||
+            (projectile->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
+            vr_special_moves_clear_hammer_projectile(slot);
+            return slot;
+        }
+        if (sVrHammerProjectileLifetime[slot] >= oldestLifetime) {
+            oldestLifetime = sVrHammerProjectileLifetime[slot];
+            oldestSlot = slot;
+        }
+    }
+    vr_special_moves_clear_hammer_projectile(oldestSlot);
+    return oldestSlot;
+}
+
 static void vr_special_moves_reset_power(void) {
     if (sVrFireFlowerMusicTimer > 0 &&
         (gMarioStates[0].flags & MARIO_SPECIAL_CAPS) == 0) {
@@ -4956,6 +5036,7 @@ bool vr_special_moves_grant_fire_flower(void) {
         gMarioStates[0].marioObj == NULL) {
         return false;
     }
+    vr_special_moves_reset_hammer_suit();
     sVrFireFlowerPowered = true;
     sVrFireFlowerTimer = VR_FIRE_FLOWER_DURATION_FRAMES;
     sVrFireFlowerMusicTimer = VR_FIRE_FLOWER_DURATION_FRAMES;
@@ -5588,6 +5669,183 @@ bool vr_special_moves_spawn_cheat_cap(enum VrCheatSpawnCap cap) {
     return true;
 }
 
+bool vr_special_moves_hammer_suit_active(void) {
+    return configVrSpecialHammerSuit && sVrHammerSuitPowered &&
+        vr_special_moves_fire_flower_online_allowed();
+}
+
+bool vr_special_moves_grant_hammer_suit(void) {
+    if (!configVrSpecialHammerSuit || !vr_is_active() ||
+        !vr_special_moves_fire_flower_online_allowed() ||
+        gMarioStates[0].marioObj == NULL) {
+        return false;
+    }
+    vr_special_moves_reset_power();
+    sVrHammerSuitPowered = true;
+    sVrHammerSuitTimer = VR_HAMMER_SUIT_DURATION_FRAMES;
+    sVrHammerSuitLevel = gCurrLevelNum;
+    sVrHammerSuitArea = gCurrAreaIndex;
+    return true;
+}
+
+bool vr_special_moves_spawn_cheat_hammer_suit(void) {
+    struct MarioState* mario = &gMarioStates[0];
+    if (!configVrSpecialHammerSuit || mario->marioObj == NULL) {
+        return false;
+    }
+    vr_special_moves_delete_object(&sVrHammerSuitPickupObject);
+    sVrHammerSuitPickupObject = spawn_object(
+        mario->marioObj,
+        MODEL_VR_HAMMER,
+        bhvStaticObject
+    );
+    if (sVrHammerSuitPickupObject == NULL) {
+        return false;
+    }
+    sVrHammerSuitPickupObject->oPosX = mario->pos[0];
+    sVrHammerSuitPickupObject->oPosY = mario->pos[1] + 480.0f;
+    sVrHammerSuitPickupObject->oPosZ = mario->pos[2];
+    sVrHammerSuitPickupObject->oFaceAnglePitch = 0;
+    sVrHammerSuitPickupObject->oInteractType = 0;
+    obj_scale(sVrHammerSuitPickupObject, 0.35f);
+    obj_update_gfx_pos_and_angle(sVrHammerSuitPickupObject);
+    sVrHammerSuitPickupVelocityY = 0.0f;
+    sVrHammerSuitPickupLanded = false;
+    return true;
+}
+
+static void vr_special_moves_update_hammer_suit_pickup(
+    struct MarioState* mario
+) {
+    struct Object* pickup = sVrHammerSuitPickupObject;
+    if (pickup == NULL || mario == NULL) {
+        return;
+    }
+    if ((pickup->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
+        sVrHammerSuitPickupObject = NULL;
+        return;
+    }
+
+    if (!sVrHammerSuitPickupLanded) {
+        sVrHammerSuitPickupVelocityY = fmaxf(
+            sVrHammerSuitPickupVelocityY - VR_HAMMER_PICKUP_GRAVITY,
+            -VR_HAMMER_PICKUP_FALL_SPEED
+        );
+        pickup->oPosY += sVrHammerSuitPickupVelocityY;
+        struct Surface* floor = NULL;
+        const f32 floorHeight = find_floor(
+            pickup->oPosX,
+            pickup->oPosY + 80.0f,
+            pickup->oPosZ,
+            &floor
+        );
+        if (floor != NULL && pickup->oPosY <= floorHeight + 38.0f) {
+            pickup->oPosY = floorHeight + 38.0f;
+            sVrHammerSuitPickupVelocityY = 0.0f;
+            sVrHammerSuitPickupLanded = true;
+        }
+    }
+    pickup->oFaceAngleYaw += 0x300;
+    pickup->oFaceAngleRoll += 0x180;
+    obj_update_gfx_pos_and_angle(pickup);
+
+    const f32 px = pickup->oPosX;
+    const f32 py = pickup->oPosY;
+    const f32 pz = pickup->oPosZ;
+    const f32 bodyDx = px - mario->marioObj->oPosX;
+    const f32 bodyDy = py - (mario->marioObj->oPosY + 45.0f);
+    const f32 bodyDz = pz - mario->marioObj->oPosZ;
+    bool collected = bodyDx * bodyDx + bodyDy * bodyDy +
+        bodyDz * bodyDz <=
+        VR_FIRE_FLOWER_PICKUP_RADIUS * VR_FIRE_FLOWER_PICKUP_RADIUS;
+    u32 collectingHand = VR_CONTROLLER_COUNT;
+
+    Vec3f headsetPosition;
+    if (!collected && vr_get_stabilized_headset_world_position(
+            headsetPosition,
+            false
+        )) {
+        const f32 dx = px - headsetPosition[0];
+        const f32 dy = py - headsetPosition[1];
+        const f32 dz = pz - headsetPosition[2];
+        collected = dx * dx + dy * dy + dz * dz <=
+            VR_FIRE_FLOWER_HEAD_PICKUP_RADIUS *
+                VR_FIRE_FLOWER_HEAD_PICKUP_RADIUS;
+    }
+    for (u32 hand = 0;
+         !collected && hand < VR_CONTROLLER_COUNT;
+         hand++) {
+        struct VrControllerState state = { 0 };
+        Vec3f handPosition;
+        Vec3f handVelocity;
+        if (!vr_get_controller_state(hand, &state) ||
+            !vr_get_controller_world_fist_raw_from_state(
+                hand,
+                &state,
+                handPosition,
+                handVelocity
+            )) {
+            continue;
+        }
+        const f32 dx = px - handPosition[0];
+        const f32 dy = py - handPosition[1];
+        const f32 dz = pz - handPosition[2];
+        if (dx * dx + dy * dy + dz * dz <=
+            VR_FIRE_FLOWER_HAND_PICKUP_RADIUS *
+                VR_FIRE_FLOWER_HAND_PICKUP_RADIUS) {
+            collected = true;
+            collectingHand = hand;
+        }
+    }
+
+    if (collected) {
+        if (vr_special_moves_grant_hammer_suit()) {
+            if (collectingHand < VR_CONTROLLER_COUNT) {
+                vr_apply_haptic(collectingHand, 0.45f, 0.10f, -1.0f);
+            } else {
+                vr_apply_haptic(VR_CONTROLLER_LEFT, 0.30f, 0.08f, -1.0f);
+                vr_apply_haptic(VR_CONTROLLER_RIGHT, 0.30f, 0.08f, -1.0f);
+            }
+            vr_special_moves_delete_object(&sVrHammerSuitPickupObject);
+        }
+    }
+}
+
+static void vr_special_moves_update_hammer_suit_shell(
+    struct MarioState* mario
+) {
+    if (!vr_special_moves_hammer_suit_active() || mario == NULL ||
+        mario->marioObj == NULL) {
+        vr_special_moves_delete_object(&sVrHammerSuitShellObject);
+        return;
+    }
+    if (sVrHammerSuitShellObject == NULL) {
+        sVrHammerSuitShellObject = spawn_object(
+            mario->marioObj,
+            MODEL_VR_HAMMER_SHELL,
+            bhvStaticObject
+        );
+        if (sVrHammerSuitShellObject == NULL) {
+            return;
+        }
+        sVrHammerSuitShellObject->oInteractType = 0;
+    }
+
+    const s16 yaw = mario->faceAngle[1];
+    sVrHammerSuitShellObject->oPosX =
+        mario->pos[0] - sins(yaw) * 8.0f;
+    sVrHammerSuitShellObject->oPosY = mario->pos[1] + 68.0f;
+    sVrHammerSuitShellObject->oPosZ =
+        mario->pos[2] - coss(yaw) * 8.0f;
+    sVrHammerSuitShellObject->oFaceAnglePitch = -0x4000;
+    sVrHammerSuitShellObject->oFaceAngleYaw = yaw;
+    sVrHammerSuitShellObject->oFaceAngleRoll = 0;
+    obj_scale(sVrHammerSuitShellObject, 0.44f);
+    obj_update_gfx_pos_and_angle(sVrHammerSuitShellObject);
+    sVrHammerSuitShellObject->header.gfx.skipInterpolationTimestamp =
+        gGlobalTimer;
+}
+
 static bool vr_special_moves_point_is_behind_target(
     struct Object* target,
     f32 x,
@@ -5711,9 +5969,24 @@ static void vr_special_moves_apply_rear_target_hit(
     network_send_object(target);
 }
 
+static bool vr_special_moves_rasengan_target_is_eligible(
+    struct MarioState* mario,
+    struct Object* object
+);
+static struct Object* vr_special_moves_resolve_rasengan_target(
+    struct Object* object
+);
+static void vr_special_moves_apply_rasen_shuriken_damage(
+    struct MarioState* mario,
+    struct Object* explosion,
+    struct Object* object
+);
+
 static bool vr_special_moves_projectile_hits_enemy(
     struct MarioState* mario,
-    struct Object* projectile
+    struct Object* projectile,
+    bool explosiveImpact,
+    bool hammerImpact
 ) {
     if (mario == NULL || projectile == NULL || gObjectLists == NULL) {
         return false;
@@ -5731,22 +6004,35 @@ static bool vr_special_moves_projectile_hits_enemy(
             const bool kingBobomb =
                 obj_has_behavior(target, bhvKingBobomb) &&
                 target->oAction == 2;
+            const bool kingWhomp =
+                obj_has_behavior(target, bhvWhompKingBoss) &&
+                target->oAction >= 2 && target->oAction < 8;
             const bool protectedBoss =
-                obj_has_behavior(target, bhvWhompKingBoss) ||
                 obj_has_behavior(target, bhvBowser) ||
                 obj_has_behavior(target, bhvBowserBodyAnchor) ||
-                obj_has_behavior(target, bhvBowserTailAnchor);
+                obj_has_behavior(target, bhvBowserTailAnchor) ||
+                (obj_has_behavior(target, bhvWhompKingBoss) &&
+                    !hammerImpact);
             const bool grabbableEnemy =
                 obj_has_behavior(target, bhvBobomb) ||
                 obj_has_behavior(target, bhvChuckya) ||
                 obj_has_behavior(target, bhvHeaveHo) ||
-                kingBobomb;
+                kingBobomb || (hammerImpact && kingWhomp);
             const bool regularWhomp =
                 obj_has_behavior(target, bhvSmallWhomp) &&
                 target->oAction < 8;
             if (target == projectile || target == mario->marioObj ||
-                protectedBoss ||
-                (target->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
+                (target->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
+                continue;
+            }
+            if (hammerImpact) {
+                if (!vr_special_moves_rasengan_target_is_eligible(
+                        mario,
+                        target
+                    )) {
+                    continue;
+                }
+            } else if (protectedBoss ||
                 (target->oIntangibleTimer != 0 && !regularWhomp) ||
                 ((target->oInteractType & enemyTypes) == 0 &&
                  !grabbableEnemy && !regularWhomp)) {
@@ -5770,7 +6056,8 @@ static bool vr_special_moves_projectile_hits_enemy(
                 continue;
             }
 
-            const bool rearTarget = regularWhomp || kingBobomb;
+            const bool rearTarget = regularWhomp || kingBobomb ||
+                (hammerImpact && kingWhomp);
             if (rearTarget) {
                 if (!vr_special_moves_point_is_behind_target(
                         target,
@@ -5779,6 +6066,22 @@ static bool vr_special_moves_projectile_hits_enemy(
                     )) {
                     continue;
                 }
+            }
+
+            if (hammerImpact) {
+                vr_special_moves_apply_rasen_shuriken_damage(
+                    mario,
+                    projectile,
+                    vr_special_moves_resolve_rasengan_target(target)
+                );
+                play_sound(
+                    SOUND_ACTION_HIT_2,
+                    projectile->header.gfx.cameraToObject
+                );
+                return true;
+            }
+
+            if (rearTarget) {
                 vr_special_moves_apply_rear_target_hit(
                     mario,
                     target,
@@ -5818,16 +6121,25 @@ static bool vr_special_moves_projectile_hits_enemy(
                 target->oMrBlizzardTimer = 30 * 30;
                 network_send_object(target);
             }
-            struct Object* explosion = spawn_object(
-                projectile,
-                MODEL_EXPLOSION,
-                bhvExplosion
-            );
-            if (explosion != NULL) {
-                obj_scale(explosion, 0.2f);
+            if (explosiveImpact) {
+                struct Object* explosion = spawn_object(
+                    projectile,
+                    MODEL_EXPLOSION,
+                    bhvExplosion
+                );
+                if (explosion != NULL) {
+                    obj_scale(explosion, 0.2f);
+                }
+                play_sound(
+                    SOUND_GENERAL_BOWSER_BOMB_EXPLOSION,
+                    projectile->header.gfx.cameraToObject
+                );
+            } else {
+                play_sound(
+                    SOUND_ACTION_HIT_2,
+                    projectile->header.gfx.cameraToObject
+                );
             }
-            play_sound(SOUND_GENERAL_BOWSER_BOMB_EXPLOSION,
-                projectile->header.gfx.cameraToObject);
             return true;
         }
     }
@@ -5896,7 +6208,12 @@ static void vr_special_moves_update_projectiles(struct MarioState* mario) {
         }
         obj_update_gfx_pos_and_angle(projectile);
 
-        if (vr_special_moves_projectile_hits_enemy(mario, projectile)) {
+        if (vr_special_moves_projectile_hits_enemy(
+                mario,
+                projectile,
+                true,
+                false
+            )) {
             vr_apply_haptic(
                 VR_CONTROLLER_RIGHT,
                 0.65f,
@@ -6441,6 +6758,167 @@ static void vr_special_moves_update_rasengan_impact(
     }
     if (sVrRasenganImpactFrames >= VR_RASENGAN_IMPACT_MAX_FRAMES) {
         vr_special_moves_clear_rasengan();
+    }
+}
+
+static void vr_special_moves_launch_hammer_volley(
+    struct MarioState* mario,
+    const Vec3f position,
+    const Vec3f handVelocity
+) {
+    if (mario == NULL || mario->marioObj == NULL) {
+        return;
+    }
+
+    const f32 rawSpeed = sqrtf(
+        handVelocity[0] * handVelocity[0] +
+        handVelocity[1] * handVelocity[1] +
+        handVelocity[2] * handVelocity[2]
+    ) * VR_THROW_VELOCITY_SCALE;
+    const f32 launchSpeed = clamp(
+        rawSpeed,
+        VR_HAMMER_MIN_HORIZONTAL_SPEED,
+        VR_HAMMER_MAX_HORIZONTAL_SPEED
+    );
+    Vec3f baseVelocity;
+    if (rawSpeed > 1.0f) {
+        const f32 velocityScale = launchSpeed /
+            (rawSpeed / VR_THROW_VELOCITY_SCALE);
+        for (u32 axis = 0; axis < 3; axis++) {
+            baseVelocity[axis] = handVelocity[axis] * velocityScale;
+        }
+    } else {
+        const s16 launchYaw = vr_get_first_person_view_yaw();
+        vec3f_set(
+            baseVelocity,
+            sins(launchYaw) * launchSpeed,
+            0.0f,
+            coss(launchYaw) * launchSpeed
+        );
+    }
+    // Preserve the player's complete 3D throw vector. A small lift supplies
+    // the classic hammer arc, while gravity immediately takes over instead
+    // of letting the projectile float like the Rasen-Shuriken.
+    baseVelocity[1] += VR_HAMMER_LAUNCH_ARC_BIAS;
+
+    static const s16 sVolleyYawOffsets[VR_HAMMER_VOLLEY_COUNT] = {
+        -0x180,
+        0,
+        0x180
+    };
+    for (u32 volley = 0; volley < VR_HAMMER_VOLLEY_COUNT; volley++) {
+        const u32 slot = vr_special_moves_allocate_hammer_projectile();
+        struct Object* projectile = spawn_object(
+            mario->marioObj,
+            MODEL_VR_HAMMER,
+            bhvStaticObject
+        );
+        if (projectile == NULL) {
+            continue;
+        }
+        sVrHammerProjectiles[slot] = projectile;
+        projectile->oPosX = position[0];
+        projectile->oPosY = position[1];
+        projectile->oPosZ = position[2];
+        projectile->oInteractType = 0;
+        projectile->oFaceAnglePitch = (s16)(volley * 0x2800);
+        projectile->oFaceAngleRoll = (s16)(volley * 0x1800);
+        obj_scale(projectile, 0.58f);
+        obj_update_gfx_pos_and_angle(projectile);
+
+        const s16 yawOffset = sVolleyYawOffsets[volley];
+        const f32 baseX = baseVelocity[0];
+        const f32 baseZ = baseVelocity[2];
+        sVrHammerProjectileVelocity[slot][0] =
+            baseX * coss(yawOffset) + baseZ * sins(yawOffset);
+        sVrHammerProjectileVelocity[slot][1] =
+            baseVelocity[1] + (1 - (s32)volley) * 2.0f;
+        sVrHammerProjectileVelocity[slot][2] =
+            baseZ * coss(yawOffset) - baseX * sins(yawOffset);
+        sVrHammerProjectileLifetime[slot] = 0;
+    }
+    play_sound(
+        SOUND_ACTION_THROW,
+        mario->marioObj->header.gfx.cameraToObject
+    );
+    vr_apply_haptic(VR_CONTROLLER_RIGHT, 0.65f, 0.10f, -1.0f);
+}
+
+static void vr_special_moves_update_hammer_projectiles(
+    struct MarioState* mario
+) {
+    for (u32 slot = 0; slot < VR_HAMMER_PROJECTILE_COUNT; slot++) {
+        struct Object* projectile = sVrHammerProjectiles[slot];
+        if (projectile == NULL) {
+            continue;
+        }
+        if ((projectile->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
+            ++sVrHammerProjectileLifetime[slot] >
+                VR_HAMMER_MAX_LIFETIME) {
+            vr_special_moves_clear_hammer_projectile(slot);
+            continue;
+        }
+
+        Vec3f* velocity = &sVrHammerProjectileVelocity[slot];
+        projectile->oPosX += (*velocity)[0];
+        projectile->oPosY += (*velocity)[1];
+        projectile->oPosZ += (*velocity)[2];
+        (*velocity)[1] -= VR_HAMMER_GRAVITY;
+        projectile->oFaceAnglePitch += 0x1800;
+        projectile->oFaceAngleRoll += 0x1000;
+
+        if (vr_special_moves_projectile_hits_enemy(
+                mario,
+                projectile,
+                false,
+                true
+            )) {
+            vr_apply_haptic(VR_CONTROLLER_RIGHT, 0.45f, 0.06f, -1.0f);
+            vr_special_moves_clear_hammer_projectile(slot);
+            continue;
+        }
+
+        bool hitGeometry = false;
+        struct WallCollisionData wall = {
+            .x = projectile->oPosX,
+            .y = projectile->oPosY,
+            .z = projectile->oPosZ,
+            .offsetY = 0.0f,
+            .radius = 18.0f,
+        };
+        if (find_wall_collisions(&wall) > 0) {
+            hitGeometry = true;
+        }
+        struct Surface* floor = NULL;
+        const f32 floorHeight = find_floor(
+            projectile->oPosX,
+            projectile->oPosY + 50.0f,
+            projectile->oPosZ,
+            &floor
+        );
+        if (floor != NULL && projectile->oPosY <= floorHeight + 12.0f) {
+            hitGeometry = true;
+        }
+        struct Surface* ceiling = NULL;
+        const f32 ceilingHeight = find_ceil(
+            projectile->oPosX,
+            projectile->oPosY - 30.0f,
+            projectile->oPosZ,
+            &ceiling
+        );
+        if (ceiling != NULL &&
+            projectile->oPosY >= ceilingHeight - 12.0f) {
+            hitGeometry = true;
+        }
+        if (hitGeometry) {
+            play_sound(
+                SOUND_ACTION_HIT_2,
+                projectile->header.gfx.cameraToObject
+            );
+            vr_special_moves_clear_hammer_projectile(slot);
+            continue;
+        }
+        obj_update_gfx_pos_and_angle(projectile);
     }
 }
 
@@ -7419,6 +7897,137 @@ static bool vr_special_moves_update_fireball_hand(
     return sVrFireballChargeObject != NULL;
 }
 
+static bool vr_special_moves_update_hammer_hand(
+    struct MarioState* mario,
+    const struct VrControllerState* state,
+    const Vec3f position,
+    const Vec3f velocity,
+    bool handBusy
+) {
+    const bool triggerPressed = state != NULL &&
+        state->trigger >= VR_FIREBALL_TRIGGER_THRESHOLD;
+    const bool gripPressed = state != NULL &&
+        state->squeeze >= VR_GRIP_CLOSE_THRESHOLD &&
+        sVrGripPressed[VR_CONTROLLER_RIGHT];
+    const bool canCharge = vr_special_moves_hammer_suit_active() &&
+        mario != NULL && !handBusy && gripPressed;
+    const bool chargingInput = canCharge && triggerPressed;
+    const bool wasCharging = sVrHammerChargeFrames > 0 ||
+        sVrHammerChargeObject != NULL;
+
+    if (chargingInput) {
+        const u16 previousFrames = sVrHammerChargeFrames;
+        sVrHammerChargeFrames = (u16)min(
+            sVrHammerChargeFrames + 1U,
+            VR_HAMMER_CHARGE_FRAMES
+        );
+        if (sVrHammerChargeObject == NULL) {
+            sVrHammerChargeObject = spawn_object(
+                mario->marioObj,
+                MODEL_VR_HAMMER,
+                bhvStaticObject
+            );
+            if (sVrHammerChargeObject != NULL) {
+                sVrHammerChargeObject->oInteractType = 0;
+            }
+        }
+        if (sVrHammerChargeObject != NULL) {
+            Vec3f palmPosition;
+            if (!vr_get_controller_world_palm_from_state(
+                    VR_CONTROLLER_RIGHT,
+                    state,
+                    palmPosition
+                )) {
+                for (u32 axis = 0; axis < 3; axis++) {
+                    palmPosition[axis] = position[axis];
+                }
+            }
+            vec3f_copy(&sVrHammerChargeObject->oPosX, palmPosition);
+            const f32 progress = clamp(
+                (f32)sVrHammerChargeFrames /
+                    (f32)VR_HAMMER_CHARGE_FRAMES,
+                0.0f,
+                1.0f
+            );
+            sVrHammerChargeObject->oFaceAnglePitch = 0x2000;
+            sVrHammerChargeObject->oFaceAngleYaw =
+                vr_get_first_person_view_yaw();
+            sVrHammerChargeObject->oFaceAngleRoll = -0x1800;
+            // Keep the handle seated inside the glove instead of growing a
+            // full projectile-sized hammer across Mario's hand.
+            obj_scale(sVrHammerChargeObject, 0.12f + progress * 0.12f);
+            obj_update_gfx_pos_and_angle(sVrHammerChargeObject);
+            sVrHammerChargeObject->header.gfx.skipInterpolationTimestamp =
+                gGlobalTimer;
+
+            const f32 speedSq = velocity[0] * velocity[0] +
+                velocity[1] * velocity[1] +
+                velocity[2] * velocity[2];
+            const f32 rememberedSq =
+                sVrHammerRememberedVelocity[0] *
+                    sVrHammerRememberedVelocity[0] +
+                sVrHammerRememberedVelocity[1] *
+                    sVrHammerRememberedVelocity[1] +
+                sVrHammerRememberedVelocity[2] *
+                    sVrHammerRememberedVelocity[2];
+            if (speedSq >= rememberedSq * VR_THROW_VELOCITY_MEMORY *
+                VR_THROW_VELOCITY_MEMORY) {
+                for (u32 axis = 0; axis < 3; axis++) {
+                    sVrHammerRememberedVelocity[axis] = velocity[axis];
+                }
+            } else {
+                vec3f_mul(
+                    sVrHammerRememberedVelocity,
+                    VR_THROW_VELOCITY_MEMORY
+                );
+            }
+        }
+        if (previousFrames < VR_HAMMER_CHARGE_FRAMES &&
+            sVrHammerChargeFrames >= VR_HAMMER_CHARGE_FRAMES) {
+            vr_apply_haptic(VR_CONTROLLER_RIGHT, 0.48f, 0.09f, -1.0f);
+        }
+    }
+
+    if (!chargingInput && wasCharging) {
+        if (sVrHammerChargeObject != NULL &&
+            sVrHammerChargeFrames >= VR_HAMMER_CHARGE_FRAMES) {
+            Vec3f launchPosition;
+            Vec3f launchVelocity;
+            vec3f_copy(
+                launchPosition,
+                &sVrHammerChargeObject->oPosX
+            );
+            const f32 releaseSpeedSq =
+                velocity[0] * velocity[0] +
+                velocity[1] * velocity[1] +
+                velocity[2] * velocity[2];
+            if (releaseSpeedSq >=
+                VR_FIREBALL_MIN_THROW_SPEED *
+                    VR_FIREBALL_MIN_THROW_SPEED) {
+                for (u32 axis = 0; axis < 3; axis++) {
+                    launchVelocity[axis] = velocity[axis];
+                }
+            } else {
+                vec3f_copy(
+                    launchVelocity,
+                    sVrHammerRememberedVelocity
+                );
+            }
+            vr_special_moves_launch_hammer_volley(
+                mario,
+                launchPosition,
+                launchVelocity
+            );
+        }
+        vr_special_moves_clear_hammer_charge();
+    }
+    if ((!canCharge || !configVrSpecialHammerSuit) &&
+        sVrHammerChargeObject != NULL) {
+        vr_special_moves_clear_hammer_charge();
+    }
+    return sVrHammerChargeObject != NULL;
+}
+
 void vr_hand_interaction_update(struct MarioState* mario) {
     // Remote Mario states run through the same interaction function. They
     // must not reset the local player's tracked fist state.
@@ -7437,6 +8046,13 @@ void vr_hand_interaction_update(struct MarioState* mario) {
           sVrFireFlowerArea != gCurrAreaIndex))) {
         vr_special_moves_reset_power();
     }
+    if (!configVrSpecialHammerSuit || !vr_is_active() ||
+        !vr_special_moves_fire_flower_online_allowed() ||
+        (sVrHammerSuitPowered &&
+         (sVrHammerSuitLevel != gCurrLevelNum ||
+          sVrHammerSuitArea != gCurrAreaIndex))) {
+        vr_special_moves_reset_hammer_suit();
+    }
     vr_special_moves_update_fire_flower_music(mario);
     if (sVrFireFlowerPowered &&
         !configVrCheatNoFireFlowerTimer &&
@@ -7445,12 +8061,20 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         vr_special_moves_reset_power();
     }
     vr_special_moves_update_pickups(mario);
+    vr_special_moves_update_hammer_suit_pickup(mario);
+    vr_special_moves_update_hammer_suit_shell(mario);
     vr_special_moves_update_projectiles(mario);
+    vr_special_moves_update_hammer_projectiles(mario);
     vr_special_moves_update_rasen_shuriken_projectile(mario);
     if ((!configVrSpecialRasengan ||
-         vr_special_moves_fire_flower_active()) &&
+         vr_special_moves_fire_flower_active() ||
+         vr_special_moves_hammer_suit_active()) &&
         sVrRasenganObject != NULL) {
         vr_special_moves_clear_rasengan();
+    }
+    if (sVrHammerSuitPowered && sVrHammerSuitTimer > 0 &&
+        --sVrHammerSuitTimer == 0) {
+        vr_special_moves_reset_hammer_suit();
     }
     vr_special_moves_update_rasengan_impact(mario);
     vr_special_moves_try_quick_fireball(mario);
@@ -7486,6 +8110,9 @@ void vr_hand_interaction_update(struct MarioState* mario) {
     if (!trackingAvailable) {
         if (sVrFireballChargeObject != NULL) {
             vr_special_moves_clear_fireball_charge();
+        }
+        if (sVrHammerChargeObject != NULL) {
+            vr_special_moves_clear_hammer_charge();
         }
         if (sVrRasenganObject != NULL) {
             vr_special_moves_clear_rasengan();
@@ -7645,6 +8272,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
     const bool rasenganRightGestureReady =
         configVrSpecialRasengan &&
         !vr_special_moves_fire_flower_active() &&
+        !vr_special_moves_hammer_suit_active() &&
         rasenganRightPreviewValid &&
         rasenganRightPreview.trigger >=
             VR_FIREBALL_TRIGGER_THRESHOLD &&
@@ -7753,6 +8381,19 @@ void vr_hand_interaction_update(struct MarioState* mario) {
             sVrRasenganTarget == NULL) {
             vr_special_moves_clear_rasengan();
         }
+        if (hand == VR_CONTROLLER_RIGHT && !positionValid &&
+            sVrHammerChargeObject != NULL) {
+            vr_special_moves_clear_hammer_charge();
+        }
+        const bool handIsChargingHammer =
+            hand == VR_CONTROLLER_RIGHT && positionValid &&
+            vr_special_moves_update_hammer_hand(
+                mario,
+                &state,
+                position,
+                velocity,
+                fireballHandBusy || handIsChargingRasengan
+            );
         const bool handIsChargingFireball =
             hand == VR_CONTROLLER_RIGHT && positionValid &&
             vr_special_moves_update_fireball_hand(
@@ -7760,10 +8401,12 @@ void vr_hand_interaction_update(struct MarioState* mario) {
                 &state,
                 position,
                 velocity,
-                fireballHandBusy || handIsChargingRasengan
+                fireballHandBusy || handIsChargingRasengan ||
+                    handIsChargingHammer
             );
         const bool handIsChargingSpecialMove =
-            handIsChargingRasengan || handIsChargingFireball;
+            handIsChargingRasengan || handIsChargingFireball ||
+            handIsChargingHammer;
         if (handIsHoldingVrItem) {
             sVrMotionDivePairFrames[hand] = 0;
         }

@@ -182,6 +182,8 @@ extern ALIGNED8 const Texture vr_rasengan_texture[];
 extern const GeoLayout vr_rasen_shuriken_geo[];
 extern const Gfx vr_rasen_shuriken_dl[];
 extern ALIGNED8 const Texture vr_rasen_shuriken_texture[];
+extern const GeoLayout vr_hammer_geo[];
+extern const Gfx vr_hammer_dl[];
 extern const Gfx mushroom_1up_seg3_dl_0302A628[];
 extern const Gfx mushroom_1up_seg3_dl_0302A660[];
 

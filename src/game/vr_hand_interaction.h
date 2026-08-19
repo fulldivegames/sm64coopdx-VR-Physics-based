@@ -81,6 +81,7 @@ bool vr_special_moves_spawn_fire_flower_chance(
     f32 chance
 );
 bool vr_special_moves_spawn_cheat_fire_flower(void);
+bool vr_special_moves_spawn_cheat_hammer_suit(void);
 enum VrCheatSpawnCap {
     VR_CHEAT_SPAWN_WING_CAP,
     VR_CHEAT_SPAWN_VANISH_CAP,
@@ -89,6 +90,8 @@ enum VrCheatSpawnCap {
 bool vr_special_moves_spawn_cheat_cap(enum VrCheatSpawnCap cap);
 bool vr_special_moves_fire_flower_active(void);
 bool vr_special_moves_grant_fire_flower(void);
+bool vr_special_moves_hammer_suit_active(void);
+bool vr_special_moves_grant_hammer_suit(void);
 Gfx* geo_vr_fireball_color(
     s32 callContext,
     struct GraphNode* node,

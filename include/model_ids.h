@@ -621,5 +621,7 @@
 #define MODEL_VR_FIREBALL                  0xFA // vr_fireball_geo
 #define MODEL_VR_RASENGAN                  0xFB // vr_rasengan_geo
 #define MODEL_VR_RASEN_SHURIKEN             0xFC // vr_rasen_shuriken_geo
+#define MODEL_VR_HAMMER_SHELL                0xFD // vr_hammer_shell_geo
+#define MODEL_VR_HAMMER                      0xFE // vr_hammer_geo
 
 #endif // MODEL_IDS_H

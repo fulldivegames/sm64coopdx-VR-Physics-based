@@ -866,7 +866,9 @@ static struct PlayerColor geo_mario_get_player_color(
 ) {
     struct PlayerColor color = { 0 };
     struct MarioBodyState* bodyState = &gBodyStates[index];
-    if (index == 0 && vr_special_moves_fire_flower_active()) {
+    if (index == 0 && vr_special_moves_hammer_suit_active()) {
+        palette = player_palette_get_hammer_suit();
+    } else if (index == 0 && vr_special_moves_fire_flower_active()) {
         palette = player_palette_get_fire_flower();
     }
     for (s32 part = 0; part != PLAYER_PART_MAX; ++part) {
