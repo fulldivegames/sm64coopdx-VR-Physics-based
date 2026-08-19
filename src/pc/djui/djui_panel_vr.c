@@ -124,6 +124,11 @@ static void djui_panel_vr_spawn_fire_flower(struct DjuiBase* caller) {
     vr_special_moves_spawn_cheat_fire_flower();
 }
 
+static void djui_panel_vr_spawn_hammer_suit(struct DjuiBase* caller) {
+    (void)caller;
+    vr_special_moves_spawn_cheat_hammer_suit();
+}
+
 static void djui_panel_vr_spawn_wing_cap(UNUSED struct DjuiBase* caller) {
     vr_special_moves_spawn_cheat_cap(VR_CHEAT_SPAWN_WING_CAP);
 }
@@ -149,6 +154,8 @@ static void djui_panel_vr_spawn_menu_create(struct DjuiBase* caller) {
         djui_panel_vr_spawn_metal_cap);
     djui_button_create(body, "Fire Flower", DJUI_BUTTON_STYLE_NORMAL,
         djui_panel_vr_spawn_fire_flower);
+    djui_button_create(body, "Hammer (Hammer Suit)", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_spawn_hammer_suit);
     djui_button_create(
         body,
         DLANG(MENU, BACK),
@@ -343,6 +350,7 @@ static void djui_panel_vr_special_moves_defaults(
     (void)caller;
     configVrSpecialFireFlower = true;
     configVrSpecialFireFlowerMusic = true;
+    configVrSpecialHammerSuit = true;
     configVrSpecialRasengan = true;
     configVrSpecialRasenganGripTrigger = false;
     configVrRasenShurikenOverheadCharge = true;
@@ -1552,6 +1560,12 @@ static void djui_panel_vr_special_moves_create(
             body,
             "Fire Flower Music",
             &configVrSpecialFireFlowerMusic,
+            NULL
+        );
+        djui_checkbox_create(
+            body,
+            "Hammer Suit",
+            &configVrSpecialHammerSuit,
             NULL
         );
         djui_checkbox_create(

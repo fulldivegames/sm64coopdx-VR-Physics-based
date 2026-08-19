@@ -33,3 +33,13 @@ const GeoLayout koopa_shell3_geo[] = {
    GEO_CLOSE_NODE(),
    GEO_END(),
 };
+
+// No shadow: this model is rigidly mounted to Mario rather than existing as
+// a separate world object.
+const GeoLayout vr_hammer_shell_geo[] = {
+   GEO_SCALE(0x00, 65536),
+   GEO_OPEN_NODE(),
+      GEO_DISPLAY_LIST(LAYER_OPAQUE, vr_hammer_shell_dl),
+   GEO_CLOSE_NODE(),
+   GEO_END(),
+};

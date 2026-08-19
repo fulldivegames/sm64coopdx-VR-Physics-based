@@ -24,6 +24,7 @@ struct PresetPalette {
 
 extern const struct PlayerPalette DEFAULT_MARIO_PALETTE;
 extern const struct PlayerPalette DEFAULT_FIRE_FLOWER_PALETTE;
+extern const struct PlayerPalette DEFAULT_HAMMER_SUIT_PALETTE;
 
 extern struct PresetPalette gPresetPalettes[MAX_PRESET_PALETTES];
 extern u16 gPresetPaletteCount;
@@ -32,6 +33,7 @@ void player_palettes_reset(void);
 void player_palettes_read(const char* palettePath, bool appendPalettes);
 void player_palette_export(char* name);
 const struct PlayerPalette* player_palette_get_fire_flower(void);
+const struct PlayerPalette* player_palette_get_hammer_suit(void);
 bool player_palette_delete(const char* palettesPath, char* name, bool appendPalettes);
 
 #endif

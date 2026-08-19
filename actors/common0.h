@@ -175,6 +175,7 @@ extern const Gfx heart_seg8_dl_0800DFE0[];
 extern const GeoLayout koopa_shell_geo[];
 extern const GeoLayout koopa_shell2_geo[];
 extern const GeoLayout koopa_shell3_geo[];
+extern const GeoLayout vr_hammer_shell_geo[];
 extern const Gfx koopa_shell_seg8_dl_08027108[];
 extern const Gfx koopa_shell_seg8_dl_08027170[];
 extern const Gfx koopa_shell_seg8_dl_08027258[];
@@ -184,6 +185,7 @@ extern const Gfx koopa_shell_seg8_dl_080288E0[];
 extern const Gfx koopa_shell_seg8_dl_08028978[];
 extern const Gfx koopa_shell_seg8_dl_08028A20[];
 extern const Gfx koopa_shell_seg8_dl_08028B78[];
+extern const Gfx vr_hammer_shell_dl[];
 
 // metal_box
 extern const GeoLayout metal_box_geo[];

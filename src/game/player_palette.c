@@ -14,6 +14,10 @@ const struct PlayerPalette DEFAULT_FIRE_FLOWER_PALETTE =
 //  Overalls              Shirt                 Gloves                Shoes                 Hair                  Skin                  Cap                   Emblem
 { { { 0xd2, 0x18, 0x18 }, { 0xff, 0xff, 0xff }, { 0xff, 0xff, 0xff }, { 0x5c, 0x30, 0x18 }, { 0x73, 0x06, 0x00 }, { 0xfe, 0xc1, 0x79 }, { 0xff, 0xff, 0xff }, { 0xff, 0xff, 0xff } } };
 
+const struct PlayerPalette DEFAULT_HAMMER_SUIT_PALETTE =
+//  Overalls              Shirt                 Gloves                Shoes                 Hair                  Skin                  Cap                   Emblem
+{ { { 0x12, 0x14, 0x18 }, { 0xf4, 0xf4, 0xf2 }, { 0xff, 0xff, 0xff }, { 0x72, 0x38, 0x1c }, { 0x73, 0x06, 0x00 }, { 0xfe, 0xc1, 0x79 }, { 0x10, 0x12, 0x16 }, { 0xf2, 0xf2, 0xf2 } } };
+
 static ini_t* sPalette = NULL;
 
 struct PresetPalette gPresetPalettes[MAX_PRESET_PALETTES] = { 0 };
@@ -86,6 +90,10 @@ const struct PlayerPalette* player_palette_get_fire_flower(void) {
         }
     }
     return &DEFAULT_FIRE_FLOWER_PALETTE;
+}
+
+const struct PlayerPalette* player_palette_get_hammer_suit(void) {
+    return &DEFAULT_HAMMER_SUIT_PALETTE;
 }
 
 static bool player_palette_init(const char* palettesPath, char* palette, bool appendPalettes) {
