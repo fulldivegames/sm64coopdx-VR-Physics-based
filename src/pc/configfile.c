@@ -118,6 +118,8 @@ bool         configVrDesktopMirror                = true;
 unsigned int configVrDesktopMirrorFps             = 60;
 unsigned int configVrHudOpacity                   = 100;
 unsigned int configVrHudSpread                    = 120;
+unsigned int configVrMenuAnchor                   = VR_UI_ANCHOR_HEADSET;
+unsigned int configVrHudAnchor                    = VR_UI_ANCHOR_HEADSET;
 bool         configVrMotionControllerInput        = true;
 bool         configVrPunchButton                  = false;
 bool         configVrRightTriggerJump             = false;
@@ -155,6 +157,7 @@ bool         configVrImmersiveLookDownTransparency = true;
 bool         configVrImmersiveCarrySpeed          = false;
 bool         configVrImmersiveStarSpawnFocus       = false;
 bool         configVrImmersiveGhostPunchArm        = true;
+bool         configVrImmersiveWallJumpCameraRelative = false;
 bool         configVrMovementOverhaul             = false;
 bool         configVrMarioPunchSound              = true;
 bool         configVrMotionControlledDive         = true;
@@ -469,6 +472,8 @@ static const struct ConfigOption options[] = {
     {.name = "vr_desktop_mirror_fps",          .type = CONFIG_TYPE_UINT, .uintValue = &configVrDesktopMirrorFps},
     {.name = "vr_hud_opacity",                 .type = CONFIG_TYPE_UINT, .uintValue = &configVrHudOpacity},
     {.name = "vr_hud_spread",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrHudSpread},
+    {.name = "vr_menu_anchor",                 .type = CONFIG_TYPE_UINT, .uintValue = &configVrMenuAnchor},
+    {.name = "vr_hud_anchor",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrHudAnchor},
     {.name = "vr_motion_controller_input",     .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControllerInput},
     {.name = "vr_punch_button",                .type = CONFIG_TYPE_BOOL, .boolValue = &configVrPunchButton},
     {.name = "vr_right_trigger_jump",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrRightTriggerJump},
@@ -506,6 +511,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_immersive_carry_speed",         .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveCarrySpeed},
     {.name = "vr_immersive_star_spawn_focus",    .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveStarSpawnFocus},
     {.name = "vr_immersive_ghost_punch_arm",     .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveGhostPunchArm},
+    {.name = "vr_immersive_wall_jump_camera_relative", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveWallJumpCameraRelative},
     {.name = "vr_mario_punch_sound",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMarioPunchSound},
     {.name = "vr_motion_controlled_dive",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControlledDive},
     {.name = "vr_motion_controlled_ground_dive",.type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControlledGroundDive},

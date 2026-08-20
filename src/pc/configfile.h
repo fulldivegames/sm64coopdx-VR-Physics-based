@@ -17,6 +17,11 @@
 #define DEFAULT_COOPNET_IP "net.coop64.us"
 #define DEFAULT_COOPNET_PORT 34197
 
+#define VR_UI_ANCHOR_HEADSET    0U
+#define VR_UI_ANCHOR_LEFT_HAND  1U
+#define VR_UI_ANCHOR_RIGHT_HAND 2U
+#define VR_UI_ANCHOR_COUNT      3U
+
 // Camera height is stored directly in world units above Mario's gameplay
 // anchor, so the value shown in Camera Settings matches the applied height.
 #define VR_CAMERA_HEIGHT_MAX 1000U
@@ -167,6 +172,8 @@ extern bool         configVrDesktopMirror;
 extern unsigned int configVrDesktopMirrorFps;
 extern unsigned int configVrHudOpacity;
 extern unsigned int configVrHudSpread;
+extern unsigned int configVrMenuAnchor;
+extern unsigned int configVrHudAnchor;
 extern bool         configVrMotionControllerInput;
 extern bool         configVrPunchButton;
 extern bool         configVrRightTriggerJump;
@@ -213,6 +220,7 @@ extern bool         configVrImmersiveLookDownTransparency;
 extern bool         configVrImmersiveCarrySpeed;
 extern bool         configVrImmersiveStarSpawnFocus;
 extern bool         configVrImmersiveGhostPunchArm;
+extern bool         configVrImmersiveWallJumpCameraRelative;
 extern bool         configVrMovementOverhaul;
 extern bool         configVrMarioPunchSound;
 extern bool         configVrMotionControlledDive;

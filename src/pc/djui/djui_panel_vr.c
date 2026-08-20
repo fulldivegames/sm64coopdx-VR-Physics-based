@@ -326,6 +326,8 @@ static void djui_panel_vr_hud_defaults(struct DjuiBase* caller) {
 
     configVrHudOpacity = 100;
     configVrHudSpread = 120;
+    configVrMenuAnchor = VR_UI_ANCHOR_HEADSET;
+    configVrHudAnchor = VR_UI_ANCHOR_HEADSET;
 }
 
 static void djui_panel_vr_cheat_defaults(struct DjuiBase* caller) {
@@ -370,6 +372,7 @@ static void djui_panel_vr_immersion_defaults(struct DjuiBase* caller) {
     configVrImmersiveCarrySpeed = false;
     configVrImmersiveStarSpawnFocus = false;
     configVrImmersiveGhostPunchArm = true;
+    configVrImmersiveWallJumpCameraRelative = false;
     configVrExperimentalSideFlipFollow = true;
     configVrExperimentalWallJumpTurn = true;
     configVrPhysicalCrouching = true;
@@ -1352,6 +1355,12 @@ static void djui_panel_vr_hud_settings_create(struct DjuiBase* caller) {
     } else if (configVrHudSpread > 200) {
         configVrHudSpread = 200;
     }
+    if (configVrMenuAnchor >= VR_UI_ANCHOR_COUNT) {
+        configVrMenuAnchor = VR_UI_ANCHOR_HEADSET;
+    }
+    if (configVrHudAnchor >= VR_UI_ANCHOR_COUNT) {
+        configVrHudAnchor = VR_UI_ANCHOR_HEADSET;
+    }
 
     struct DjuiThreePanel* panel =
         djui_panel_menu_create("HUD Settings", false);
@@ -1360,6 +1369,30 @@ static void djui_panel_vr_hud_settings_create(struct DjuiBase* caller) {
         djui_three_panel_get_body(panel);
 
     {
+        char* anchorChoices[VR_UI_ANCHOR_COUNT] = {
+            "Headset",
+            "Left Hand",
+            "Right Hand"
+        };
+
+        djui_selectionbox_create(
+            body,
+            "Menu Placement",
+            anchorChoices,
+            VR_UI_ANCHOR_COUNT,
+            &configVrMenuAnchor,
+            NULL
+        );
+
+        djui_selectionbox_create(
+            body,
+            "HUD Placement",
+            anchorChoices,
+            VR_UI_ANCHOR_COUNT,
+            &configVrHudAnchor,
+            NULL
+        );
+
         djui_slider_create(
             body,
             "HUD Opacity (%)",
@@ -1602,9 +1635,11 @@ static void djui_panel_vr_special_moves_create(
     djui_panel_add(caller, panel, NULL);
 }
 
-static void djui_panel_vr_immersion_create(struct DjuiBase* caller) {
+static void djui_panel_vr_immersion_camera_create(
+    struct DjuiBase* caller
+) {
     struct DjuiThreePanel* panel =
-        djui_panel_menu_create("Immersion", false);
+        djui_panel_menu_create("Camera & Comfort", false);
 
     struct DjuiBase* body =
         djui_three_panel_get_body(panel);
@@ -1633,13 +1668,6 @@ static void djui_panel_vr_immersion_create(struct DjuiBase* caller) {
 
         djui_checkbox_create(
             body,
-            "Head-Tracked 3D Sound",
-            &configVrImmersive3dSound,
-            NULL
-        );
-
-        djui_checkbox_create(
-            body,
             "Camera on Body During Climb Up",
             &configVrImmersiveLedgeCamera,
             NULL
@@ -1654,35 +1682,8 @@ static void djui_panel_vr_immersion_create(struct DjuiBase* caller) {
 
         djui_checkbox_create(
             body,
-            "Grab Cap at Any Time",
-            &configVrImmersiveRemovableCap,
-            NULL
-        );
-        djui_checkbox_create(
-            body,
-            "Mario Transparency While Looking Down",
-            &configVrImmersiveLookDownTransparency,
-            NULL
-        );
-
-        djui_checkbox_create(
-            body,
-            "Carrying-Speed Movement While Holding",
-            &configVrImmersiveCarrySpeed,
-            NULL
-        );
-
-        djui_checkbox_create(
-            body,
             "Look Toward Spawned Stars",
             &configVrImmersiveStarSpawnFocus,
-            NULL
-        );
-
-        djui_checkbox_create(
-            body,
-            "Ghost Arm for Button Punches",
-            &configVrImmersiveGhostPunchArm,
             NULL
         );
 
@@ -1700,20 +1701,6 @@ static void djui_panel_vr_immersion_create(struct DjuiBase* caller) {
             NULL
         );
 
-        djui_checkbox_create(
-            body,
-            "Physical Crouching / Ground Pounds",
-            &configVrPhysicalCrouching,
-            NULL
-        );
-
-        djui_button_create(
-            body,
-            "Set to Defaults",
-            DJUI_BUTTON_STYLE_NORMAL,
-            djui_panel_vr_immersion_defaults
-        );
-
         djui_button_create(
             body,
             DLANG(MENU, BACK),
@@ -1722,6 +1709,118 @@ static void djui_panel_vr_immersion_create(struct DjuiBase* caller) {
         );
     }
 
+    djui_panel_add(caller, panel, NULL);
+}
+
+static void djui_panel_vr_immersion_movement_create(
+    struct DjuiBase* caller
+) {
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create("Movement & Body", false);
+    struct DjuiBase* body = djui_three_panel_get_body(panel);
+
+    djui_checkbox_create(
+        body,
+        "Camera-Relative Wall-Jump Steering",
+        &configVrImmersiveWallJumpCameraRelative,
+        NULL
+    );
+    djui_checkbox_create(
+        body,
+        "Physical Crouching / Ground Pounds",
+        &configVrPhysicalCrouching,
+        NULL
+    );
+    djui_checkbox_create(
+        body,
+        "Carrying-Speed Movement While Holding",
+        &configVrImmersiveCarrySpeed,
+        NULL
+    );
+    djui_checkbox_create(
+        body,
+        "Mario Transparency While Looking Down",
+        &configVrImmersiveLookDownTransparency,
+        NULL
+    );
+    djui_checkbox_create(
+        body,
+        "Ghost Arm for Button Punches",
+        &configVrImmersiveGhostPunchArm,
+        NULL
+    );
+    djui_button_create(
+        body,
+        DLANG(MENU, BACK),
+        DJUI_BUTTON_STYLE_BACK,
+        djui_panel_menu_back
+    );
+    djui_panel_add(caller, panel, NULL);
+}
+
+static void djui_panel_vr_immersion_interaction_create(
+    struct DjuiBase* caller
+) {
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create("Interaction & Audio", false);
+    struct DjuiBase* body = djui_three_panel_get_body(panel);
+
+    djui_checkbox_create(
+        body,
+        "Head-Tracked 3D Sound",
+        &configVrImmersive3dSound,
+        NULL
+    );
+    djui_checkbox_create(
+        body,
+        "Grab Cap at Any Time",
+        &configVrImmersiveRemovableCap,
+        NULL
+    );
+    djui_button_create(
+        body,
+        DLANG(MENU, BACK),
+        DJUI_BUTTON_STYLE_BACK,
+        djui_panel_menu_back
+    );
+    djui_panel_add(caller, panel, NULL);
+}
+
+static void djui_panel_vr_immersion_create(struct DjuiBase* caller) {
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create("Immersion", false);
+    struct DjuiBase* body = djui_three_panel_get_body(panel);
+
+    djui_button_create(
+        body,
+        "Camera & Comfort",
+        DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_immersion_camera_create
+    );
+    djui_button_create(
+        body,
+        "Movement & Body",
+        DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_immersion_movement_create
+    );
+    djui_button_create(
+        body,
+        "Interaction & Audio",
+        DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_immersion_interaction_create
+    );
+    djui_button_create(
+        body,
+        "Set All Immersion Defaults",
+        DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_immersion_defaults
+    );
+    djui_button_create(
+        body,
+        DLANG(MENU, BACK),
+        DJUI_BUTTON_STYLE_BACK,
+        djui_panel_menu_back
+    );
     djui_panel_add(caller, panel, NULL);
 }
 
@@ -1754,6 +1853,120 @@ static void djui_panel_vr_effects_create(struct DjuiBase* caller) {
     djui_panel_add(caller, panel, NULL);
 }
 
+static void djui_panel_vr_tutorial_page(
+    struct DjuiBase* caller,
+    char* title,
+    const char* message
+) {
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create(title, false);
+    struct DjuiBase* body = djui_three_panel_get_body(panel);
+    struct DjuiText* text = djui_text_create(body, message);
+    djui_base_set_location(&text->base, 0, 0);
+    djui_base_set_size(
+        &text->base,
+        (DJUI_DEFAULT_PANEL_WIDTH *
+            (configDjuiThemeCenter ? DJUI_THEME_CENTERED_WIDTH : 1)) - 64,
+        300
+    );
+    djui_base_set_color(&text->base, 235, 235, 235, 255);
+    djui_text_set_drop_shadow(text, 32, 32, 32, 180);
+    djui_text_set_alignment(text, DJUI_HALIGN_LEFT, DJUI_VALIGN_TOP);
+    djui_button_create(
+        body,
+        DLANG(MENU, BACK),
+        DJUI_BUTTON_STYLE_BACK,
+        djui_panel_menu_back
+    );
+    djui_panel_add(caller, panel, NULL);
+}
+
+static void djui_panel_vr_tutorial_start(
+    struct DjuiBase* caller
+) {
+    djui_panel_vr_tutorial_page(
+        caller,
+        "Getting Started",
+        "Move with the selected movement stick. Your movement direction can follow the headset or either controller in Camera Settings. Jump, crouch, punch, and pause use the bindings shown in Controller Settings. Turn physically or use your configured camera controls. Recenter from Camera Settings whenever your forward direction or seated height needs correction."
+    );
+}
+
+static void djui_panel_vr_tutorial_physical(
+    struct DjuiBase* caller
+) {
+    djui_panel_vr_tutorial_page(
+        caller,
+        "Hands & Physical Actions",
+        "Swing a fist to punch enemies and break valid blocks. Close a hand with Grip to grab supported objects; release to drop or throw using your real hand velocity. Trigger-based punches remain available when enabled. Head and hand colliders can collect stars, coins, caps, and 1-Ups where supported. Physical hand collision stops gloves at solid geometry unless an exception is enabled."
+    );
+}
+
+static void djui_panel_vr_tutorial_climbing(
+    struct DjuiBase* caller
+) {
+    djui_panel_vr_tutorial_page(
+        caller,
+        "Climbing & Movement",
+        "Hold Grip as a hand reaches a pole, tree, or hangable ceiling. Pull your body by moving that hand, then alternate hands for monkey-bar movement. Let go with both hands to fall; swing and release for a momentum jump when enabled. To climb a ledge, move the headset over its top and release. Standard Climbing and Physical Climbing can be enabled separately; Climb Any Wall or Ceiling is a cheat."
+    );
+}
+
+static void djui_panel_vr_tutorial_water(
+    struct DjuiBase* caller
+) {
+    djui_panel_vr_tutorial_page(
+        caller,
+        "Swimming, Flying & Caps",
+        "Swim and fly in the headset's look direction, including straight up or down. Wing Cap flight retains normal momentum unless Free Fly is enabled. Grab removable caps with Trigger near the cap, throw them like physics objects, or release one over Mario's head to put it back on. Shaking Hat Gives Wing Cap requires Grab Cap at Any Time. Underwater head and hand colliders collect supported items."
+    );
+}
+
+static void djui_panel_vr_tutorial_bowser(
+    struct DjuiBase* caller
+) {
+    djui_panel_vr_tutorial_page(
+        caller,
+        "Objects, Bosses & Bowser",
+        "Grabbable NPCs and enemies use Grip; large enemies may require their valid rear grab area. King Bob-omb and other scripted pickups keep their original rules. Hold Bowser's tail with one or both hands, build the normal spin momentum, then release the grabbing hand or both hands to throw in the real swing direction. Taking damage drops held objects when the original game requires it."
+    );
+}
+
+static void djui_panel_vr_tutorial_ui(
+    struct DjuiBase* caller
+) {
+    djui_panel_vr_tutorial_page(
+        caller,
+        "Menus, HUD & Multiplayer",
+        "Pause opens the in-game menu; B backs out of supported menus. HUD Settings controls opacity, spread, and whether menus and the HUD attach independently to the headset or either hand. Select a text field to open the VR keyboard; Enter confirms. Chat and player lists are available from the online menus. Public standalone lobbies target compatible Android/Quest clients; direct connections can work with matching PC builds."
+    );
+}
+
+static void djui_panel_vr_tutorial_moves(
+    struct DjuiBase* caller
+) {
+    djui_panel_vr_tutorial_page(
+        caller,
+        "Special Moves",
+        "Fire Flower: make a right fist, hold Grip and Trigger to charge, then swing and release to throw. Hammer Suit: charge the same way; the hammer grows into the fist and the volley follows your throw. Rasengan: hold right Trigger with an open hand and circle the other gripping hand around it; keep Trigger held after charging and touch an enemy. Hold the Special button above your head to charge Rasen-Shuriken, then swing and release to throw."
+    );
+}
+
+static void djui_panel_vr_tutorial_create(struct DjuiBase* caller) {
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create("VR Tutorial", false);
+    struct DjuiBase* body = djui_three_panel_get_body(panel);
+
+    djui_button_create(body, "Getting Started", DJUI_BUTTON_STYLE_NORMAL, djui_panel_vr_tutorial_start);
+    djui_button_create(body, "Hands & Physical Actions", DJUI_BUTTON_STYLE_NORMAL, djui_panel_vr_tutorial_physical);
+    djui_button_create(body, "Climbing & Movement", DJUI_BUTTON_STYLE_NORMAL, djui_panel_vr_tutorial_climbing);
+    djui_button_create(body, "Swimming, Flying & Caps", DJUI_BUTTON_STYLE_NORMAL, djui_panel_vr_tutorial_water);
+    djui_button_create(body, "Objects, Bosses & Bowser", DJUI_BUTTON_STYLE_NORMAL, djui_panel_vr_tutorial_bowser);
+    djui_button_create(body, "Menus, HUD & Multiplayer", DJUI_BUTTON_STYLE_NORMAL, djui_panel_vr_tutorial_ui);
+    djui_button_create(body, "Special Moves", DJUI_BUTTON_STYLE_NORMAL, djui_panel_vr_tutorial_moves);
+    djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK, djui_panel_menu_back);
+    djui_panel_add(caller, panel, NULL);
+}
+
 void djui_panel_vr_create(struct DjuiBase* caller) {
     // Make the checkbox match the actual VR state whenever
     // the panel is opened.
@@ -1778,6 +1991,13 @@ void djui_panel_vr_create(struct DjuiBase* caller) {
             "Launch in VR",
             &configVrAutoStart,
             NULL
+        );
+
+        djui_button_create(
+            body,
+            "Tutorial",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_vr_tutorial_create
         );
 
         djui_button_create(

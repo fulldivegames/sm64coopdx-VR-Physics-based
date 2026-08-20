@@ -836,6 +836,19 @@ s32 act_wall_kick_air(struct MarioState *m) {
     }
 
     play_mario_jump_sound(m);
+
+    // The optional VR half-turn rotates the player's view independently of
+    // Mario's original wall-kick physics. Rotate the held stick intent by the
+    // same half-turn so screen-left remains screen-left after the camera has
+    // turned, while preserving the vanilla wall-kick speed and trajectory.
+    if (m == &gMarioStates[0] &&
+        vr_is_active() &&
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
+        configVrExperimentalWallJumpTurn &&
+        configVrImmersiveWallJumpCameraRelative &&
+        m->intendedMag > 0.0f) {
+        m->intendedYaw += 0x8000;
+    }
     common_air_action_step(m, ACT_JUMP_LAND, CHAR_ANIM_SLIDEJUMP, AIR_STEP_CHECK_LEDGE_GRAB);
     return FALSE;
 }
