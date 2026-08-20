@@ -66,6 +66,7 @@
 #define VR_CLIMB_CEILING_HAND_PLANE_TOLERANCE 8.0f
 #define VR_CLIMB_SWING_RELEASE_MIN_SPEED 110.0f
 #define VR_CLIMB_REGRAB_COOLDOWN_FRAMES 8
+#define VR_CLIMB_HANDOFF_GRACE_FRAMES 9
 #define VR_PHYSICAL_POLE_SLIDE_MAX_SPEED 6.0f
 #define VR_HEADSET_INTERACTION_RADIUS 24.0f
 #define VR_HEADSET_INTERACTION_HEIGHT 48.0f
@@ -248,6 +249,15 @@ static Vec3f sVrPhysicalClimbSafeReleasePosition = {
 static u32 sVrPhysicalClimbSafeReleaseTimestamp = 0;
 static u32 sVrPhysicalClimbOffsetTimestamp = 0;
 static u8 sVrPhysicalClimbRegrabFrames = 0;
+static u8 sVrPhysicalClimbHandoffGraceFrames = 0;
+static u32 sVrPhysicalClimbHandoffGraceTimestamp = 0;
+static bool sVrPhysicalClimbPendingSwingRelease = false;
+static bool sVrPhysicalClimbPendingVelocityValid = false;
+static Vec3f sVrPhysicalClimbPendingVelocity = {
+    0.0f,
+    0.0f,
+    0.0f
+};
 static bool sVrClimbPreviousPositionValid[VR_CONTROLLER_COUNT] = {
     false,
     false
@@ -793,6 +803,11 @@ static void vr_hand_interaction_clear_physical_climb(void) {
         0.0f
     );
     sVrPhysicalClimbOffsetTimestamp = 0;
+    sVrPhysicalClimbHandoffGraceFrames = 0;
+    sVrPhysicalClimbHandoffGraceTimestamp = 0;
+    sVrPhysicalClimbPendingSwingRelease = false;
+    sVrPhysicalClimbPendingVelocityValid = false;
+    vec3f_set(sVrPhysicalClimbPendingVelocity, 0.0f, 0.0f, 0.0f);
 }
 
 static void vr_hand_interaction_prepare_climb_offset_update(void) {
@@ -2414,6 +2429,10 @@ static void vr_hand_interaction_set_physical_climb_owner(
 
     sVrPhysicalClimbHands[hand] = true;
     sVrPhysicalClimbHand = hand;
+    sVrPhysicalClimbHandoffGraceFrames = 0;
+    sVrPhysicalClimbHandoffGraceTimestamp = 0;
+    sVrPhysicalClimbPendingSwingRelease = false;
+    sVrPhysicalClimbPendingVelocityValid = false;
     for (u32 axis = 0; axis < 3; axis++) {
         sVrPhysicalClimbContactPosition[axis] = climbPosition[axis];
         sVrPhysicalClimbLastPosition[hand][axis] = climbPosition[axis];
@@ -3849,6 +3868,82 @@ static void vr_hand_interaction_release_physical_climb(
     VR_INTERACTION_DEBUG("[VR] Physical climb grip released.\n");
 }
 
+static void vr_hand_interaction_schedule_physical_climb_release(
+    const Vec3f releaseVelocity,
+    bool allowSwingRelease
+) {
+    sVrPhysicalClimbHandoffGraceFrames =
+        VR_CLIMB_HANDOFF_GRACE_FRAMES;
+    sVrPhysicalClimbHandoffGraceTimestamp = gGlobalTimer;
+    sVrPhysicalClimbPendingSwingRelease = allowSwingRelease;
+    sVrPhysicalClimbPendingVelocityValid =
+        releaseVelocity != NULL;
+    if (releaseVelocity != NULL) {
+        for (u32 axis = 0; axis < 3; axis++) {
+            sVrPhysicalClimbPendingVelocity[axis] =
+                releaseVelocity[axis];
+        }
+    } else {
+        vec3f_set(
+            sVrPhysicalClimbPendingVelocity,
+            0.0f,
+            0.0f,
+            0.0f
+        );
+    }
+}
+
+static void vr_hand_interaction_update_physical_climb_handoff(
+    struct MarioState* mario
+) {
+    if (sVrPhysicalClimbHandoffGraceFrames == 0 ||
+        sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_NONE) {
+        return;
+    }
+
+    for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
+        if (sVrPhysicalClimbHands[hand] &&
+            sVrGripPressed[hand]) {
+            sVrPhysicalClimbHandoffGraceFrames = 0;
+            sVrPhysicalClimbHandoffGraceTimestamp = 0;
+            sVrPhysicalClimbPendingSwingRelease = false;
+            sVrPhysicalClimbPendingVelocityValid = false;
+            return;
+        }
+    }
+
+    // Let both controllers finish processing the frame that opened the last
+    // hand. This gives the other hand a full nine simulation frames (about
+    // 0.3 seconds) to take ownership before a fall or swing-jump is applied.
+    if (sVrPhysicalClimbHandoffGraceTimestamp == gGlobalTimer) {
+        return;
+    }
+
+    sVrPhysicalClimbHandoffGraceFrames--;
+    if (sVrPhysicalClimbHandoffGraceFrames == 0) {
+        vr_hand_interaction_release_physical_climb(
+            mario,
+            sVrPhysicalClimbPendingVelocityValid
+                ? sVrPhysicalClimbPendingVelocity
+                : NULL,
+            sVrPhysicalClimbPendingSwingRelease
+        );
+        return;
+    }
+
+    // The native pole/hang action remains the temporary anchor during the
+    // handoff window. Keep analog locomotion from turning a harmless hand
+    // switch into an accidental detach.
+    mario->input &= ~INPUT_NONZERO_ANALOG;
+    mario->input |= INPUT_ZERO_MOVEMENT;
+    if (mario->controller != NULL) {
+        mario->controller->stickX = 0.0f;
+        mario->controller->stickY = 0.0f;
+        mario->controller->stickMag = 0.0f;
+    }
+    vr_hand_interaction_sync_climb_collider_to_headset(mario);
+}
+
 static void vr_hand_interaction_maintain_physical_climb(
     struct MarioState* mario,
     u32 hand,
@@ -3902,11 +3997,22 @@ static void vr_hand_interaction_maintain_physical_climb(
             }
         }
 
-        vr_hand_interaction_release_physical_climb(
-            mario,
-            climbPositionValid ? handVelocity : NULL,
-            climbPositionValid && !sVrGripPressed[hand]
-        );
+        const bool handOpened =
+            climbPositionValid &&
+            !sVrGripPressed[hand] &&
+            configVrPhysicalClimbing;
+        if (handOpened) {
+            vr_hand_interaction_schedule_physical_climb_release(
+                handVelocity,
+                true
+            );
+        } else {
+            vr_hand_interaction_release_physical_climb(
+                mario,
+                climbPositionValid ? handVelocity : NULL,
+                false
+            );
+        }
         return;
     }
 
@@ -6391,6 +6497,14 @@ static bool vr_special_moves_hammer_melee_contact(
                 ? INT_GROUND_POUND_OR_TWIRL
                 : INT_PUNCH
         );
+        if (obj_has_behavior(contact, bhvBobomb)) {
+            // The Hammer Suit's physical hammer head is its own melee
+            // contact. Feed only this contact through the Bob-omb's native
+            // touched/interacted path; ordinary VR punch behavior is left
+            // unchanged.
+            contact->oInteractStatus |=
+                INT_STATUS_INTERACTED | INT_STATUS_TOUCHED_BOB_OMB;
+        }
         smlua_call_event_hooks(
             HOOK_ON_INTERACT,
             mario,
@@ -8946,6 +9060,8 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         );
         sVrFistPreviousPositionValid[hand] = true;
     }
+
+    vr_hand_interaction_update_physical_climb_handoff(mario);
 
     if (canStartInteraction) {
         vr_hand_interaction_process_star_contacts(

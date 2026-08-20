@@ -229,7 +229,6 @@ extern bool         configVrImmersiveLookDownTransparency;
 extern bool         configVrImmersiveCarrySpeed;
 extern bool         configVrImmersiveStarSpawnFocus;
 extern bool         configVrImmersiveGhostPunchArm;
-extern bool         configVrImmersiveWallJumpCameraRelative;
 extern bool         configVrMovementOverhaul;
 extern bool         configVrMarioPunchSound;
 extern bool         configVrMotionControlledDive;
