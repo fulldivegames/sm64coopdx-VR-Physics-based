@@ -232,40 +232,6 @@ static f32 sTextRenderY = 0;
 static f32 sTextRenderLastX = 0;
 static f32 sTextRenderLastY = 0;
 
-static bool djui_text_apply_translation(
-    s8 pushOp,
-    f32 x,
-    f32 y,
-    f32 z
-) {
-    Mtx* matrix = alloc_display_list(sizeof(Mtx));
-    if (matrix == NULL) {
-        return false;
-    }
-    guTranslate(matrix, x, y, z);
-    gSPMatrix(
-        gDisplayListHead++,
-        VIRTUAL_TO_PHYSICAL(matrix),
-        G_MTX_MODELVIEW | G_MTX_MUL |
-            (pushOp == DJUI_MTX_PUSH ? G_MTX_PUSH : G_MTX_NOPUSH)
-    );
-    return true;
-}
-
-static bool djui_text_apply_scale(f32 x, f32 y, f32 z) {
-    Mtx* matrix = alloc_display_list(sizeof(Mtx));
-    if (matrix == NULL) {
-        return false;
-    }
-    guScale(matrix, x, y, z);
-    gSPMatrix(
-        gDisplayListHead++,
-        VIRTUAL_TO_PHYSICAL(matrix),
-        G_MTX_MODELVIEW | G_MTX_MUL | G_MTX_NOPUSH
-    );
-    return true;
-}
-
 bool djui_text_is_printable(const char *c) {
     return c != NULL && (!iscntrl(*c) || *c == 0x7F); // the star
 }
@@ -287,14 +253,7 @@ static void djui_text_render_single_char(struct DjuiText* text, char* c) {
         return;
     }
 
-    if (!djui_text_apply_translation(
-            DJUI_MTX_NOPUSH,
-            sTextRenderX - sTextRenderLastX,
-            (sTextRenderY - sTextRenderLastY) * -1.0f,
-            0
-        )) {
-        return;
-    }
+    create_dl_translation_matrix(DJUI_MTX_NOPUSH, sTextRenderX - sTextRenderLastX, (sTextRenderY - sTextRenderLastY) * -1.0f, 0);
     text->font->render_char(c);
 
     sTextRenderLastX = sTextRenderX;
@@ -517,15 +476,7 @@ static bool djui_text_render(struct DjuiBase* base) {
     f32 translatedX = comp->x;
     f32 translatedY = comp->y;
     djui_gfx_position_translate(&translatedX, &translatedY);
-    if (!djui_text_apply_translation(
-            DJUI_MTX_PUSH,
-            translatedX,
-            translatedY,
-            0
-        )) {
-        gSPDisplayList(gDisplayListHead++, dl_ia_text_end);
-        return false;
-    }
+    create_dl_translation_matrix(DJUI_MTX_PUSH, translatedX, translatedY, 0);
 
     // compute size
     f32 translatedWidth  = comp->width;
@@ -535,15 +486,7 @@ static bool djui_text_render(struct DjuiBase* base) {
     // compute font size
     f32 translatedFontSize = text->fontScale;
     djui_gfx_size_translate(&translatedFontSize);
-    if (!djui_text_apply_scale(
-            translatedFontSize,
-            translatedFontSize,
-            1.0f
-        )) {
-        gSPPopMatrix(gDisplayListHead++, G_MTX_MODELVIEW);
-        gSPDisplayList(gDisplayListHead++, dl_ia_text_end);
-        return false;
-    }
+    create_dl_scale_matrix(DJUI_MTX_NOPUSH, translatedFontSize, translatedFontSize, 1.0f);
 
     // set color
     gDPSetPrimColor(gDisplayListHead++, 0, 0, 255, 255, 255, 255);
