@@ -205,7 +205,7 @@ static void djui_panel_vr_performance_defaults(struct DjuiBase* caller) {
 
     configVrRenderScale = 100;
     configVrShowFps = false;
-    configVrFlameOptimizations = false;
+    configVrFlameOptimizations = true;
     configVrUltraPerformanceMode = false;
     configVrDisableFog = true;
     configVrDesktopMirror = true;
@@ -548,13 +548,6 @@ static void djui_panel_vr_performance_create(struct DjuiBase* caller) {
             body,
             "FPS Counter",
             &configVrShowFps,
-            NULL
-        );
-
-        djui_checkbox_create(
-            body,
-            "Flame & Lava Optimizations",
-            &configVrFlameOptimizations,
             NULL
         );
 

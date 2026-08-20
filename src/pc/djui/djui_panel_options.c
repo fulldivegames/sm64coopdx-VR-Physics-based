@@ -6,7 +6,6 @@
 #include "djui_panel_display.h"
 #include "djui_panel_sound.h"
 #include "djui_panel_misc.h"
-#include "djui_panel_vr.h"
 #include "djui_panel_menu.h"
 #include "djui_panel_dynos.h"
 #include "pc/network/network.h"
@@ -32,13 +31,6 @@ void djui_panel_options_create(struct DjuiBase* caller) {
         djui_button_create(body, DLANG(OPTIONS, CAMERA), DJUI_BUTTON_STYLE_NORMAL, djui_panel_camera_create);
         djui_button_create(body, DLANG(OPTIONS, CONTROLS), DJUI_BUTTON_STYLE_NORMAL, djui_panel_controls_create);
         djui_button_create(body, DLANG(OPTIONS, DISPLAY), DJUI_BUTTON_STYLE_NORMAL, djui_panel_display_create);
-
-djui_button_create(
-    body,
-    "VR",
-    DJUI_BUTTON_STYLE_NORMAL,
-    djui_panel_vr_create
-);
 
         djui_button_create(body, DLANG(OPTIONS, SOUND), DJUI_BUTTON_STYLE_NORMAL, djui_panel_sound_create);
         djui_button_create(body, DLANG(OPTIONS, MISC), DJUI_BUTTON_STYLE_NORMAL, djui_panel_misc_create);

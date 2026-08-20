@@ -103,8 +103,8 @@
 #define VR_HAMMER_GRAVITY 1.75f
 #define VR_HAMMER_MIN_HORIZONTAL_SPEED 38.0f
 #define VR_HAMMER_MAX_HORIZONTAL_SPEED 72.0f
-#define VR_HAMMER_LAUNCH_ARC_BIAS 8.0f
-#define VR_HAMMER_VOLLEY_SPACING 480.0f
+#define VR_HAMMER_LAUNCH_ARC_BIAS 9.0f
+#define VR_HAMMER_VOLLEY_SPEED_STEP 0.12f
 #define VR_HAMMER_CONTACT_PADDING 32.0f
 #define VR_HAMMER_MELEE_RADIUS 30.0f
 #define VR_HAMMER_PICKUP_GRAVITY 0.65f
@@ -7051,19 +7051,6 @@ static void vr_special_moves_launch_hammer_volley(
     // of letting the projectile float like the Rasen-Shuriken.
     baseVelocity[1] += VR_HAMMER_LAUNCH_ARC_BIAS;
 
-    Vec3f throwDirection;
-    const f32 throwMagnitude = sqrtf(
-        baseVelocity[0] * baseVelocity[0] +
-        baseVelocity[1] * baseVelocity[1] +
-        baseVelocity[2] * baseVelocity[2]
-    );
-    if (throwMagnitude > 0.001f) {
-        for (u32 axis = 0; axis < 3; axis++) {
-            throwDirection[axis] = baseVelocity[axis] / throwMagnitude;
-        }
-    } else {
-        vec3f_set(throwDirection, 0.0f, 0.0f, 1.0f);
-    }
     for (u32 volley = 0; volley < VR_HAMMER_VOLLEY_COUNT; volley++) {
         const u32 slot = vr_special_moves_allocate_hammer_projectile();
         struct Object* projectile = spawn_object(
@@ -7075,25 +7062,21 @@ static void vr_special_moves_launch_hammer_volley(
             continue;
         }
         sVrHammerProjectiles[slot] = projectile;
-        // Arrange the volley along the throw path—front to back—rather than
-        // fanning it left and right. This preserves precise aiming while
-        // keeping all three hammers visually distinct at release.
-        const f32 forwardOffset =
-            ((f32)VR_HAMMER_VOLLEY_COUNT - 1.0f - (f32)volley) *
-            VR_HAMMER_VOLLEY_SPACING;
-        projectile->oPosX = position[0] +
-            throwDirection[0] * forwardOffset;
-        projectile->oPosY = position[1] +
-            throwDirection[1] * forwardOffset;
-        projectile->oPosZ = position[2] +
-            throwDirection[2] * forwardOffset;
+        // All three leave the same hand-held bunch. Their slightly different
+        // forward speeds separate them front-to-back only after release, so
+        // none appears to spawn independently out in front of the glove.
+        projectile->oPosX = position[0];
+        projectile->oPosY = position[1];
+        projectile->oPosZ = position[2];
         projectile->oInteractType = 0;
         projectile->oFaceAnglePitch = (s16)(volley * 0x2800);
         projectile->oFaceAngleRoll = (s16)(volley * 0x1800);
         obj_scale(projectile, 0.58f);
         obj_update_gfx_pos_and_angle(projectile);
 
-        const f32 volleySpeedScale = 0.86f + (f32)volley * 0.14f;
+        const f32 volleySpeedScale =
+            1.0f + ((f32)volley - 1.0f) *
+                VR_HAMMER_VOLLEY_SPEED_STEP;
         sVrHammerProjectileVelocity[slot][0] =
             baseVelocity[0] * volleySpeedScale;
         sVrHammerProjectileVelocity[slot][1] =
