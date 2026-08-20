@@ -84,7 +84,6 @@
 #define VR_FIRE_FLOWER_PICKUP_RADIUS 115.0f
 #define VR_FIRE_FLOWER_HEAD_PICKUP_RADIUS 58.0f
 #define VR_FIRE_FLOWER_HAND_PICKUP_RADIUS 52.0f
-#define VR_FIRE_FLOWER_SPAWN_VELOCITY 6.0f
 #define VR_FIRE_FLOWER_GRAVITY 0.65f
 #define VR_FIRE_FLOWER_FALL_SPEED 7.0f
 #define VR_FIRE_FLOWER_DURATION_FRAMES 1800U
@@ -294,9 +293,9 @@ static struct Object* sVrFireFlowerPickups[VR_FIRE_FLOWER_PICKUP_COUNT] = { NULL
 static f32 sVrFireFlowerPickupVelocityY[VR_FIRE_FLOWER_PICKUP_COUNT] = { 0.0f };
 static bool sVrFireFlowerPickupLanded[VR_FIRE_FLOWER_PICKUP_COUNT] = { false };
 static u16 sVrFireFlowerPickupAge[VR_FIRE_FLOWER_PICKUP_COUNT] = { 0 };
-static struct Object* sVrFireFlowerRolledBox = NULL;
-static u32 sVrFireFlowerRolledBoxTimestamp = 0;
-static bool sVrFireFlowerRolledBoxResult = false;
+static struct Object* sVrRewardRolledBox = NULL;
+static u32 sVrRewardRolledBoxTimestamp = 0;
+static enum VrBoxReward sVrRolledBoxReward = VR_BOX_REWARD_ORIGINAL;
 static struct Object* sVrFireballChargeObject = NULL;
 static struct Object*
     sVrFireballProjectiles[VR_FIREBALL_PROJECTILE_COUNT] = { NULL };
@@ -316,6 +315,7 @@ static struct Object* sVrHammerSuitShellObject = NULL;
 static struct Object* sVrHammerSuitPickupObject = NULL;
 static f32 sVrHammerSuitPickupVelocityY = 0.0f;
 static bool sVrHammerSuitPickupLanded = false;
+static u16 sVrHammerSuitPickupAge = 0;
 static struct Object* sVrHammerChargeObject = NULL;
 static u16 sVrHammerChargeFrames = 0;
 static Vec3f sVrHammerRememberedVelocity = { 0.0f, 0.0f, 0.0f };
@@ -4676,11 +4676,7 @@ static bool vr_hand_interaction_attack_object(
     if (obj_has_behavior(object, bhvBreakableBox) ||
         obj_has_behavior(object, bhvBreakableBoxSmall) ||
         obj_has_behavior(object, bhvJumpingBox)) {
-        vr_special_moves_spawn_fire_flower_chance(
-            object,
-            mario,
-            0.30f
-        );
+        vr_special_moves_roll_box_reward(object, mario);
     }
 
     mario->interactObj = object;
@@ -5564,62 +5560,88 @@ static bool vr_special_moves_spawn_pickup(
     return false;
 }
 
-static bool vr_special_moves_spawn_fire_flower_with_chance(
-    struct Object* box,
-    struct MarioState* owner,
-    f32 chance,
+static bool vr_special_moves_spawn_hammer_pickup(
+    struct Object* parent,
+    f32 x,
+    f32 y,
+    f32 z,
     f32 velocityY
 ) {
-    if (box == sVrFireFlowerRolledBox &&
-        (u32)(gGlobalTimer - sVrFireFlowerRolledBoxTimestamp) <= 1U) {
-        return sVrFireFlowerRolledBoxResult;
-    }
-
-    sVrFireFlowerRolledBox = box;
-    sVrFireFlowerRolledBoxTimestamp = gGlobalTimer;
-    sVrFireFlowerRolledBoxResult = false;
-    if (!configVrSpecialFireFlower || !vr_is_active() ||
-        !vr_special_moves_fire_flower_online_allowed() || box == NULL ||
-        owner == NULL || owner->playerIndex != 0 ||
-        random_u16() >= (u16)(clamp(chance, 0.0f, 1.0f) * 65535.0f)) {
+    if (parent == NULL || (sVrHammerSuitPickupObject != NULL &&
+        (sVrHammerSuitPickupObject->activeFlags & ACTIVE_FLAG_ACTIVE) != 0)) {
         return false;
     }
-    sVrFireFlowerRolledBoxResult = vr_special_moves_spawn_pickup(
-        owner->marioObj,
-        box->oPosX,
-        box->oPosY + 65.0f,
-        box->oPosZ,
-        velocityY
+
+    sVrHammerSuitPickupObject = spawn_object(
+        parent,
+        MODEL_VR_HAMMER,
+        bhvStaticObject
     );
-    return sVrFireFlowerRolledBoxResult;
+    if (sVrHammerSuitPickupObject == NULL) {
+        return false;
+    }
+    sVrHammerSuitPickupObject->oPosX = x;
+    sVrHammerSuitPickupObject->oPosY = y;
+    sVrHammerSuitPickupObject->oPosZ = z;
+    sVrHammerSuitPickupObject->oFaceAnglePitch = 0;
+    sVrHammerSuitPickupObject->oInteractType = 0;
+    obj_scale(sVrHammerSuitPickupObject, 0.35f);
+    obj_update_gfx_pos_and_angle(sVrHammerSuitPickupObject);
+    sVrHammerSuitPickupVelocityY = velocityY;
+    sVrHammerSuitPickupLanded = false;
+    sVrHammerSuitPickupAge = 0;
+    return true;
 }
 
-bool vr_special_moves_spawn_fire_flower_chance(
-    struct Object* box,
-    struct MarioState* owner,
-    f32 chance
-) {
-    // Breakable/carryable boxes deactivate immediately. Keep their flower
-    // attached to Mario's persistent object and pop it clearly above the
-    // debris before gravity settles it on the floor.
-    return vr_special_moves_spawn_fire_flower_with_chance(
-        box,
-        owner,
-        chance,
-        20.0f
-    );
-}
-
-bool vr_special_moves_spawn_fire_flower(
+enum VrBoxReward vr_special_moves_roll_box_reward(
     struct Object* box,
     struct MarioState* owner
 ) {
-    return vr_special_moves_spawn_fire_flower_with_chance(
-        box,
-        owner,
-        0.5f,
-        VR_FIRE_FLOWER_SPAWN_VELOCITY
-    );
+    if (box == sVrRewardRolledBox &&
+        (u32)(gGlobalTimer - sVrRewardRolledBoxTimestamp) <= 1U) {
+        return sVrRolledBoxReward;
+    }
+
+    sVrRewardRolledBox = box;
+    sVrRewardRolledBoxTimestamp = gGlobalTimer;
+    sVrRolledBoxReward = VR_BOX_REWARD_ORIGINAL;
+    if (!vr_is_active() || !vr_special_moves_fire_flower_online_allowed() ||
+        box == NULL || owner == NULL || owner->playerIndex != 0 ||
+        owner->marioObj == NULL) {
+        return sVrRolledBoxReward;
+    }
+
+    enum VrBoxReward choices[3] = { VR_BOX_REWARD_ORIGINAL };
+    u32 choiceCount = 1;
+    if (configVrSpecialFireFlower) {
+        choices[choiceCount++] = VR_BOX_REWARD_FIRE_FLOWER;
+    }
+    if (configVrSpecialHammerSuit) {
+        choices[choiceCount++] = VR_BOX_REWARD_HAMMER_SUIT;
+    }
+    const enum VrBoxReward choice = choices[random_u16() % choiceCount];
+    bool spawned = false;
+    if (choice == VR_BOX_REWARD_FIRE_FLOWER) {
+        spawned = vr_special_moves_spawn_pickup(
+            owner->marioObj,
+            box->oPosX,
+            box->oPosY + 65.0f,
+            box->oPosZ,
+            20.0f
+        );
+    } else if (choice == VR_BOX_REWARD_HAMMER_SUIT) {
+        spawned = vr_special_moves_spawn_hammer_pickup(
+            owner->marioObj,
+            box->oPosX,
+            box->oPosY + 65.0f,
+            box->oPosZ,
+            20.0f
+        );
+    }
+    if (choice == VR_BOX_REWARD_ORIGINAL || spawned) {
+        sVrRolledBoxReward = choice;
+    }
+    return sVrRolledBoxReward;
 }
 
 bool vr_special_moves_spawn_cheat_fire_flower(void) {
@@ -5905,24 +5927,13 @@ bool vr_special_moves_spawn_cheat_hammer_suit(void) {
         return false;
     }
     vr_special_moves_delete_object(&sVrHammerSuitPickupObject);
-    sVrHammerSuitPickupObject = spawn_object(
+    return vr_special_moves_spawn_hammer_pickup(
         mario->marioObj,
-        MODEL_VR_HAMMER,
-        bhvStaticObject
+        mario->pos[0],
+        mario->pos[1] + 480.0f,
+        mario->pos[2],
+        0.0f
     );
-    if (sVrHammerSuitPickupObject == NULL) {
-        return false;
-    }
-    sVrHammerSuitPickupObject->oPosX = mario->pos[0];
-    sVrHammerSuitPickupObject->oPosY = mario->pos[1] + 480.0f;
-    sVrHammerSuitPickupObject->oPosZ = mario->pos[2];
-    sVrHammerSuitPickupObject->oFaceAnglePitch = 0;
-    sVrHammerSuitPickupObject->oInteractType = 0;
-    obj_scale(sVrHammerSuitPickupObject, 0.35f);
-    obj_update_gfx_pos_and_angle(sVrHammerSuitPickupObject);
-    sVrHammerSuitPickupVelocityY = 0.0f;
-    sVrHammerSuitPickupLanded = false;
-    return true;
 }
 
 static void vr_special_moves_update_hammer_suit_pickup(
@@ -5934,7 +5945,12 @@ static void vr_special_moves_update_hammer_suit_pickup(
     }
     if ((pickup->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
         sVrHammerSuitPickupObject = NULL;
+        sVrHammerSuitPickupAge = 0;
         return;
+    }
+
+    if (sVrHammerSuitPickupAge < 0xFFFFU) {
+        sVrHammerSuitPickupAge++;
     }
 
     if (!sVrHammerSuitPickupLanded) {
@@ -5959,6 +5975,10 @@ static void vr_special_moves_update_hammer_suit_pickup(
     pickup->oFaceAngleYaw += 0x300;
     pickup->oFaceAngleRoll += 0x180;
     obj_update_gfx_pos_and_angle(pickup);
+
+    if (sVrHammerSuitPickupAge < VR_FIRE_FLOWER_PICKUP_GRACE_FRAMES) {
+        return;
+    }
 
     const f32 px = pickup->oPosX;
     const f32 py = pickup->oPosY;
@@ -6018,6 +6038,7 @@ static void vr_special_moves_update_hammer_suit_pickup(
                 vr_apply_haptic(VR_CONTROLLER_RIGHT, 0.30f, 0.08f, -1.0f);
             }
             vr_special_moves_delete_object(&sVrHammerSuitPickupObject);
+            sVrHammerSuitPickupAge = 0;
         }
     }
 }
@@ -6497,11 +6518,7 @@ static bool vr_special_moves_hammer_melee_contact(
             obj_has_behavior(contact, bhvBreakableBoxSmall) ||
             obj_has_behavior(contact, bhvJumpingBox);
         if (breakable) {
-            vr_special_moves_spawn_fire_flower_chance(
-                contact,
-                mario,
-                0.30f
-            );
+            vr_special_moves_roll_box_reward(contact, mario);
         }
         attack_object(
             mario,
@@ -7086,11 +7103,7 @@ static void vr_special_moves_update_rasengan_impact(
                     obj_has_behavior(target, bhvBreakableBoxSmall) ||
                     obj_has_behavior(target, bhvJumpingBox);
                 if (breakableTarget) {
-                    vr_special_moves_spawn_fire_flower_chance(
-                        target,
-                        mario,
-                        0.30f
-                    );
+                    vr_special_moves_roll_box_reward(target, mario);
                 }
                 attack_object(
                     mario,
@@ -7341,11 +7354,7 @@ static void vr_special_moves_apply_rasen_shuriken_damage(
     if (obj_has_behavior(object, bhvBreakableBox) ||
         obj_has_behavior(object, bhvBreakableBoxSmall) ||
         obj_has_behavior(object, bhvJumpingBox)) {
-        vr_special_moves_spawn_fire_flower_chance(
-            object,
-            mario,
-            0.30f
-        );
+        vr_special_moves_roll_box_reward(object, mario);
     }
     mario->interactObj = object;
     attack_object(

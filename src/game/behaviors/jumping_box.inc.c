@@ -71,14 +71,13 @@ void bhv_jumping_box_loop(void) {
             break;
     }
     if (o->oInteractStatus & INT_STATUS_STOP_RIDING) {
-        const bool fireFlower =
-            vr_special_moves_spawn_fire_flower_chance(
-                o,
-                &gMarioStates[0],
-                0.30f
-            );
+        const enum VrBoxReward reward =
+            vr_special_moves_roll_box_reward(o, &gMarioStates[0]);
         create_sound_spawner(SOUND_GENERAL_BREAK_BOX);
-        obj_explode_and_spawn_coins(46.0f, fireFlower ? 0 : 1);
+        obj_explode_and_spawn_coins(
+            46.0f,
+            reward == VR_BOX_REWARD_ORIGINAL ? 1 : 0
+        );
     }
     o->oInteractStatus = 0;
 }

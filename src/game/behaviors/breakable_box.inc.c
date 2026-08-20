@@ -10,13 +10,13 @@ void bhv_breakable_box_loop(void) {
     const bool locallyBroken =
         cur_obj_was_attacked_or_ground_pounded() != 0;
     if (locallyBroken || o->oSyncDeath) {
-        const bool fireFlower = locallyBroken &&
-            vr_special_moves_spawn_fire_flower_chance(
-                o,
-                &gMarioStates[0],
-                0.30f
-            );
-        obj_explode_and_spawn_coins(46.0f, fireFlower ? 0 : 1);
+        const enum VrBoxReward reward = locallyBroken
+            ? vr_special_moves_roll_box_reward(o, &gMarioStates[0])
+            : VR_BOX_REWARD_ORIGINAL;
+        obj_explode_and_spawn_coins(
+            46.0f,
+            reward == VR_BOX_REWARD_ORIGINAL ? 1 : 0
+        );
         create_sound_spawner(SOUND_GENERAL_BREAK_BOX);
     }
 }
