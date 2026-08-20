@@ -3998,6 +3998,17 @@ void patch_mtx_vr_shared(void) {
         vr_patch_controller_hand_matrices(0);
 
         if (sVrHeldMatrixHead != NULL) {
+            // Keep an immutable copy of the complete held hierarchy before
+            // applying any late hand correction. The list is patched in
+            // place, so reading an already-moved root while processing a
+            // later bone would otherwise give different offsets to different
+            // parts of the same actor and recreate the visual deformation.
+            for (struct MtxInterp *interp = sVrHeldMatrixHead;
+                 interp != NULL;
+                 interp = interp->nextVrHeld) {
+                mtxf_copy(interp->vrBase.m, interp->interp.m);
+            }
+
             Vec3f cameraPos;
             Vec3f cameraFocus;
             Mat4 cameraMatrix;
@@ -4056,7 +4067,7 @@ void patch_mtx_vr_shared(void) {
                         Vec3f localPosition = {
                             68.0f,
                             -82.0f * relativeScale,
-                            -10.0f
+                            10.0f
                         };
                         // The Hammer Suit model's head is local +Y. Flip it
                         // around the handle axis so +Y points above the fist
@@ -4113,23 +4124,59 @@ void patch_mtx_vr_shared(void) {
                             vr_hand_interaction_get_held_object_center_offset(
                                 interp->owner
                             );
-                        // Work entirely in the rendered camera space here.
-                        // Both the visible glove and this anchor now use the
-                        // same predicted OpenXR pose, so Mario locomotion can
-                        // no longer introduce a 30 Hz world/camera mismatch.
-                        // One rigid correction moves the complete hierarchy;
-                        // individual animated bones retain their offsets.
+                        Vec3f expectedRoot;
                         for (u32 axis = 0; axis < 3; axis++) {
-                            const f32 currentRoot =
+                            expectedRoot[axis] =
                                 heldRenderBase[0] * cameraMatrix[0][axis] +
                                 heldRenderBase[1] * cameraMatrix[1][axis] +
                                 heldRenderBase[2] * cameraMatrix[2][axis] +
                                 cameraMatrix[3][axis];
+                        }
+
+                        // The old perfectly smooth attachment overwrote the
+                        // translation of every animated bone with the fist
+                        // position. That removed locomotion jitter, but also
+                        // folded penguins, Bob-ombs, and other articulated
+                        // actors into one point. Find the matrix nearest the
+                        // actor's rendered root instead, then move the whole
+                        // hierarchy by the one correction derived from it.
+                        // Every bone retains its relative transform while the
+                        // actor follows the same predicted hand pose as the
+                        // visible glove at the headset refresh rate.
+                        struct MtxInterp *rootInterp = NULL;
+                        f32 rootDistanceSq = FLT_MAX;
+                        for (struct MtxInterp *candidate =
+                                 sVrHeldMatrixHead;
+                             candidate != NULL;
+                             candidate = candidate->nextVrHeld) {
+                            if (candidate->owner != interp->owner ||
+                                !candidate->usingCamSpace) {
+                                continue;
+                            }
+                            const f32 dx =
+                                candidate->vrBase.m[3][0] - expectedRoot[0];
+                            const f32 dy =
+                                candidate->vrBase.m[3][1] - expectedRoot[1];
+                            const f32 dz =
+                                candidate->vrBase.m[3][2] - expectedRoot[2];
+                            const f32 distanceSq =
+                                dx * dx + dy * dy + dz * dz;
+                            if (distanceSq < rootDistanceSq) {
+                                rootDistanceSq = distanceSq;
+                                rootInterp = candidate;
+                            }
+                        }
+                        if (rootInterp == NULL) {
+                            continue;
+                        }
+
+                        for (u32 axis = 0; axis < 3; axis++) {
                             const f32 desiredRoot =
                                 fistCameraPosition[axis] -
                                 centerOffset * cameraMatrix[1][axis];
                             interp->interp.m[3][axis] +=
-                                desiredRoot - currentRoot;
+                                desiredRoot -
+                                rootInterp->vrBase.m[3][axis];
                         }
                         continue;
                     }

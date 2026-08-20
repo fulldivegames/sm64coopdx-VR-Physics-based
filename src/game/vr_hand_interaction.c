@@ -66,7 +66,7 @@
 #define VR_CLIMB_CEILING_HAND_PLANE_TOLERANCE 8.0f
 #define VR_CLIMB_SWING_RELEASE_MIN_SPEED 110.0f
 #define VR_CLIMB_REGRAB_COOLDOWN_FRAMES 8
-#define VR_CLIMB_HANDOFF_GRACE_FRAMES 9
+#define VR_CLIMB_HANDOFF_GRACE_FRAMES 3
 #define VR_PHYSICAL_POLE_SLIDE_MAX_SPEED 6.0f
 #define VR_HEADSET_INTERACTION_RADIUS 24.0f
 #define VR_HEADSET_INTERACTION_HEIGHT 48.0f
@@ -3913,8 +3913,8 @@ static void vr_hand_interaction_update_physical_climb_handoff(
     }
 
     // Let both controllers finish processing the frame that opened the last
-    // hand. This gives the other hand a full nine simulation frames (about
-    // 0.3 seconds) to take ownership before a fall or swing-jump is applied.
+    // hand. This gives the other hand three simulation frames (about
+    // 0.1 seconds) to take ownership before a fall or swing-jump is applied.
     if (sVrPhysicalClimbHandoffGraceTimestamp == gGlobalTimer) {
         return;
     }
