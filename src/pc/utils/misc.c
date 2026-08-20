@@ -521,6 +521,31 @@ inline static void delta_interpolate_mtx_accurate(Mtx* out, Mtx* a, Mtx* b, f32 
     rematrix(out, matTranfsB);
 }
 
+void delta_interpolate_mtx_display_rate(
+    Mtx* out,
+    Mtx* a,
+    Mtx* b,
+    f32 delta
+) {
+    // This path is intentionally reserved for short-lived tracked
+    // attachments. It is evaluated once per submitted display frame, so a
+    // held animated actor receives a proper quaternion pose at 72/90/120 Hz
+    // without advancing gameplay, behavior timers, events, or networking.
+    if (delta <= 0.0f) {
+        if (out != a) memcpy(out, a, sizeof(*out));
+        return;
+    }
+    if (delta >= 1.0f || memcmp(a, b, sizeof(*a)) == 0) {
+        if (out != b) memcpy(out, b, sizeof(*out));
+        return;
+    }
+    if (sizeof(void*) > 4) {
+        delta_interpolate_mtx_accurate(out, a, b, delta);
+    } else {
+        delta_interpolate_mtx(out, a, b, delta);
+    }
+}
+
 void delta_interpolate_mtx(Mtx* out, Mtx* a, Mtx* b, f32 delta) {
     // Accurate interpolation decomposes both matrices and performs a
     // quaternion slerp. Most level geometry is static, and XR commonly asks
