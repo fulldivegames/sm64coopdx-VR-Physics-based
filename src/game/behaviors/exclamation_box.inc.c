@@ -114,11 +114,14 @@ void exclamation_box_spawn_contents(struct ExclamationBoxContent *content, u8 it
         return;
     }
 
-    // Fire Flowers may replace only the stock coin/1-Up box classes. Keep
-    // caps, shells, stars, and mod-added contents completely untouched.
+    // Special-move pickups may replace only the stock coin/1-Up box classes.
+    // Caps, shells, stars, and mod-added contents remain untouched. With both
+    // power-ups enabled this is an even three-way roll: original reward,
+    // Fire Flower, or Hammer Suit.
     if ((itemId == 4 || itemId == 5 || itemId == 6 ||
          itemId == 7 || itemId == 9) &&
-        vr_special_moves_spawn_fire_flower(o, marioState)) {
+        vr_special_moves_roll_box_reward(o, marioState) !=
+            VR_BOX_REWARD_ORIGINAL) {
         return;
     }
 

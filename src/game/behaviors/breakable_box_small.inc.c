@@ -50,15 +50,11 @@ void small_breakable_box_act_move(void) {
     // Set these flags to break the small box without a wall collision
     s32 breakStatus = ATTACK_KICK_OR_TRIP | INT_STATUS_INTERACTED | INT_STATUS_WAS_ATTACKED | INT_STATUS_STOP_RIDING;
     if ((sp1E & 2) || (o->oInteractStatus & breakStatus) == breakStatus) {
-        const bool fireFlower =
-            vr_special_moves_spawn_fire_flower_chance(
-                o,
-                &gMarioStates[0],
-                0.30f
-            );
+        const enum VrBoxReward reward =
+            vr_special_moves_roll_box_reward(o, &gMarioStates[0]);
         spawn_mist_particles();
         spawn_triangle_break_particles(20, 138, 0.7f, 3);
-        if (!fireFlower) {
+        if (reward == VR_BOX_REWARD_ORIGINAL) {
             obj_spawn_yellow_coins(o, 3);
         }
         create_sound_spawner(SOUND_GENERAL_BREAK_BOX);

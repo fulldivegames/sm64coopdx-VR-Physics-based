@@ -231,6 +231,40 @@ static f32 sTextRenderY = 0;
 static f32 sTextRenderLastX = 0;
 static f32 sTextRenderLastY = 0;
 
+static bool djui_text_apply_translation(
+    s8 pushOp,
+    f32 x,
+    f32 y,
+    f32 z
+) {
+    Mtx* matrix = alloc_display_list(sizeof(Mtx));
+    if (matrix == NULL) {
+        return false;
+    }
+    guTranslate(matrix, x, y, z);
+    gSPMatrix(
+        gDisplayListHead++,
+        VIRTUAL_TO_PHYSICAL(matrix),
+        G_MTX_MODELVIEW | G_MTX_MUL |
+            (pushOp == DJUI_MTX_PUSH ? G_MTX_PUSH : G_MTX_NOPUSH)
+    );
+    return true;
+}
+
+static bool djui_text_apply_scale(f32 x, f32 y, f32 z) {
+    Mtx* matrix = alloc_display_list(sizeof(Mtx));
+    if (matrix == NULL) {
+        return false;
+    }
+    guScale(matrix, x, y, z);
+    gSPMatrix(
+        gDisplayListHead++,
+        VIRTUAL_TO_PHYSICAL(matrix),
+        G_MTX_MODELVIEW | G_MTX_MUL | G_MTX_NOPUSH
+    );
+    return true;
+}
+
 bool djui_text_is_printable(const char *c) {
     return c != NULL && (!iscntrl(*c) || *c == 0x7F); // the star
 }
@@ -252,7 +286,14 @@ static void djui_text_render_single_char(struct DjuiText* text, char* c) {
         return;
     }
 
-    create_dl_translation_matrix(DJUI_MTX_NOPUSH, sTextRenderX - sTextRenderLastX, (sTextRenderY - sTextRenderLastY) * -1.0f, 0);
+    if (!djui_text_apply_translation(
+            DJUI_MTX_NOPUSH,
+            sTextRenderX - sTextRenderLastX,
+            (sTextRenderY - sTextRenderLastY) * -1.0f,
+            0
+        )) {
+        return;
+    }
     text->font->render_char(c);
 
     sTextRenderLastX = sTextRenderX;
@@ -461,17 +502,6 @@ static bool djui_text_render(struct DjuiBase* base) {
     struct DjuiText* text     = (struct DjuiText*)base;
     struct DjuiBaseRect* comp = &base->comp;
 
-    // Reserve both root transforms before emitting any commands. If the
-    // display-list arena is exhausted, create_dl_translation_matrix() would
-    // otherwise skip its push while the unconditional pop below still ran.
-    // That unbalanced the model-view stack and made later scrolling labels
-    // inherit a 3D/world transform until the visible item set changed.
-    Mtx* translation = alloc_display_list(sizeof(Mtx));
-    Mtx* scale = alloc_display_list(sizeof(Mtx));
-    if (translation == NULL || scale == NULL) {
-        return false;
-    }
-
     if (text->font->textBeginDisplayList != NULL) {
         gSPDisplayList(gDisplayListHead++, text->font->textBeginDisplayList);
     }
@@ -486,12 +516,15 @@ static bool djui_text_render(struct DjuiBase* base) {
     f32 translatedX = comp->x;
     f32 translatedY = comp->y;
     djui_gfx_position_translate(&translatedX, &translatedY);
-    guTranslate(translation, translatedX, translatedY, 0);
-    gSPMatrix(
-        gDisplayListHead++,
-        VIRTUAL_TO_PHYSICAL(translation),
-        G_MTX_MODELVIEW | G_MTX_MUL | G_MTX_PUSH
-    );
+    if (!djui_text_apply_translation(
+            DJUI_MTX_PUSH,
+            translatedX,
+            translatedY,
+            0
+        )) {
+        gSPDisplayList(gDisplayListHead++, dl_ia_text_end);
+        return false;
+    }
 
     // compute size
     f32 translatedWidth  = comp->width;
@@ -501,12 +534,15 @@ static bool djui_text_render(struct DjuiBase* base) {
     // compute font size
     f32 translatedFontSize = text->fontScale;
     djui_gfx_size_translate(&translatedFontSize);
-    guScale(scale, translatedFontSize, translatedFontSize, 1.0f);
-    gSPMatrix(
-        gDisplayListHead++,
-        VIRTUAL_TO_PHYSICAL(scale),
-        G_MTX_MODELVIEW | G_MTX_MUL | G_MTX_NOPUSH
-    );
+    if (!djui_text_apply_scale(
+            translatedFontSize,
+            translatedFontSize,
+            1.0f
+        )) {
+        gSPPopMatrix(gDisplayListHead++, G_MTX_MODELVIEW);
+        gSPDisplayList(gDisplayListHead++, dl_ia_text_end);
+        return false;
+    }
 
     // set color
     gDPSetPrimColor(gDisplayListHead++, 0, 0, 255, 255, 255, 255);
