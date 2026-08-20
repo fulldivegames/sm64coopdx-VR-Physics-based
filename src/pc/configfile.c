@@ -175,6 +175,7 @@ unsigned int configVrBowserSpinAcceleration       = 100;
 unsigned int configVrBowserMaxSpinSpeed           = 100;
 static unsigned int sConfigVrInteractionTuningVersion = 0;
 static unsigned int sConfigVrStarFocusDefaultVersion = 0;
+static unsigned int sConfigVrEffectsDefaultVersion = 0;
 unsigned int configVrGloveSize                    = 70;
 unsigned int configVrLeftGloveRotationX           = 180;
 unsigned int configVrLeftGloveRotationY           = 0;
@@ -528,6 +529,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_bowser_max_spin_speed",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrBowserMaxSpinSpeed},
     {.name = "vr_interaction_tuning_version",  .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrInteractionTuningVersion},
     {.name = "vr_star_focus_default_version",  .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrStarFocusDefaultVersion},
+    {.name = "vr_effects_default_version",     .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrEffectsDefaultVersion},
     {.name = "vr_glove_size",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrGloveSize},
     {.name = "vr_left_glove_rotation_x",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrLeftGloveRotationX},
     {.name = "vr_left_glove_rotation_y",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrLeftGloveRotationY},
@@ -1141,6 +1143,17 @@ static void configfile_migrate_vr_star_focus_default(void) {
     sConfigVrStarFocusDefaultVersion = 1;
 }
 
+static void configfile_migrate_vr_effect_defaults(void) {
+    if (sConfigVrEffectsDefaultVersion >= 1) {
+        return;
+    }
+
+    // Ultra Performance Mode previously wrote this option to false, leaving
+    // the tornado disabled even after the mode was turned back off. Repair
+    // that old side effect once; subsequent player choices remain untouched.
+    configVrTwirlTornadoEffect = true;
+    sConfigVrEffectsDefaultVersion = 1;
+}
 // Loads the config file specified by 'filename'
 static void configfile_load_internal(const char *filename, bool* error) {
     fs_file_t *file;
@@ -1160,6 +1173,7 @@ static void configfile_load_internal(const char *filename, bool* error) {
         configfile_migrate_vr_camera_height();
         configfile_migrate_vr_interaction_tuning();
         configfile_migrate_vr_star_focus_default();
+        configfile_migrate_vr_effect_defaults();
         configfile_save(filename);
         return;
     }
@@ -1276,6 +1290,7 @@ NEXT_OPTION:
     configfile_migrate_vr_camera_height();
     configfile_migrate_vr_interaction_tuning();
     configfile_migrate_vr_star_focus_default();
+    configfile_migrate_vr_effect_defaults();
 
     if (configGraphicsBackend < GAPI_GL || configGraphicsBackend > GAPI_MAX) { configGraphicsBackend = GAPI_GL; }
 

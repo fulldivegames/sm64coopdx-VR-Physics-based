@@ -3809,16 +3809,12 @@ static void patch_mtx_vr_ui(uint32_t eyeIndex) {
             1.0f
         );
         Mtx handHudProjection;
-        unsigned int hudHandAnchor = configVrMenuAnchor;
-        if (hudHandAnchor < VR_UI_ANCHOR_LEFT_HAND ||
-            hudHandAnchor > VR_UI_ANCHOR_RIGHT_HAND) {
-            // HUD "Hand" follows whichever hand was selected for the menu.
-            // If the menu is headset-mounted, use the right hand as the
-            // predictable fallback without adding a second hand selector.
-            hudHandAnchor = VR_UI_ANCHOR_RIGHT_HAND;
-        }
+        const unsigned int hudHandAnchor =
+            configVrHudAnchor == VR_HUD_ANCHOR_LEFT_HAND
+                ? VR_UI_ANCHOR_LEFT_HAND
+                : VR_UI_ANCHOR_RIGHT_HAND;
         bool handHud = false;
-        if (configVrHudAnchor == VR_HUD_ANCHOR_HAND) {
+        if (configVrHudAnchor != VR_HUD_ANCHOR_HEADSET) {
             // The menu and HUD frequently share the same selected hand.
             // Reuse the already sampled controller/eye projection instead of
             // repeating OpenXR pose queries and matrix construction per eye.
