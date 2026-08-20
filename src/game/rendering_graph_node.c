@@ -4671,7 +4671,21 @@ static void geo_process_master_list_sub(struct GraphNodeMasterList *node) {
         if ((currList = node->listHeads[i]) != NULL) {
             gDPSetRenderMode(gDisplayListHead++, modeList->modes[i], mode2List->modes[i]);
             while (currList != NULL) {
-                detect_and_skip_mtx_interpolation(&currList->transform, &currList->transformPrev);
+                // A held animated actor is late-anchored to the tracked hand
+                // after interpolation. Its rapidly rotating limbs can trip
+                // the generic discontinuity guard, which then repeats a 30 Hz
+                // pose for a frame and looks like hand-relative jitter. Keep
+                // full matrix interpolation for these actors; gameplay and
+                // animation timing remain unchanged.
+                if (currList->owner == NULL ||
+                    !vr_hand_interaction_is_tracked_held_object(
+                        currList->owner
+                    )) {
+                    detect_and_skip_mtx_interpolation(
+                        &currList->transform,
+                        &currList->transformPrev
+                    );
+                }
 
                 struct MtxInterp *interp = growing_array_alloc(sMtxTbl, sizeof(struct MtxInterp));
                 interp->pos = gDisplayListHead;

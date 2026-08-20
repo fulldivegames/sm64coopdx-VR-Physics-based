@@ -4,6 +4,7 @@
 #include "djui_panel_player.h"
 #include "djui_panel_dynos.h"
 #include "djui_panel_options.h"
+#include "djui_panel_vr.h"
 #include "djui_panel_host.h"
 #include "djui_panel_client_server_settings.h"
 #include "djui_panel_menu.h"
@@ -66,6 +67,10 @@ void djui_panel_pause_create(struct DjuiBase* caller) {
             djui_button_left_create(&rect1->base, DLANG(PAUSE, PLAYER), DJUI_BUTTON_STYLE_NORMAL, djui_panel_player_create);
             djui_button_right_create(&rect1->base, DLANG(PAUSE, DYNOS_PACKS), DJUI_BUTTON_STYLE_NORMAL, djui_panel_dynos_create);
         }
+
+        // VR belongs at the top level: it is a primary way to configure this
+        // build, not a display option hidden another panel deep.
+        djui_button_create(body, "VR Settings", DJUI_BUTTON_STYLE_NORMAL, djui_panel_vr_create);
 
         struct DjuiButton* button3 = djui_button_create(body, DLANG(PAUSE, OPTIONS), DJUI_BUTTON_STYLE_NORMAL, djui_panel_options_create);
         defaultBase = &button3->base;

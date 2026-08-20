@@ -1364,6 +1364,10 @@ void configfile_load(void) {
         configfile_save(configfile_backup_name());
     }
 #endif
+    // Flame/lava reductions are now part of the baseline VR renderer. Keep
+    // the legacy config key readable for older profiles, but never allow an
+    // old `false` value to silently turn the optimized path back off.
+    configVrFlameOptimizations = true;
 }
 
 static void configfile_save_option(FILE *file, const struct ConfigOption *option, bool isSecret) {
