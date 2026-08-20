@@ -4087,6 +4087,54 @@ void patch_mtx_vr_shared(void) {
                     }
                 }
 
+                const u32 heldHand =
+                    vr_hand_interaction_get_tracked_held_hand(
+                        interp->owner
+                    );
+                if (interp->usingCamSpace && sCameraNode != NULL &&
+                    heldHand < VR_CONTROLLER_COUNT) {
+                    Mat4 handMatrix;
+                    if (vr_get_controller_hand_attachment_matrix(
+                            heldHand,
+                            handMatrix)) {
+                        Vec3f fistCameraPosition;
+                        vr_get_controller_fist_from_hand_matrix(
+                            handMatrix,
+                            fistCameraPosition
+                        );
+                        Vec3f heldRenderBase;
+                        delta_interpolate_vec3f(
+                            heldRenderBase,
+                            interp->owner->header.gfx.prevPos,
+                            interp->owner->header.gfx.pos,
+                            gRenderingDelta
+                        );
+                        const f32 centerOffset =
+                            vr_hand_interaction_get_held_object_center_offset(
+                                interp->owner
+                            );
+                        // Work entirely in the rendered camera space here.
+                        // Both the visible glove and this anchor now use the
+                        // same predicted OpenXR pose, so Mario locomotion can
+                        // no longer introduce a 30 Hz world/camera mismatch.
+                        // One rigid correction moves the complete hierarchy;
+                        // individual animated bones retain their offsets.
+                        for (u32 axis = 0; axis < 3; axis++) {
+                            const f32 currentRoot =
+                                heldRenderBase[0] * cameraMatrix[0][axis] +
+                                heldRenderBase[1] * cameraMatrix[1][axis] +
+                                heldRenderBase[2] * cameraMatrix[2][axis] +
+                                cameraMatrix[3][axis];
+                            const f32 desiredRoot =
+                                fistCameraPosition[axis] -
+                                centerOffset * cameraMatrix[1][axis];
+                            interp->interp.m[3][axis] +=
+                                desiredRoot - currentRoot;
+                        }
+                        continue;
+                    }
+                }
+
                 Vec3f latePosition;
                 if (!vr_hand_interaction_get_late_held_object_position(
                         interp->owner,
@@ -4289,28 +4337,12 @@ void patch_mtx_interpolated(f32 delta) {
                 srcMtx = &bufMtx;
                 srcMtxPrev = &bufMtxPrev;
             }
-            if (interp->owner != NULL &&
-                vr_hand_interaction_is_tracked_held_object(
-                    interp->owner
-                )) {
-                // Experimental held-animation-rate path: sample every bone at
-                // the headset's submitted frame rate while it is attached to
-                // a hand. Clearing/releasing the tracked hold immediately
-                // returns the actor to the normal interpolation path.
-                delta_interpolate_mtx_display_rate(
-                    &interp->interp,
-                    srcMtxPrev,
-                    srcMtx,
-                    delta
-                );
-            } else {
-                delta_interpolate_mtx(
-                    &interp->interp,
-                    srcMtxPrev,
-                    srcMtx,
-                    delta
-                );
-            }
+            delta_interpolate_mtx(
+                &interp->interp,
+                srcMtxPrev,
+                srcMtx,
+                delta
+            );
             if (interp->usingCamSpace) {
                 // transform back to camera space, respecting camera interpolation
             mtxf_mul(interp->interp.m, interp->interp.m, camInterp.m);
@@ -4692,21 +4724,10 @@ static void geo_process_master_list_sub(struct GraphNodeMasterList *node) {
         if ((currList = node->listHeads[i]) != NULL) {
             gDPSetRenderMode(gDisplayListHead++, modeList->modes[i], mode2List->modes[i]);
             while (currList != NULL) {
-                // A held animated actor is late-anchored to the tracked hand
-                // after interpolation. Its rapidly rotating limbs can trip
-                // the generic discontinuity guard, which then repeats a 30 Hz
-                // pose for a frame and looks like hand-relative jitter. Keep
-                // full matrix interpolation for these actors; gameplay and
-                // animation timing remain unchanged.
-                if (currList->owner == NULL ||
-                    !vr_hand_interaction_is_tracked_held_object(
-                        currList->owner
-                    )) {
-                    detect_and_skip_mtx_interpolation(
-                        &currList->transform,
-                        &currList->transformPrev
-                    );
-                }
+                detect_and_skip_mtx_interpolation(
+                    &currList->transform,
+                    &currList->transformPrev
+                );
 
                 struct MtxInterp *interp = growing_array_alloc(sMtxTbl, sizeof(struct MtxInterp));
                 interp->pos = gDisplayListHead;

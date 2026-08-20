@@ -103,7 +103,7 @@
 #define VR_HAMMER_GRAVITY 1.75f
 #define VR_HAMMER_MIN_HORIZONTAL_SPEED 38.0f
 #define VR_HAMMER_MAX_HORIZONTAL_SPEED 72.0f
-#define VR_HAMMER_LAUNCH_ARC_BIAS 9.0f
+#define VR_HAMMER_LAUNCH_ARC_BIAS 12.0f
 #define VR_HAMMER_CONTACT_PADDING 32.0f
 #define VR_HAMMER_MELEE_RADIUS 30.0f
 #define VR_HAMMER_PICKUP_GRAVITY 0.65f
@@ -6138,6 +6138,13 @@ static bool vr_special_moves_projectile_hits_enemy(
                 continue;
             }
             if (hammerImpact) {
+                // Hammer Suit follows the supported special-move enemy list,
+                // but Mr. Blizzard is intentionally immune: melting or
+                // exploding a snowman with a physical hammer is not a
+                // sensible Hammer Suit interaction.
+                if (obj_has_behavior(target, bhvMrBlizzard)) {
+                    continue;
+                }
                 if (!vr_special_moves_rasengan_target_is_eligible(
                         mario,
                         target
