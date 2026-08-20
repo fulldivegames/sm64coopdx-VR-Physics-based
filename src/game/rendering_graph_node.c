@@ -743,6 +743,8 @@ enum VrBillboardType {
 static struct GrowingArray* sMtxTbl = NULL;
 static struct MtxInterp* sVrBillboardHead = NULL;
 static struct MtxInterp* sVrHeldMatrixHead = NULL;
+static struct Object* sVrHeldAnchorOwner = NULL;
+static void* sVrHeldAnchorDisplayList = NULL;
 static bool sVrFirstPersonAnchorValid = false;
 static u32 sVrFirstPersonAnchorTimestamp = 0;
 static Vec3f sVrFirstPersonAnchorPrev = { 0 };
@@ -4067,7 +4069,7 @@ void patch_mtx_vr_shared(void) {
                         Vec3f localPosition = {
                             68.0f,
                             -82.0f * relativeScale,
-                            10.0f
+                            14.0f
                         };
                         // The Hammer Suit model's head is local +Y. Flip it
                         // around the handle axis so +Y points above the fist
@@ -4144,26 +4146,51 @@ void patch_mtx_vr_shared(void) {
                         // actor follows the same predicted hand pose as the
                         // visible glove at the headset refresh rate.
                         struct MtxInterp *rootInterp = NULL;
-                        f32 rootDistanceSq = FLT_MAX;
-                        for (struct MtxInterp *candidate =
-                                 sVrHeldMatrixHead;
-                             candidate != NULL;
-                             candidate = candidate->nextVrHeld) {
-                            if (candidate->owner != interp->owner ||
-                                !candidate->usingCamSpace) {
-                                continue;
+                        if (sVrHeldAnchorOwner == interp->owner &&
+                            sVrHeldAnchorDisplayList != NULL) {
+                            for (struct MtxInterp *candidate =
+                                     sVrHeldMatrixHead;
+                                 candidate != NULL;
+                                 candidate = candidate->nextVrHeld) {
+                                if (candidate->owner == interp->owner &&
+                                    candidate->usingCamSpace &&
+                                    candidate->displayList ==
+                                        sVrHeldAnchorDisplayList) {
+                                    rootInterp = candidate;
+                                    break;
+                                }
                             }
-                            const f32 dx =
-                                candidate->vrBase.m[3][0] - expectedRoot[0];
-                            const f32 dy =
-                                candidate->vrBase.m[3][1] - expectedRoot[1];
-                            const f32 dz =
-                                candidate->vrBase.m[3][2] - expectedRoot[2];
-                            const f32 distanceSq =
-                                dx * dx + dy * dy + dz * dz;
-                            if (distanceSq < rootDistanceSq) {
-                                rootDistanceSq = distanceSq;
-                                rootInterp = candidate;
+                        }
+                        f32 rootDistanceSq = FLT_MAX;
+                        if (rootInterp == NULL) {
+                            for (struct MtxInterp *candidate =
+                                     sVrHeldMatrixHead;
+                                 candidate != NULL;
+                                 candidate = candidate->nextVrHeld) {
+                                if (candidate->owner != interp->owner ||
+                                    !candidate->usingCamSpace) {
+                                    continue;
+                                }
+                                const f32 dx =
+                                    candidate->vrBase.m[3][0] -
+                                    expectedRoot[0];
+                                const f32 dy =
+                                    candidate->vrBase.m[3][1] -
+                                    expectedRoot[1];
+                                const f32 dz =
+                                    candidate->vrBase.m[3][2] -
+                                    expectedRoot[2];
+                                const f32 distanceSq =
+                                    dx * dx + dy * dy + dz * dz;
+                                if (distanceSq < rootDistanceSq) {
+                                    rootDistanceSq = distanceSq;
+                                    rootInterp = candidate;
+                                }
+                            }
+                            if (rootInterp != NULL) {
+                                sVrHeldAnchorOwner = interp->owner;
+                                sVrHeldAnchorDisplayList =
+                                    rootInterp->displayList;
                             }
                         }
                         if (rootInterp == NULL) {
@@ -4225,6 +4252,11 @@ void patch_mtx_vr_shared(void) {
                     interp->interp.m[3][2] += dz;
                 }
             }
+        } else {
+            // A release ends the stable-root lifetime. A later grab may reuse
+            // the same object-pool address with a completely different graph.
+            sVrHeldAnchorOwner = NULL;
+            sVrHeldAnchorDisplayList = NULL;
         }
     }
 }

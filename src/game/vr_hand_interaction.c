@@ -6042,29 +6042,35 @@ static void vr_special_moves_update_hammer_suit_shell(
         sVrHammerSuitShellObject->oInteractType = 0;
     }
 
-    // The shell is an independent object, so preserve its prior attachment
-    // transform before following Mario. Letting the ordinary render
-    // interpolator blend these matching samples keeps it locked to Mario's
-    // back instead of visibly stepping at the 30 Hz simulation rate.
-    vec3f_copy(
-        sVrHammerSuitShellObject->header.gfx.prevPos,
-        sVrHammerSuitShellObject->header.gfx.pos
-    );
-    vec3s_copy(
-        sVrHammerSuitShellObject->header.gfx.prevAngle,
-        sVrHammerSuitShellObject->header.gfx.angle
-    );
-    const s16 yaw = mario->faceAngle[1];
+    // Drive both interpolation endpoints from Mario's corresponding rendered
+    // body samples. Copying the shell's own previous transform made it trail
+    // Mario by a simulation update and produced the same intermittent jitter
+    // that physically held actors used to show in third person.
+    const s16 yaw = mario->marioObj->header.gfx.angle[1];
+    const s16 previousYaw =
+        mario->marioObj->header.gfx.prevAngle[1];
     sVrHammerSuitShellObject->oPosX =
-        mario->pos[0] - sins(yaw) * 8.0f;
-    sVrHammerSuitShellObject->oPosY = mario->pos[1] + 68.0f;
+        mario->marioObj->header.gfx.pos[0] - sins(yaw) * 8.0f;
+    sVrHammerSuitShellObject->oPosY =
+        mario->marioObj->header.gfx.pos[1] + 68.0f;
     sVrHammerSuitShellObject->oPosZ =
-        mario->pos[2] - coss(yaw) * 8.0f;
+        mario->marioObj->header.gfx.pos[2] - coss(yaw) * 8.0f;
     sVrHammerSuitShellObject->oFaceAnglePitch = -0x4000;
     sVrHammerSuitShellObject->oFaceAngleYaw = yaw;
     sVrHammerSuitShellObject->oFaceAngleRoll = 0;
     obj_scale(sVrHammerSuitShellObject, 0.44f);
     obj_update_gfx_pos_and_angle(sVrHammerSuitShellObject);
+    sVrHammerSuitShellObject->header.gfx.prevPos[0] =
+        mario->marioObj->header.gfx.prevPos[0] -
+        sins(previousYaw) * 8.0f;
+    sVrHammerSuitShellObject->header.gfx.prevPos[1] =
+        mario->marioObj->header.gfx.prevPos[1] + 68.0f;
+    sVrHammerSuitShellObject->header.gfx.prevPos[2] =
+        mario->marioObj->header.gfx.prevPos[2] -
+        coss(previousYaw) * 8.0f;
+    sVrHammerSuitShellObject->header.gfx.prevAngle[0] = -0x4000;
+    sVrHammerSuitShellObject->header.gfx.prevAngle[1] = previousYaw;
+    sVrHammerSuitShellObject->header.gfx.prevAngle[2] = 0;
 }
 
 static bool vr_special_moves_point_is_behind_target(
@@ -6413,6 +6419,14 @@ static bool vr_special_moves_hammer_melee_contact(
                 &targetRadius,
                 &targetHeight
             );
+            if (obj_has_behavior(target, bhvChainChomp)) {
+                // Chain Chomp's native interaction bounds are intentionally
+                // small and do not match its visible head. Enlarge only the
+                // Hammer Suit head contact; ordinary fist/punch collision is
+                // deliberately left unchanged.
+                targetRadius = fmaxf(targetRadius, 160.0f);
+                targetHeight = fmaxf(targetHeight, 300.0f);
+            }
             const f32 targetBottom =
                 target->oPosY - target->hitboxDownOffset;
             const f32 targetTop = targetBottom + targetHeight;
