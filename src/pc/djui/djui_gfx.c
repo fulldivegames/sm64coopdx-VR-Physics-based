@@ -289,14 +289,21 @@ bool djui_gfx_add_clipping_specific(struct DjuiBase* base, f32 dX, f32 dY, f32 d
     if (dY2 < clip->y) { return true; }
     if (dY  > clipY2)  { return true; }
 
-    f32 dClipX1 = fmax((clip->x - dX) / dW, 0);
-    f32 dClipY1 = fmax((clip->y - dY) / dH, 0);
-    f32 dClipX2 = fmax((dX - (clipX2 - dW)) / dW, 0);
-    f32 dClipY2 = fmax((dY - (clipY2 - dH)) / dH, 0);
+    f32 dClipX1 = fmin(fmax((clip->x - dX) / dW, 0), 1);
+    f32 dClipY1 = fmin(fmax((clip->y - dY) / dH, 0), 1);
+    f32 dClipX2 = fmin(fmax((dX - (clipX2 - dW)) / dW, 0), 1);
+    f32 dClipY2 = fmin(fmax((dY - (clipY2 - dH)) / dH, 0), 1);
 
-    if ((dClipX1 != 0) || (dClipY1 != 0) || (dClipX2 != 0) || (dClipY2 != 0)) {
-        gDPSetTextureClippingDjui(gDisplayListHead++, (u8)(dClipX1 * 255), (u8)(dClipY1 * 255), (u8)(dClipX2 * 255), (u8)(dClipY2 * 255));
-    }
+    // Clipping is persistent renderer state. Always update it for every visible
+    // primitive, including the all-zero case, so a fully visible glyph cannot
+    // inherit the partial clipping from the preceding glyph while scrolling.
+    gDPSetTextureClippingDjui(
+        gDisplayListHead++,
+        (u8)(dClipX1 * 255),
+        (u8)(dClipY1 * 255),
+        (u8)(dClipX2 * 255),
+        (u8)(dClipY2 * 255)
+    );
 
     return false;
 }
