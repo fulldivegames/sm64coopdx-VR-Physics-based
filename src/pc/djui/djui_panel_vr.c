@@ -2038,8 +2038,6 @@ static void djui_panel_vr_special_create(struct DjuiBase* caller) {
         djui_panel_vr_experimental_create);
     djui_button_create(body, "Special Moves", DJUI_BUTTON_STYLE_NORMAL,
         djui_panel_vr_special_moves_create);
-    djui_button_create(body, "Cheats", DJUI_BUTTON_STYLE_NORMAL,
-        djui_panel_vr_cheats_create);
     djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK,
         djui_panel_menu_back);
     djui_panel_add(caller, panel, NULL);
@@ -2097,6 +2095,13 @@ void djui_panel_vr_create(struct DjuiBase* caller) {
             "Special",
             DJUI_BUTTON_STYLE_NORMAL,
             djui_panel_vr_special_create
+        );
+
+        djui_button_create(
+            body,
+            "Cheats",
+            DJUI_BUTTON_STYLE_NORMAL,
+            djui_panel_vr_cheats_create
         );
 
         djui_button_create(
