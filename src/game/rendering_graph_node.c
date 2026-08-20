@@ -4289,7 +4289,28 @@ void patch_mtx_interpolated(f32 delta) {
                 srcMtx = &bufMtx;
                 srcMtxPrev = &bufMtxPrev;
             }
-            delta_interpolate_mtx(&interp->interp, srcMtxPrev, srcMtx, delta);
+            if (interp->owner != NULL &&
+                vr_hand_interaction_is_tracked_held_object(
+                    interp->owner
+                )) {
+                // Experimental held-animation-rate path: sample every bone at
+                // the headset's submitted frame rate while it is attached to
+                // a hand. Clearing/releasing the tracked hold immediately
+                // returns the actor to the normal interpolation path.
+                delta_interpolate_mtx_display_rate(
+                    &interp->interp,
+                    srcMtxPrev,
+                    srcMtx,
+                    delta
+                );
+            } else {
+                delta_interpolate_mtx(
+                    &interp->interp,
+                    srcMtxPrev,
+                    srcMtx,
+                    delta
+                );
+            }
             if (interp->usingCamSpace) {
                 // transform back to camera space, respecting camera interpolation
             mtxf_mul(interp->interp.m, interp->interp.m, camInterp.m);
