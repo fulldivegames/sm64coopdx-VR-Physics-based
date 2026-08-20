@@ -374,7 +374,15 @@ void render_hud_power_meter(void) {
 #endif
 
 void render_hud_icon(Vtx *vtx, const Texture *texture, u32 fmt, u32 siz, s32 texW, s32 texH, s32 x, s32 y, s32 w, s32 h, s32 tileX, s32 tileY, s32 tileW, s32 tileH) {
-    create_dl_ortho_matrix();
+    // HUD icons create their own orthographic projection, unlike the text
+    // glyphs around them. Register that projection with the HUD anchor so
+    // Mario's head and the camera/Lakitu status icon cannot remain attached
+    // to a hand-mounted menu while their accompanying text is on the HMD.
+    if (vr_is_active()) {
+        create_dl_vr_hud_matrix();
+    } else {
+        create_dl_ortho_matrix();
+    }
     if (!vtx) {
         vtx = alloc_display_list(sizeof(Vtx) * 4);
         vtx[0] = (Vtx) {{{ x,     y - h, 0 }, 0, {  tileX          << 5, (tileY + tileH) << 5 }, { 0xFF, 0xFF, 0xFF, 0xFF }}};

@@ -277,7 +277,15 @@ void create_dl_scale_matrix(s8 pushOp, f32 x, f32 y, f32 z) {
         gSPMatrix(gDisplayListHead++, VIRTUAL_TO_PHYSICAL(matrix), G_MTX_MODELVIEW | G_MTX_MUL | G_MTX_NOPUSH);
 }
 
-static void create_dl_ortho_matrix_internal(bool vrUi) {
+enum VrOrthoAnchorGroup {
+    VR_ORTHO_ANCHOR_NONE,
+    VR_ORTHO_ANCHOR_UI,
+    VR_ORTHO_ANCHOR_HUD,
+};
+
+static void create_dl_ortho_matrix_internal(
+    enum VrOrthoAnchorGroup anchorGroup
+) {
     Mtx *matrix = (Mtx *) alloc_display_list(sizeof(Mtx));
 
     if (matrix == NULL) {
@@ -288,8 +296,10 @@ static void create_dl_ortho_matrix_internal(bool vrUi) {
 
     guOrtho(matrix, 0.0f, SCREEN_WIDTH, 0.0f, SCREEN_HEIGHT, -10.0f, 10.0f, 1.0f);
 
-    if (vrUi) {
+    if (anchorGroup == VR_ORTHO_ANCHOR_UI) {
         register_mtx_vr_ui(matrix);
+    } else if (anchorGroup == VR_ORTHO_ANCHOR_HUD) {
+        register_mtx_vr_hud(matrix);
     }
 
     // Should produce G_RDPHALF_1 in Fast3D
@@ -299,11 +309,17 @@ static void create_dl_ortho_matrix_internal(bool vrUi) {
 }
 
 void create_dl_ortho_matrix(void) {
-    create_dl_ortho_matrix_internal(vr_is_active());
+    create_dl_ortho_matrix_internal(
+        vr_is_active() ? VR_ORTHO_ANCHOR_UI : VR_ORTHO_ANCHOR_NONE
+    );
 }
 
 void create_dl_vr_ui_matrix(void) {
-    create_dl_ortho_matrix_internal(true);
+    create_dl_ortho_matrix_internal(VR_ORTHO_ANCHOR_UI);
+}
+
+void create_dl_vr_hud_matrix(void) {
+    create_dl_ortho_matrix_internal(VR_ORTHO_ANCHOR_HUD);
 }
 
 void render_screen_texture_rectangle(s16 x, s16 y, s16 width, s16 height,

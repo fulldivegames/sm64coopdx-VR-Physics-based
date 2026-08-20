@@ -1869,7 +1869,17 @@ static void djui_panel_vr_tutorial_physical(
     djui_panel_vr_tutorial_page(
         caller,
         "Hands & Physical Actions",
-        "Swing a fist to punch enemies and break valid blocks. Close a hand with Grip to grab supported objects; release to drop or throw using your real hand velocity. Trigger-based punches remain available when enabled. Head and hand colliders can collect stars, coins, caps, and 1-Ups where supported. Physical hand collision stops gloves at solid geometry unless an exception is enabled."
+        "Hold a Grip button to make a fist, then swing that fist to punch enemies and break valid blocks. You must make a fist for a physical punch. Close a hand with Grip to grab supported objects; release to drop or throw using your real hand velocity. Head and hand colliders can collect stars, coins, caps, and 1-Ups where supported. Physical hand collision stops gloves at solid geometry unless an exception is enabled."
+    );
+}
+
+static void djui_panel_vr_tutorial_troubleshooting(
+    struct DjuiBase* caller
+) {
+    djui_panel_vr_tutorial_page(
+        caller,
+        "Common Bugs & Fixes",
+        "If performance is lower than expected after entering a course or loading content, fully restart the game; this commonly clears temporary performance or visual issues. Recenter if height or forward direction looks wrong. If menu text appears blurry or a mod leaves visual artifacts, restarting can also restore the normal display. Disable recently enabled gameplay or HUD mods when an issue only appears with those mods active."
     );
 }
 
@@ -1985,6 +1995,7 @@ static void djui_panel_vr_tutorial_create(struct DjuiBase* caller) {
     djui_button_create(body, "Objects, Bosses & Bowser", DJUI_BUTTON_STYLE_NORMAL, djui_panel_vr_tutorial_bowser);
     djui_button_create(body, "Menus, HUD & Multiplayer", DJUI_BUTTON_STYLE_NORMAL, djui_panel_vr_tutorial_ui);
     djui_button_create(body, "Special Moves", DJUI_BUTTON_STYLE_NORMAL, djui_panel_vr_tutorial_moves);
+    djui_button_create(body, "Common Bugs & Fixes", DJUI_BUTTON_STYLE_NORMAL, djui_panel_vr_tutorial_troubleshooting);
     djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK, djui_panel_menu_back);
     djui_panel_add(caller, panel, NULL);
 }

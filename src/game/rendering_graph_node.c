@@ -4087,32 +4087,6 @@ void patch_mtx_vr_shared(void) {
                     }
                 }
 
-                const u32 heldHand =
-                    vr_hand_interaction_get_tracked_held_hand(
-                        interp->owner
-                    );
-                if (heldHand < VR_CONTROLLER_COUNT) {
-                    Mat4 handMatrix;
-                    if (vr_get_controller_hand_attachment_matrix(
-                            heldHand,
-                            handMatrix)) {
-                        Vec3f fistPosition;
-                        vr_get_controller_fist_from_hand_matrix(
-                            handMatrix,
-                            fistPosition
-                        );
-                        const f32 centerOffset =
-                            vr_hand_interaction_get_held_object_center_offset(
-                                interp->owner
-                            );
-                        interp->interp.m[3][0] = fistPosition[0];
-                        interp->interp.m[3][1] =
-                            fistPosition[1] - centerOffset;
-                        interp->interp.m[3][2] = fistPosition[2];
-                        continue;
-                    }
-                }
-
                 Vec3f latePosition;
                 if (!vr_hand_interaction_get_late_held_object_position(
                         interp->owner,
@@ -4130,6 +4104,13 @@ void patch_mtx_vr_shared(void) {
                 const f32 dx = latePosition[0] - heldRenderBase[0];
                 const f32 dy = latePosition[1] - heldRenderBase[1];
                 const f32 dz = latePosition[2] - heldRenderBase[2];
+                // Apply one common late hand-pose delta to every matrix in an
+                // animated held actor. Replacing every bone's translation
+                // with the fist position collapsed Bob-ombs, penguins, and
+                // other articulated models into a bunched-up pose. Their
+                // native animation remains simulation-driven and interpolated
+                // at render rate; only the complete animated hierarchy is
+                // moved to the latest tracked hand pose here.
                 if (interp->usingCamSpace && sCameraNode != NULL) {
                     interp->interp.m[3][0] +=
                         dx * cameraMatrix[0][0] +
