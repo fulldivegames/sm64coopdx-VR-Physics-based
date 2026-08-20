@@ -3549,6 +3549,139 @@ void register_mtx_vr_hud(Mtx *matrix) {
     sVrHudMatrices[sVrHudMatrixCount++] = matrix;
 }
 
+static bool vr_build_hand_ui_projection(
+    uint32_t eyeIndex,
+    unsigned int anchor,
+    Mtx* fixedProjection
+) {
+    if (eyeIndex >= 2 || fixedProjection == NULL ||
+        anchor < VR_UI_ANCHOR_LEFT_HAND ||
+        anchor > VR_UI_ANCHOR_RIGHT_HAND) {
+        return false;
+    }
+
+    const u32 hand = anchor == VR_UI_ANCHOR_LEFT_HAND
+        ? VR_CONTROLLER_LEFT
+        : VR_CONTROLLER_RIGHT;
+    struct VrControllerState state;
+    float eyeTangents[4] = { 0 };
+    float headTranslation[3] = { 0 };
+    float eyeOffset[3] = { 0 };
+    float headRotation[4] = { 0 };
+    if (!vr_get_controller_state(hand, &state) ||
+        (!state.gripPoseValid && !state.aimPoseValid) ||
+        !vr_get_eye_tangents(eyeIndex, eyeTangents) ||
+        !vr_get_head_translation(headTranslation) ||
+        !vr_get_head_rotation(headRotation) ||
+        !vr_get_eye_offset(eyeIndex, eyeOffset)) {
+        return false;
+    }
+
+    const float* position = state.gripPoseValid
+        ? state.gripPosition
+        : state.aimPosition;
+    const float* rotation = state.aimPoseValid
+        ? state.aimRotation
+        : state.gripRotation;
+    Vec3f right = { 1.0f, 0.0f, 0.0f };
+    Vec3f up = { 0.0f, 1.0f, 0.0f };
+    Vec3f backward = { 0.0f, 0.0f, 1.0f };
+    vr_rotate_pose_vector(rotation, right, right);
+    vr_rotate_pose_vector(rotation, up, up);
+    vr_rotate_pose_vector(rotation, backward, backward);
+
+    // Place a readable 4:3 panel just above the controller/glove's top face.
+    // Its axes come directly from the latest OpenXR pose, so rotation and
+    // translation update once per submitted headset frame rather than at the
+    // 30 Hz gameplay rate.
+    const f32 unitsPerMeter = 100.0f;
+    const f32 panelWidth = 32.0f;
+    const f32 panelHeight = panelWidth *
+        (f32)SCREEN_HEIGHT / (f32)SCREEN_WIDTH;
+    Vec3f panelRight = { right[0], right[1], right[2] };
+    Vec3f panelUp = { -backward[0], -backward[1], -backward[2] };
+    Vec3f center = {
+        position[0] * unitsPerMeter + up[0] * 9.0f - backward[0] * 2.0f,
+        position[1] * unitsPerMeter + up[1] * 9.0f - backward[1] * 2.0f,
+        position[2] * unitsPerMeter + up[2] * 9.0f - backward[2] * 2.0f
+    };
+
+    Mat4 panel;
+    mtxf_identity(panel);
+    for (u32 axis = 0; axis < 3; axis++) {
+        panel[0][axis] = panelRight[axis] *
+            panelWidth / (f32)SCREEN_WIDTH;
+        panel[1][axis] = panelUp[axis] *
+            panelHeight / (f32)SCREEN_HEIGHT;
+        panel[3][axis] = center[axis] -
+            panelRight[axis] * panelWidth * 0.5f -
+            panelUp[axis] * panelHeight * 0.5f;
+    }
+
+    // Build a tracking-space view matrix even in title/file-select scenes;
+    // those scenes normally use a deliberately head-locked world view, while
+    // a controller-mounted panel must remain relative to the real hand.
+    Vec3f viewRight = { 1.0f, 0.0f, 0.0f };
+    Vec3f viewUp = { 0.0f, 1.0f, 0.0f };
+    Vec3f viewBackward = { 0.0f, 0.0f, 1.0f };
+    vr_rotate_pose_vector(headRotation, viewRight, viewRight);
+    vr_rotate_pose_vector(headRotation, viewUp, viewUp);
+    vr_rotate_pose_vector(headRotation, viewBackward, viewBackward);
+    Mat4 view;
+    for (u32 axis = 0; axis < 3; axis++) {
+        view[axis][0] = viewRight[axis];
+        view[axis][1] = viewUp[axis];
+        view[axis][2] = viewBackward[axis];
+        view[axis][3] = 0.0f;
+    }
+    const f32 trackedX = headTranslation[0] * unitsPerMeter;
+    const f32 trackedY = headTranslation[1] * unitsPerMeter;
+    const f32 trackedZ = headTranslation[2] * unitsPerMeter;
+    view[3][0] = -(trackedX * view[0][0] +
+                     trackedY * view[1][0] +
+                     trackedZ * view[2][0]) -
+        eyeOffset[0] * unitsPerMeter;
+    view[3][1] = -(trackedX * view[0][1] +
+                     trackedY * view[1][1] +
+                     trackedZ * view[2][1]) -
+        eyeOffset[1] * unitsPerMeter;
+    view[3][2] = -(trackedX * view[0][2] +
+                     trackedY * view[1][2] +
+                     trackedZ * view[2][2]) -
+        eyeOffset[2] * unitsPerMeter;
+    view[3][3] = 1.0f;
+
+    const f32 tanLeft = eyeTangents[0];
+    const f32 tanRight = eyeTangents[1];
+    const f32 tanDown = eyeTangents[2];
+    const f32 tanUp = eyeTangents[3];
+    const f32 tanWidth = tanRight - tanLeft;
+    const f32 tanHeight = tanUp - tanDown;
+    if (tanWidth <= 0.000001f || tanHeight <= 0.000001f) {
+        return false;
+    }
+
+    const f32 near = 0.5f;
+    const f32 far = 10000.0f;
+    Mat4 perspective;
+    mtxf_identity(perspective);
+    perspective[0][0] = 2.0f / tanWidth;
+    perspective[1][1] = 2.0f / tanHeight;
+    perspective[2][0] = (tanRight + tanLeft) / tanWidth;
+    perspective[2][1] = (tanUp + tanDown) / tanHeight;
+    perspective[2][2] = (near + far) / (near - far);
+    perspective[2][3] = -1.0f;
+    perspective[3][2] = 2.0f * near * far / (near - far);
+    perspective[3][3] = 0.0f;
+
+    Mat4 viewProjection;
+    Mat4 panelProjection;
+    mtxf_mul(viewProjection, view, perspective);
+    mtxf_mul(panelProjection, panel, viewProjection);
+    mtxf_to_mtx(fixedProjection, panelProjection);
+    return true;
+}
+
 static void patch_mtx_vr_ui(uint32_t eyeIndex) {
     if (sVrUiMatrixCount == 0 && sVrHudMatrixCount == 0) {
         return;
@@ -3602,8 +3735,18 @@ static void patch_mtx_vr_ui(uint32_t eyeIndex) {
         10.0f,
         1.0f
     );
+    Mtx menuProjection;
+    const bool handMenu = vr_build_hand_ui_projection(
+        eyeIndex,
+        configVrMenuAnchor,
+        &menuProjection
+    );
     for (u32 i = 0; i < sVrUiMatrixCount; i++) {
-        memcpy(sVrUiMatrices[i], &projection, sizeof(projection));
+        memcpy(
+            sVrUiMatrices[i],
+            handMenu ? &menuProjection : &projection,
+            sizeof(projection)
+        );
     }
 
     if (sVrHudMatrixCount > 0) {
@@ -3626,10 +3769,16 @@ static void patch_mtx_vr_ui(uint32_t eyeIndex) {
             10.0f,
             1.0f
         );
+        Mtx handHudProjection;
+        const bool handHud = vr_build_hand_ui_projection(
+            eyeIndex,
+            configVrHudAnchor,
+            &handHudProjection
+        );
         for (u32 i = 0; i < sVrHudMatrixCount; i++) {
             memcpy(
                 sVrHudMatrices[i],
-                &hudProjection,
+                handHud ? &handHudProjection : &hudProjection,
                 sizeof(hudProjection)
             );
         }
