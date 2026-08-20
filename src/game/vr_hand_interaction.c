@@ -104,7 +104,6 @@
 #define VR_HAMMER_MIN_HORIZONTAL_SPEED 38.0f
 #define VR_HAMMER_MAX_HORIZONTAL_SPEED 72.0f
 #define VR_HAMMER_LAUNCH_ARC_BIAS 9.0f
-#define VR_HAMMER_VOLLEY_SPEED_STEP 0.12f
 #define VR_HAMMER_CONTACT_PADDING 32.0f
 #define VR_HAMMER_MELEE_RADIUS 30.0f
 #define VR_HAMMER_PICKUP_GRAVITY 0.65f
@@ -7051,6 +7050,13 @@ static void vr_special_moves_launch_hammer_volley(
     // of letting the projectile float like the Rasen-Shuriken.
     baseVelocity[1] += VR_HAMMER_LAUNCH_ARC_BIAS;
 
+    // The complete volley begins as one bunch in the glove. On release these
+    // explicit roles separate it front-to-back without any sideways fan:
+    // hammer 1 lands near, hammer 2 in the middle, and hammer 3 far. All three
+    // share one vertical arc so their flight times stay approximately equal.
+    static const f32 sHammerVolleyHorizontalScale[
+        VR_HAMMER_VOLLEY_COUNT
+    ] = { 0.72f, 1.00f, 1.28f };
     for (u32 volley = 0; volley < VR_HAMMER_VOLLEY_COUNT; volley++) {
         const u32 slot = vr_special_moves_allocate_hammer_projectile();
         struct Object* projectile = spawn_object(
@@ -7075,12 +7081,11 @@ static void vr_special_moves_launch_hammer_volley(
         obj_update_gfx_pos_and_angle(projectile);
 
         const f32 volleySpeedScale =
-            1.0f + ((f32)volley - 1.0f) *
-                VR_HAMMER_VOLLEY_SPEED_STEP;
+            sHammerVolleyHorizontalScale[volley];
         sVrHammerProjectileVelocity[slot][0] =
             baseVelocity[0] * volleySpeedScale;
         sVrHammerProjectileVelocity[slot][1] =
-            baseVelocity[1] + (1 - (s32)volley) * 2.0f;
+            baseVelocity[1];
         sVrHammerProjectileVelocity[slot][2] =
             baseVelocity[2] * volleySpeedScale;
         sVrHammerProjectileLifetime[slot] = 0;
