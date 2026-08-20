@@ -121,8 +121,6 @@ unsigned int configVrHudSpread                    = 120;
 unsigned int configVrMenuAnchor                   = VR_UI_ANCHOR_HEADSET;
 unsigned int configVrHudAnchor                    = VR_UI_ANCHOR_HEADSET;
 bool         configVrMotionControllerInput        = true;
-bool         configVrPunchButton                  = false;
-bool         configVrRightTriggerJump             = false;
 unsigned int configVrMoveStick                    = VR_CONTROLLER_STICK_LEFT;
 unsigned int configVrCameraStick                  = VR_CONTROLLER_STICK_RIGHT;
 unsigned int configVrJumpBinding                  = VR_CONTROLLER_BINDING_RIGHT_PRIMARY;
@@ -475,8 +473,6 @@ static const struct ConfigOption options[] = {
     {.name = "vr_menu_anchor",                 .type = CONFIG_TYPE_UINT, .uintValue = &configVrMenuAnchor},
     {.name = "vr_hud_anchor",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrHudAnchor},
     {.name = "vr_motion_controller_input",     .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControllerInput},
-    {.name = "vr_punch_button",                .type = CONFIG_TYPE_BOOL, .boolValue = &configVrPunchButton},
-    {.name = "vr_right_trigger_jump",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrRightTriggerJump},
     {.name = "vr_move_stick",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrMoveStick},
     {.name = "vr_camera_stick",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrCameraStick},
     {.name = "vr_jump_binding",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrJumpBinding},

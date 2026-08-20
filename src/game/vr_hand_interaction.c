@@ -104,8 +104,9 @@
 #define VR_HAMMER_MIN_HORIZONTAL_SPEED 38.0f
 #define VR_HAMMER_MAX_HORIZONTAL_SPEED 72.0f
 #define VR_HAMMER_LAUNCH_ARC_BIAS 8.0f
-#define VR_HAMMER_VOLLEY_SPACING 96.0f
+#define VR_HAMMER_VOLLEY_SPACING 160.0f
 #define VR_HAMMER_CONTACT_PADDING 32.0f
+#define VR_HAMMER_MELEE_RADIUS 30.0f
 #define VR_HAMMER_PICKUP_GRAVITY 0.65f
 #define VR_HAMMER_PICKUP_FALL_SPEED 7.0f
 #define VR_RASENGAN_IMPACT_GROW_FRAMES 10U
@@ -309,6 +310,7 @@ static bool sVrHammerSuitPickupLanded = false;
 static struct Object* sVrHammerChargeObject = NULL;
 static u16 sVrHammerChargeFrames = 0;
 static Vec3f sVrHammerRememberedVelocity = { 0.0f, 0.0f, 0.0f };
+static struct Object* sVrHammerMeleeContact = NULL;
 static struct Object* sVrHammerProjectiles[VR_HAMMER_PROJECTILE_COUNT] = {
     NULL
 };
@@ -1199,6 +1201,34 @@ bool vr_hand_interaction_get_held_object_position(
     return true;
 }
 
+f32 vr_hand_interaction_get_held_object_center_offset(
+    struct Object* object
+) {
+    if (object == NULL) {
+        return 0.0f;
+    }
+
+    // Baby penguins use a tiny 40-unit gameplay hitbox even though their
+    // animated model is much taller. Centering that hitbox on the fist puts
+    // the glove through the torso and can fold the head visually into the
+    // body. Hold it by its upper body while preserving native held/delivery
+    // state and event behavior.
+    if (obj_has_behavior(object, bhvPenguinBaby) ||
+        obj_has_behavior(object, bhvSmallPenguin)) {
+        return 58.0f;
+    }
+
+    const f32 objectHeight = fmaxf(
+        object->hitboxHeight,
+        object->hurtboxHeight
+    );
+    return clamp(
+        objectHeight * 0.5f - object->hitboxDownOffset,
+        0.0f,
+        80.0f
+    );
+}
+
 bool vr_hand_interaction_get_late_held_object_position(
     struct Object* object,
     Vec3f position
@@ -1256,15 +1286,8 @@ bool vr_hand_interaction_get_late_held_object_position(
         );
     }
 
-    const f32 objectHeight = fmaxf(
-        object->hitboxHeight,
-        object->hurtboxHeight
-    );
-    const f32 centerOffset = clamp(
-        objectHeight * 0.5f - object->hitboxDownOffset,
-        0.0f,
-        80.0f
-    );
+    const f32 centerOffset =
+        vr_hand_interaction_get_held_object_center_offset(object);
     position[0] = handPosition[0];
     position[1] = handPosition[1] - centerOffset;
     position[2] = handPosition[2];
@@ -1631,15 +1654,8 @@ static void vr_hand_interaction_update_held_position(
     const Vec3f handPosition,
     const Vec3f handVelocity
 ) {
-    const f32 objectHeight = fmaxf(
-        object->hitboxHeight,
-        object->hurtboxHeight
-    );
-    const f32 centerOffset = clamp(
-        objectHeight * 0.5f - object->hitboxDownOffset,
-        0.0f,
-        80.0f
-    );
+    const f32 centerOffset =
+        vr_hand_interaction_get_held_object_center_offset(object);
 
     Vec3f nextPosition = {
         handPosition[0],
@@ -4997,6 +5013,7 @@ static u32 vr_special_moves_allocate_fireball_projectile(void) {
 static void vr_special_moves_clear_hammer_charge(void) {
     vr_special_moves_delete_object(&sVrHammerChargeObject);
     sVrHammerChargeFrames = 0;
+    sVrHammerMeleeContact = NULL;
     vec3f_set(sVrHammerRememberedVelocity, 0.0f, 0.0f, 0.0f);
 }
 
@@ -6246,6 +6263,139 @@ static bool vr_special_moves_projectile_hits_enemy(
     return false;
 }
 
+static bool vr_special_moves_hammer_melee_contact(
+    struct MarioState* mario,
+    const Vec3f hammerHead
+) {
+    struct Object* contact = NULL;
+    if (mario == NULL || hammerHead == NULL || gObjectLists == NULL) {
+        sVrHammerMeleeContact = NULL;
+        return false;
+    }
+
+    const f32 gloveScale =
+        (f32)clamp(configVrGloveSize, 25U, 250U) / 70.0f;
+    const f32 hammerRadius = VR_HAMMER_MELEE_RADIUS * gloveScale;
+    for (s32 listIndex = 0;
+         listIndex < NUM_OBJ_LISTS && contact == NULL;
+         listIndex++) {
+        struct ObjectNode* list = &gObjectLists[listIndex];
+        for (struct ObjectNode* node = list->next;
+             node != NULL && node != list;
+             node = node->next) {
+            struct Object* target = (struct Object*)node;
+            if (!vr_special_moves_rasengan_target_is_eligible(
+                    mario,
+                    target
+                )) {
+                continue;
+            }
+
+            f32 targetRadius = 0.0f;
+            f32 targetHeight = 0.0f;
+            vr_special_moves_get_enemy_contact_bounds(
+                target,
+                &targetRadius,
+                &targetHeight
+            );
+            const f32 targetBottom =
+                target->oPosY - target->hitboxDownOffset;
+            const f32 targetTop = targetBottom + targetHeight;
+            const f32 dx = hammerHead[0] - target->oPosX;
+            const f32 dz = hammerHead[2] - target->oPosZ;
+            const f32 combinedRadius =
+                fmaxf(targetRadius, 20.0f) + hammerRadius;
+            if (dx * dx + dz * dz >
+                    combinedRadius * combinedRadius ||
+                hammerHead[1] + hammerRadius < targetBottom ||
+                hammerHead[1] - hammerRadius > targetTop) {
+                continue;
+            }
+
+            const bool rearTarget =
+                obj_has_behavior(target, bhvKingBobomb) ||
+                vr_special_moves_target_is_whomp(target);
+            if (rearTarget &&
+                !vr_special_moves_point_is_behind_target(
+                    target,
+                    hammerHead[0],
+                    hammerHead[2]
+                )) {
+                continue;
+            }
+            contact = target;
+            break;
+        }
+    }
+
+    if (contact == NULL) {
+        sVrHammerMeleeContact = NULL;
+        return false;
+    }
+    if (contact == sVrHammerMeleeContact) {
+        return false;
+    }
+    sVrHammerMeleeContact = contact;
+
+    bool allowInteract = true;
+    const bool rearTarget =
+        obj_has_behavior(contact, bhvKingBobomb) ||
+        vr_special_moves_target_is_whomp(contact);
+    if (!rearTarget) {
+        smlua_call_event_hooks(
+            HOOK_ALLOW_INTERACT,
+            mario,
+            contact,
+            contact->oInteractType,
+            &allowInteract
+        );
+    }
+    if (!allowInteract) {
+        return false;
+    }
+
+    mario->interactObj = contact;
+    if (rearTarget) {
+        vr_special_moves_apply_rear_target_hit(
+            mario,
+            contact,
+            hammerHead[0],
+            hammerHead[2]
+        );
+    } else {
+        const bool breakable =
+            obj_has_behavior(contact, bhvBreakableBox) ||
+            obj_has_behavior(contact, bhvBreakableBoxSmall) ||
+            obj_has_behavior(contact, bhvJumpingBox);
+        if (breakable) {
+            vr_special_moves_spawn_fire_flower_chance(
+                contact,
+                mario,
+                0.30f
+            );
+        }
+        attack_object(
+            mario,
+            contact,
+            obj_has_behavior(contact, bhvGoomba) &&
+                contact->oGoombaSize == GOOMBA_SIZE_HUGE
+                ? INT_GROUND_POUND_OR_TWIRL
+                : INT_PUNCH
+        );
+        smlua_call_event_hooks(
+            HOOK_ON_INTERACT,
+            mario,
+            contact,
+            contact->oInteractType,
+            true
+        );
+        network_send_object(contact);
+    }
+    play_sound(SOUND_ACTION_HIT_2, contact->header.gfx.cameraToObject);
+    vr_apply_haptic(VR_CONTROLLER_RIGHT, 0.55f, 0.06f, -1.0f);
+    return true;
+}
+
 static void vr_special_moves_update_projectiles(struct MarioState* mario) {
     for (u32 slot = 0; slot < VR_FIREBALL_PROJECTILE_COUNT; slot++) {
         struct Object* projectile = sVrFireballProjectiles[slot];
@@ -6943,10 +7093,13 @@ static void vr_special_moves_launch_hammer_volley(
         obj_scale(projectile, 0.58f);
         obj_update_gfx_pos_and_angle(projectile);
 
-        sVrHammerProjectileVelocity[slot][0] = baseVelocity[0];
+        const f32 volleySpeedScale = 0.86f + (f32)volley * 0.14f;
+        sVrHammerProjectileVelocity[slot][0] =
+            baseVelocity[0] * volleySpeedScale;
         sVrHammerProjectileVelocity[slot][1] =
             baseVelocity[1] + (1 - (s32)volley) * 2.0f;
-        sVrHammerProjectileVelocity[slot][2] = baseVelocity[2];
+        sVrHammerProjectileVelocity[slot][2] =
+            baseVelocity[2] * volleySpeedScale;
         sVrHammerProjectileLifetime[slot] = 0;
     }
     play_sound(
@@ -8101,6 +8254,20 @@ static bool vr_special_moves_update_hammer_hand(
         if (previousFrames < VR_HAMMER_CHARGE_FRAMES &&
             sVrHammerChargeFrames >= VR_HAMMER_CHARGE_FRAMES) {
             vr_apply_haptic(VR_CONTROLLER_RIGHT, 0.48f, 0.09f, -1.0f);
+        }
+        if (sVrHammerChargeFrames >= VR_HAMMER_CHARGE_FRAMES) {
+            Vec3f hammerHead;
+            if (vr_get_controller_world_hammer_head_from_state(
+                    VR_CONTROLLER_RIGHT,
+                    state,
+                    hammerHead
+                )) {
+                vr_special_moves_hammer_melee_contact(mario, hammerHead);
+            } else {
+                sVrHammerMeleeContact = NULL;
+            }
+        } else {
+            sVrHammerMeleeContact = NULL;
         }
     }
 

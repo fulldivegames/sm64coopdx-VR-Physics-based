@@ -3549,6 +3549,43 @@ void register_mtx_vr_hud(Mtx *matrix) {
     sVrHudMatrices[sVrHudMatrixCount++] = matrix;
 }
 
+bool vr_get_controller_world_hammer_head_from_state(
+    u32 handIndex,
+    const struct VrControllerState* state,
+    Vec3f worldPosition
+) {
+    if (!vr_get_controller_world_fist_from_state(
+            handIndex,
+            state,
+            worldPosition,
+            NULL
+        ) || !sVrControllerCameraInverseValid) {
+        return false;
+    }
+
+    const float* rotation = state->aimPoseValid
+        ? state->aimRotation
+        : state->gripRotation;
+    Vec3f trackedUp = { 0.0f, 1.0f, 0.0f };
+    vr_rotate_pose_vector(rotation, trackedUp, trackedUp);
+    Vec3f worldUp;
+    for (u32 axis = 0; axis < 3; axis++) {
+        worldUp[axis] =
+            trackedUp[0] * sVrControllerCameraInverse[0][axis] +
+            trackedUp[1] * sVrControllerCameraInverse[1][axis] +
+            trackedUp[2] * sVrControllerCameraInverse[2][axis];
+    }
+    const f32 gloveScale =
+        (f32)clamp(configVrGloveSize, 25U, 250U) / 70.0f;
+    // The fist grips the lower handle, so the damaging head is farther up
+    // the controller axis than when the model origin sat in the palm.
+    const f32 fistToHead = 36.0f * gloveScale;
+    for (u32 axis = 0; axis < 3; axis++) {
+        worldPosition[axis] += worldUp[axis] * fistToHead;
+    }
+    return true;
+}
+
 static bool vr_build_hand_ui_projection(
     uint32_t eyeIndex,
     unsigned int anchor,
@@ -3770,11 +3807,35 @@ static void patch_mtx_vr_ui(uint32_t eyeIndex) {
             1.0f
         );
         Mtx handHudProjection;
-        const bool handHud = vr_build_hand_ui_projection(
-            eyeIndex,
-            configVrHudAnchor,
-            &handHudProjection
-        );
+        unsigned int hudHandAnchor = configVrMenuAnchor;
+        if (hudHandAnchor < VR_UI_ANCHOR_LEFT_HAND ||
+            hudHandAnchor > VR_UI_ANCHOR_RIGHT_HAND) {
+            // HUD "Hand" follows whichever hand was selected for the menu.
+            // If the menu is headset-mounted, use the right hand as the
+            // predictable fallback without adding a second hand selector.
+            hudHandAnchor = VR_UI_ANCHOR_RIGHT_HAND;
+        }
+        bool handHud = false;
+        if (configVrHudAnchor == VR_HUD_ANCHOR_HAND) {
+            // The menu and HUD frequently share the same selected hand.
+            // Reuse the already sampled controller/eye projection instead of
+            // repeating OpenXR pose queries and matrix construction per eye.
+            // This changes no text, scaling, filtering, or layout.
+            if (handMenu && hudHandAnchor == configVrMenuAnchor) {
+                memcpy(
+                    &handHudProjection,
+                    &menuProjection,
+                    sizeof(handHudProjection)
+                );
+                handHud = true;
+            } else {
+                handHud = vr_build_hand_ui_projection(
+                    eyeIndex,
+                    hudHandAnchor,
+                    &handHudProjection
+                );
+            }
+        }
         for (u32 i = 0; i < sVrHudMatrixCount; i++) {
             memcpy(
                 sVrHudMatrices[i],
@@ -3979,14 +4040,6 @@ void patch_mtx_vr_shared(void) {
                     if (vr_get_controller_hand_attachment_matrix(
                             VR_CONTROLLER_RIGHT,
                             handMatrix)) {
-                        Vec3f localPosition = { 68.0f, 0.0f, 0.0f };
-                        Vec3s localRotation = { 0, 0, 0 };
-                        Mat4 hammerMatrix;
-                        mtxf_rotate_zxy_and_translate(
-                            hammerMatrix,
-                            localPosition,
-                            localRotation
-                        );
                         const f32 handModelScale = 0.20f *
                             (f32)clamp(
                                 configVrGloveSize,
@@ -3996,6 +4049,25 @@ void patch_mtx_vr_shared(void) {
                         const f32 relativeScale =
                             interp->owner->header.gfx.scale[0] /
                             fmaxf(handModelScale, 0.001f);
+                        // Local +X reaches the fist from the wrist. After the
+                        // X-axis flip, this Y offset puts the start of the
+                        // wooden handle in the closed glove rather than the
+                        // shaft directly underneath the hammer head.
+                        Vec3f localPosition = {
+                            68.0f,
+                            -82.0f * relativeScale,
+                            0.0f
+                        };
+                        // The Hammer Suit model's head is local +Y. Flip it
+                        // around the handle axis so +Y points above the fist
+                        // instead of below it while preserving the grip point.
+                        Vec3s localRotation = { (s16)0x8000, 0, 0 };
+                        Mat4 hammerMatrix;
+                        mtxf_rotate_zxy_and_translate(
+                            hammerMatrix,
+                            localPosition,
+                            localRotation
+                        );
                         Vec3f hammerScale = {
                             relativeScale,
                             relativeScale,
@@ -4029,16 +4101,10 @@ void patch_mtx_vr_shared(void) {
                             handMatrix,
                             fistPosition
                         );
-                        const f32 objectHeight = fmaxf(
-                            interp->owner->hitboxHeight,
-                            interp->owner->hurtboxHeight
-                        );
-                        const f32 centerOffset = clamp(
-                            objectHeight * 0.5f -
-                                interp->owner->hitboxDownOffset,
-                            0.0f,
-                            80.0f
-                        );
+                        const f32 centerOffset =
+                            vr_hand_interaction_get_held_object_center_offset(
+                                interp->owner
+                            );
                         interp->interp.m[3][0] = fistPosition[0];
                         interp->interp.m[3][1] =
                             fistPosition[1] - centerOffset;
@@ -6660,6 +6726,17 @@ static void geo_process_object(struct Object *node) {
             node->header.gfx.pos,
             node->header.gfx.cameraToObject
         );
+        if (sVrHeadTrackedAudioEnabledForFrame &&
+            gMarioStates[0].marioObj != NULL &&
+            node == gMarioStates[0].marioObj) {
+            // Local footsteps, voice, landing, and movement sounds all use
+            // Mario's cameraToObject source. Room-scale body correction can
+            // place that root slightly left/right of the headset even though
+            // the sound belongs to the player. Keep its distance/elevation,
+            // but center only the local player's stereo pan. Other actors and
+            // environmental sources retain full head-relative 3D placement.
+            node->header.gfx.cameraToObject[0] = 0.0f;
+        }
 
         // FIXME: correct types
         if (node->header.gfx.animInfo.curAnim != NULL) {
