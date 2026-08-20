@@ -75,6 +75,11 @@ bool vr_get_controller_world_palm_from_state(
     const struct VrControllerState* state,
     Vec3f worldPosition
 );
+bool vr_get_controller_world_hammer_head_from_state(
+    u32 handIndex,
+    const struct VrControllerState* state,
+    Vec3f worldPosition
+);
 bool vr_get_controller_climb_fist(
     const Vec3f worldPosition,
     Vec3f climbPosition

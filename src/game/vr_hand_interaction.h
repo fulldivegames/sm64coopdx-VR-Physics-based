@@ -68,6 +68,9 @@ bool vr_hand_interaction_get_late_held_object_position(
     struct Object* object,
     Vec3f position
 );
+f32 vr_hand_interaction_get_held_object_center_offset(
+    struct Object* object
+);
 bool vr_hand_interaction_get_bowser_controls(
     struct MarioState* mario,
     f32* turnInput,

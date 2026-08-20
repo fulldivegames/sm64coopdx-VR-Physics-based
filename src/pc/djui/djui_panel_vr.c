@@ -237,8 +237,6 @@ static void djui_panel_vr_controller_defaults(
     (void)caller;
 
     configVrMotionControllerInput = true;
-    configVrPunchButton = false;
-    configVrRightTriggerJump = false;
     configVrMoveStick = VR_CONTROLLER_STICK_LEFT;
     configVrCameraStick = VR_CONTROLLER_STICK_RIGHT;
     configVrJumpBinding =
@@ -255,22 +253,6 @@ static void djui_panel_vr_controller_defaults(
         VR_CONTROLLER_BINDING_LEFT_MENU;
     configVrSpecialBinding =
         VR_CONTROLLER_BINDING_LEFT_SECONDARY;
-}
-
-static void djui_panel_vr_right_trigger_jump_changed(
-    UNUSED struct DjuiBase* caller
-) {
-    if (configVrRightTriggerJump) {
-        configVrPunchButton = false;
-    }
-}
-
-static void djui_panel_vr_punch_button_changed(
-    UNUSED struct DjuiBase* caller
-) {
-    if (configVrPunchButton) {
-        configVrRightTriggerJump = false;
-    }
 }
 
 static void djui_panel_vr_motion_control_defaults(
@@ -818,20 +800,6 @@ static void djui_panel_vr_controller_settings_create(
             NULL
         );
 
-        djui_checkbox_create(
-            body,
-            "Enable Punch Button (Right Trigger)",
-            &configVrPunchButton,
-            djui_panel_vr_punch_button_changed
-        );
-
-        djui_checkbox_create(
-            body,
-            "Right Trigger Jump",
-            &configVrRightTriggerJump,
-            djui_panel_vr_right_trigger_jump_changed
-        );
-
         djui_button_create(
             body,
             "Set to Defaults",
@@ -1358,8 +1326,8 @@ static void djui_panel_vr_hud_settings_create(struct DjuiBase* caller) {
     if (configVrMenuAnchor >= VR_UI_ANCHOR_COUNT) {
         configVrMenuAnchor = VR_UI_ANCHOR_HEADSET;
     }
-    if (configVrHudAnchor >= VR_UI_ANCHOR_COUNT) {
-        configVrHudAnchor = VR_UI_ANCHOR_HEADSET;
+    if (configVrHudAnchor >= VR_HUD_ANCHOR_COUNT) {
+        configVrHudAnchor = VR_HUD_ANCHOR_HEADSET;
     }
 
     struct DjuiThreePanel* panel =
@@ -1369,16 +1337,20 @@ static void djui_panel_vr_hud_settings_create(struct DjuiBase* caller) {
         djui_three_panel_get_body(panel);
 
     {
-        char* anchorChoices[VR_UI_ANCHOR_COUNT] = {
+        char* menuAnchorChoices[VR_UI_ANCHOR_COUNT] = {
             "Headset",
             "Left Hand",
             "Right Hand"
+        };
+        char* hudAnchorChoices[VR_HUD_ANCHOR_COUNT] = {
+            "Headset",
+            "Hand"
         };
 
         djui_selectionbox_create(
             body,
             "Menu Placement",
-            anchorChoices,
+            menuAnchorChoices,
             VR_UI_ANCHOR_COUNT,
             &configVrMenuAnchor,
             NULL
@@ -1387,8 +1359,8 @@ static void djui_panel_vr_hud_settings_create(struct DjuiBase* caller) {
         djui_selectionbox_create(
             body,
             "HUD Placement",
-            anchorChoices,
-            VR_UI_ANCHOR_COUNT,
+            hudAnchorChoices,
+            VR_HUD_ANCHOR_COUNT,
             &configVrHudAnchor,
             NULL
         );
@@ -1941,14 +1913,64 @@ static void djui_panel_vr_tutorial_ui(
     );
 }
 
-static void djui_panel_vr_tutorial_moves(
+static void djui_panel_vr_tutorial_fire_flower(
     struct DjuiBase* caller
 ) {
     djui_panel_vr_tutorial_page(
         caller,
-        "Special Moves",
-        "Fire Flower: make a right fist, hold Grip and Trigger to charge, then swing and release to throw. Hammer Suit: charge the same way; the hammer grows into the fist and the volley follows your throw. Rasengan: hold right Trigger with an open hand and circle the other gripping hand around it; keep Trigger held after charging and touch an enemy. Hold the Special button above your head to charge Rasen-Shuriken, then swing and release to throw."
+        "Fire Flower",
+        "Make a right fist, hold Grip and Trigger to charge a fireball, then swing and release to throw it. The Fire Flower palette and timer end when the power expires or you leave the area. Spawn and timer cheats are available from the VR Cheats menu."
     );
+}
+
+static void djui_panel_vr_tutorial_hammer_suit(
+    struct DjuiBase* caller
+) {
+    djui_panel_vr_tutorial_page(
+        caller,
+        "Hammer Suit",
+        "Make a right fist, then hold Grip and Trigger to grow a hammer in the glove. The hammer head can strike valid targets while held. After it finishes charging, swing and release to throw a three-hammer volley along your real throw direction."
+    );
+}
+
+static void djui_panel_vr_tutorial_rasengan(
+    struct DjuiBase* caller
+) {
+    djui_panel_vr_tutorial_page(
+        caller,
+        "Rasengan",
+        "Hold right Trigger with an open right hand. Grip with the empty left hand and circle it around the right hand until the Rasengan finishes charging. Keep right Trigger held, then touch a valid enemy with the sphere."
+    );
+}
+
+static void djui_panel_vr_tutorial_rasen_shuriken(
+    struct DjuiBase* caller
+) {
+    djui_panel_vr_tutorial_page(
+        caller,
+        "Rasen-Shuriken",
+        "Begin with a charged Rasengan, hold the Special button, and keep it above the headset while it charges. Once ready, keep holding right Trigger, swing the right hand, and release to throw it. It explodes when it reaches an enemy or solid surface."
+    );
+}
+
+static void djui_panel_vr_tutorial_moves(
+    struct DjuiBase* caller
+) {
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create("Special Moves", false);
+    struct DjuiBase* body = djui_three_panel_get_body(panel);
+
+    djui_button_create(body, "Fire Flower", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_tutorial_fire_flower);
+    djui_button_create(body, "Hammer Suit", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_tutorial_hammer_suit);
+    djui_button_create(body, "Rasengan", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_tutorial_rasengan);
+    djui_button_create(body, "Rasen-Shuriken", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_tutorial_rasen_shuriken);
+    djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK,
+        djui_panel_menu_back);
+    djui_panel_add(caller, panel, NULL);
 }
 
 static void djui_panel_vr_tutorial_create(struct DjuiBase* caller) {
@@ -1964,6 +1986,58 @@ static void djui_panel_vr_tutorial_create(struct DjuiBase* caller) {
     djui_button_create(body, "Menus, HUD & Multiplayer", DJUI_BUTTON_STYLE_NORMAL, djui_panel_vr_tutorial_ui);
     djui_button_create(body, "Special Moves", DJUI_BUTTON_STYLE_NORMAL, djui_panel_vr_tutorial_moves);
     djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK, djui_panel_menu_back);
+    djui_panel_add(caller, panel, NULL);
+}
+
+static void djui_panel_vr_setup_create(struct DjuiBase* caller) {
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create("VR Setup", false);
+    struct DjuiBase* body = djui_three_panel_get_body(panel);
+
+    djui_button_create(body, "Camera Settings", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_camera_settings_create);
+    djui_button_create(body, "Controller Settings", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_controller_settings_create);
+    djui_button_create(body, "Motion Control Settings", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_motion_control_settings_create);
+    djui_button_create(body, "Model Settings", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_model_settings_create);
+    djui_button_create(body, "Immersion", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_immersion_create);
+    djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK,
+        djui_panel_menu_back);
+    djui_panel_add(caller, panel, NULL);
+}
+
+static void djui_panel_vr_display_create(struct DjuiBase* caller) {
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create("Display", false);
+    struct DjuiBase* body = djui_three_panel_get_body(panel);
+
+    djui_button_create(body, "Performance", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_performance_create);
+    djui_button_create(body, "HUD Settings", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_hud_settings_create);
+    djui_button_create(body, "Effects", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_effects_create);
+    djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK,
+        djui_panel_menu_back);
+    djui_panel_add(caller, panel, NULL);
+}
+
+static void djui_panel_vr_special_create(struct DjuiBase* caller) {
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create("Special", false);
+    struct DjuiBase* body = djui_three_panel_get_body(panel);
+
+    djui_button_create(body, "Experimental", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_experimental_create);
+    djui_button_create(body, "Special Moves", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_special_moves_create);
+    djui_button_create(body, "Cheats", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_cheats_create);
+    djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK,
+        djui_panel_menu_back);
     djui_panel_add(caller, panel, NULL);
 }
 
@@ -2002,79 +2076,23 @@ void djui_panel_vr_create(struct DjuiBase* caller) {
 
         djui_button_create(
             body,
-            "Camera Settings",
+            "VR Setup",
             DJUI_BUTTON_STYLE_NORMAL,
-            djui_panel_vr_camera_settings_create
+            djui_panel_vr_setup_create
         );
 
         djui_button_create(
             body,
-            "Controller Settings",
+            "Display",
             DJUI_BUTTON_STYLE_NORMAL,
-            djui_panel_vr_controller_settings_create
+            djui_panel_vr_display_create
         );
 
         djui_button_create(
             body,
-            "Motion Control Settings",
+            "Special",
             DJUI_BUTTON_STYLE_NORMAL,
-            djui_panel_vr_motion_control_settings_create
-        );
-
-        djui_button_create(
-            body,
-            "Model Settings",
-            DJUI_BUTTON_STYLE_NORMAL,
-            djui_panel_vr_model_settings_create
-        );
-
-        djui_button_create(
-            body,
-            "Performance",
-            DJUI_BUTTON_STYLE_NORMAL,
-            djui_panel_vr_performance_create
-        );
-
-        djui_button_create(
-            body,
-            "HUD Settings",
-            DJUI_BUTTON_STYLE_NORMAL,
-            djui_panel_vr_hud_settings_create
-        );
-
-        djui_button_create(
-            body,
-            "Immersion",
-            DJUI_BUTTON_STYLE_NORMAL,
-            djui_panel_vr_immersion_create
-        );
-
-        djui_button_create(
-            body,
-            "Effects",
-            DJUI_BUTTON_STYLE_NORMAL,
-            djui_panel_vr_effects_create
-        );
-
-        djui_button_create(
-            body,
-            "Experimental",
-            DJUI_BUTTON_STYLE_NORMAL,
-            djui_panel_vr_experimental_create
-        );
-
-        djui_button_create(
-            body,
-            "Special Moves",
-            DJUI_BUTTON_STYLE_NORMAL,
-            djui_panel_vr_special_moves_create
-        );
-
-        djui_button_create(
-            body,
-            "Cheats",
-            DJUI_BUTTON_STYLE_NORMAL,
-            djui_panel_vr_cheats_create
+            djui_panel_vr_special_create
         );
 
         djui_button_create(

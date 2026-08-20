@@ -439,7 +439,11 @@ void render_text_labels(void) {
     }
 
     guOrtho(mtx, 0.0f, SCREEN_WIDTH, 0.0f, SCREEN_HEIGHT, -10.0f, 10.0f, 1.0f);
-    register_mtx_vr_ui(mtx);
+    // These queued labels are the native gameplay HUD counters (lives,
+    // coins, stars, FPS, and related readouts). Keep their projection in the
+    // HUD anchor group so a hand-mounted DJUI/menu does not drag them onto
+    // that hand when HUD Placement remains Headset.
+    register_mtx_vr_hud(mtx);
     gSPPerspNormalize((Gfx *) (gDisplayListHead++), 0xFFFF);
     gSPMatrix(gDisplayListHead++, VIRTUAL_TO_PHYSICAL(mtx), G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
     gSPDisplayList(gDisplayListHead++, dl_hud_img_begin);

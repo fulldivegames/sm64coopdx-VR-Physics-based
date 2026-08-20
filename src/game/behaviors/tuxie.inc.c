@@ -321,7 +321,13 @@ void bhv_small_penguin_loop(void) {
             small_penguin_free_actions();
             break;
         case HELD_HELD:
-            cur_obj_unrender_and_reset_state(0, 0);
+            // Physical holding renders the actual penguin instead of Mario's
+            // canned carry prop. Use its stable standing pose so the walking
+            // animation cannot fold its head into its body around the fist.
+            cur_obj_unrender_and_reset_state(
+                vr_hand_interaction_is_tracked_held_object(o) ? 3 : 0,
+                0
+            );
             if (cur_obj_has_behavior(bhvPenguinBaby)) {
                 obj_set_behavior(o, bhvSmallPenguin);
             }
