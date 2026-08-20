@@ -4056,7 +4056,7 @@ void patch_mtx_vr_shared(void) {
                         Vec3f localPosition = {
                             68.0f,
                             -82.0f * relativeScale,
-                            0.0f
+                            -10.0f
                         };
                         // The Hammer Suit model's head is local +Y. Flip it
                         // around the handle axis so +Y points above the fist
@@ -4724,10 +4724,20 @@ static void geo_process_master_list_sub(struct GraphNodeMasterList *node) {
         if ((currList = node->listHeads[i]) != NULL) {
             gDPSetRenderMode(gDisplayListHead++, modeList->modes[i], mode2List->modes[i]);
             while (currList != NULL) {
-                detect_and_skip_mtx_interpolation(
-                    &currList->transform,
-                    &currList->transformPrev
-                );
+                // The rigid render-space hand anchor removes locomotion from
+                // held actors. Keep their individual bones interpolating even
+                // when the generic discontinuity detector mistakes a quick
+                // native animation step for a teleport; otherwise the model
+                // visibly alternates between smooth and 30 Hz poses.
+                if (currList->owner == NULL ||
+                    !vr_hand_interaction_is_tracked_held_object(
+                        currList->owner
+                    )) {
+                    detect_and_skip_mtx_interpolation(
+                        &currList->transform,
+                        &currList->transformPrev
+                    );
+                }
 
                 struct MtxInterp *interp = growing_array_alloc(sMtxTbl, sizeof(struct MtxInterp));
                 interp->pos = gDisplayListHead;

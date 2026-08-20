@@ -40,7 +40,7 @@
 #define VR_HAND_COLLISION_RADIUS_MAX 24.0f
 #define VR_HAND_COLLISION_RELEASE_MARGIN 3.0f
 #define VR_HAND_COLLISION_MAX_SWEEP 300.0f
-#define VR_HAND_COLLISION_MAX_HEADSET_DISTANCE 125.0f
+#define VR_HAND_COLLISION_MAX_CONTROLLER_SEPARATION 30.5f
 #define VR_FIST_MAX_SWEEP_DISTANCE 150.0f
 #define VR_PUNCH_SOUND_COMBO_RESET_FRAMES 18
 #define VR_MOTION_DIVE_PAIR_WINDOW_FRAMES 5
@@ -453,6 +453,16 @@ void vr_hand_interaction_apply_hand_collision_position(
         return;
     }
     const f32 correction = radius - distance;
+    // Collision may visually hold a glove at a surface, but it must never
+    // become detached from the physical controller. If satisfying the stale
+    // plane would leave the glove over roughly one foot from the live pose,
+    // release the constraint immediately and let the render-rate controller
+    // matrix pull the glove back—even when that means crossing geometry.
+    if (correction > VR_HAND_COLLISION_MAX_CONTROLLER_SEPARATION) {
+        sVrHandCollision[hand].constraintActive = false;
+        sVrHandCollision[hand].constraintObject = NULL;
+        return;
+    }
     for (u32 axis = 0; axis < 3; axis++) {
         position[axis] +=
             sVrHandCollision[hand].constraintNormal[axis] * correction;
@@ -613,28 +623,21 @@ static bool vr_hand_interaction_resolve_hand_collision(
         collided = true;
     }
 
-    // Never let a collision plane leave a glove behind after the player
-    // walks away. Once the constrained pose is roughly four feet from the
-    // HMD, prefer the live controller pose even if that reset crosses the
-    // surface. A nearby contact can be established again on the next frame.
+    // Never let a collision plane leave a glove behind its controller. The
+    // visible glove and gameplay fist both snap back after roughly one foot,
+    // rather than waiting until the hand is several feet from the headset.
     if (collided || state->constraintActive) {
-        Vec3f headsetPosition;
-        if (vr_get_stabilized_headset_world_position(
-                headsetPosition,
-                false
-            )) {
-            const f32 dx = position[0] - headsetPosition[0];
-            const f32 dy = position[1] - headsetPosition[1];
-            const f32 dz = position[2] - headsetPosition[2];
-            if (dx * dx + dy * dy + dz * dz >
-                VR_HAND_COLLISION_MAX_HEADSET_DISTANCE *
-                    VR_HAND_COLLISION_MAX_HEADSET_DISTANCE) {
-                vec3f_copy(position, rawPosition);
-                state->constraintActive = false;
-                state->constraintObject = NULL;
-                collisionSurface = NULL;
-                collided = false;
-            }
+        const f32 dx = position[0] - rawPosition[0];
+        const f32 dy = position[1] - rawPosition[1];
+        const f32 dz = position[2] - rawPosition[2];
+        if (dx * dx + dy * dy + dz * dz >
+            VR_HAND_COLLISION_MAX_CONTROLLER_SEPARATION *
+                VR_HAND_COLLISION_MAX_CONTROLLER_SEPARATION) {
+            vec3f_copy(position, rawPosition);
+            state->constraintActive = false;
+            state->constraintObject = NULL;
+            collisionSurface = NULL;
+            collided = false;
         }
     }
 
