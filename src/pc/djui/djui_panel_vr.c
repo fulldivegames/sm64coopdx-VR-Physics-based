@@ -212,13 +212,6 @@ static void djui_panel_vr_performance_defaults(struct DjuiBase* caller) {
     configVrDesktopMirrorFps = 60;
 }
 
-static void djui_panel_vr_ultra_performance_changed(struct DjuiBase* caller) {
-    (void)caller;
-    if (configVrUltraPerformanceMode) {
-        configVrTwirlTornadoEffect = false;
-    }
-}
-
 static void djui_panel_vr_experimental_defaults(struct DjuiBase* caller) {
     (void)caller;
 
@@ -554,7 +547,7 @@ static void djui_panel_vr_performance_create(struct DjuiBase* caller) {
             body,
             "Ultra Performance Mode (Degrades Visuals)",
             &configVrUltraPerformanceMode,
-            djui_panel_vr_ultra_performance_changed
+            NULL
         );
 
         djui_checkbox_create(
@@ -1336,7 +1329,8 @@ static void djui_panel_vr_hud_settings_create(struct DjuiBase* caller) {
         };
         char* hudAnchorChoices[VR_HUD_ANCHOR_COUNT] = {
             "Headset",
-            "Hand"
+            "Left Hand",
+            "Right Hand"
         };
 
         djui_selectionbox_create(

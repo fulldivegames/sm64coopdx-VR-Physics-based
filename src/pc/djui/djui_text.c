@@ -461,6 +461,17 @@ static bool djui_text_render(struct DjuiBase* base) {
     struct DjuiText* text     = (struct DjuiText*)base;
     struct DjuiBaseRect* comp = &base->comp;
 
+    // Reserve both root transforms before emitting any commands. If the
+    // display-list arena is exhausted, create_dl_translation_matrix() would
+    // otherwise skip its push while the unconditional pop below still ran.
+    // That unbalanced the model-view stack and made later scrolling labels
+    // inherit a 3D/world transform until the visible item set changed.
+    Mtx* translation = alloc_display_list(sizeof(Mtx));
+    Mtx* scale = alloc_display_list(sizeof(Mtx));
+    if (translation == NULL || scale == NULL) {
+        return false;
+    }
+
     if (text->font->textBeginDisplayList != NULL) {
         gSPDisplayList(gDisplayListHead++, text->font->textBeginDisplayList);
     }
@@ -475,7 +486,12 @@ static bool djui_text_render(struct DjuiBase* base) {
     f32 translatedX = comp->x;
     f32 translatedY = comp->y;
     djui_gfx_position_translate(&translatedX, &translatedY);
-    create_dl_translation_matrix(DJUI_MTX_PUSH, translatedX, translatedY, 0);
+    guTranslate(translation, translatedX, translatedY, 0);
+    gSPMatrix(
+        gDisplayListHead++,
+        VIRTUAL_TO_PHYSICAL(translation),
+        G_MTX_MODELVIEW | G_MTX_MUL | G_MTX_PUSH
+    );
 
     // compute size
     f32 translatedWidth  = comp->width;
@@ -485,7 +501,12 @@ static bool djui_text_render(struct DjuiBase* base) {
     // compute font size
     f32 translatedFontSize = text->fontScale;
     djui_gfx_size_translate(&translatedFontSize);
-    create_dl_scale_matrix(DJUI_MTX_NOPUSH, translatedFontSize, translatedFontSize, 1.0f);
+    guScale(scale, translatedFontSize, translatedFontSize, 1.0f);
+    gSPMatrix(
+        gDisplayListHead++,
+        VIRTUAL_TO_PHYSICAL(scale),
+        G_MTX_MODELVIEW | G_MTX_MUL | G_MTX_NOPUSH
+    );
 
     // set color
     gDPSetPrimColor(gDisplayListHead++, 0, 0, 255, 255, 255, 255);
