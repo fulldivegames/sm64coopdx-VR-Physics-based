@@ -354,7 +354,6 @@ static void djui_panel_vr_immersion_defaults(struct DjuiBase* caller) {
     configVrImmersiveCarrySpeed = false;
     configVrImmersiveStarSpawnFocus = false;
     configVrImmersiveGhostPunchArm = true;
-    configVrImmersiveWallJumpCameraRelative = false;
     configVrExperimentalSideFlipFollow = true;
     configVrExperimentalWallJumpTurn = true;
     configVrPhysicalCrouching = true;
@@ -1684,12 +1683,6 @@ static void djui_panel_vr_immersion_movement_create(
         djui_panel_menu_create("Movement & Body", false);
     struct DjuiBase* body = djui_three_panel_get_body(panel);
 
-    djui_checkbox_create(
-        body,
-        "Camera-Relative Wall-Jump Steering",
-        &configVrImmersiveWallJumpCameraRelative,
-        NULL
-    );
     djui_checkbox_create(
         body,
         "Physical Crouching / Ground Pounds",
