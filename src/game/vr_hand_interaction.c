@@ -5953,12 +5953,30 @@ static void vr_special_moves_update_hammer_suit_pickup(
         sVrHammerSuitPickupAge++;
     }
 
+    if (sVrHammerSuitPickupLanded) {
+        struct Surface* support = NULL;
+        const f32 supportHeight = find_floor(
+            pickup->oPosX,
+            pickup->oPosY + 80.0f,
+            pickup->oPosZ,
+            &support
+        );
+        if (support == NULL ||
+            fabsf(pickup->oPosY - (supportHeight + 38.0f)) > 2.0f) {
+            // A broken box can briefly be reported as support. Resume the
+            // fall when that temporary geometry disappears.
+            sVrHammerSuitPickupLanded = false;
+            sVrHammerSuitPickupVelocityY = 0.0f;
+        } else {
+            pickup->oPosY = supportHeight + 38.0f;
+        }
+    }
     if (!sVrHammerSuitPickupLanded) {
+        pickup->oPosY += sVrHammerSuitPickupVelocityY;
         sVrHammerSuitPickupVelocityY = fmaxf(
             sVrHammerSuitPickupVelocityY - VR_HAMMER_PICKUP_GRAVITY,
             -VR_HAMMER_PICKUP_FALL_SPEED
         );
-        pickup->oPosY += sVrHammerSuitPickupVelocityY;
         struct Surface* floor = NULL;
         const f32 floorHeight = find_floor(
             pickup->oPosX,
@@ -5966,7 +5984,10 @@ static void vr_special_moves_update_hammer_suit_pickup(
             pickup->oPosZ,
             &floor
         );
-        if (floor != NULL && pickup->oPosY <= floorHeight + 38.0f) {
+        // Match the Fire Flower: emerge from a box before gravity is allowed
+        // to settle the pickup onto the supporting surface.
+        if (sVrHammerSuitPickupVelocityY <= 0.0f && floor != NULL &&
+            pickup->oPosY <= floorHeight + 38.0f) {
             pickup->oPosY = floorHeight + 38.0f;
             sVrHammerSuitPickupVelocityY = 0.0f;
             sVrHammerSuitPickupLanded = true;

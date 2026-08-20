@@ -4070,7 +4070,16 @@ void patch_mtx_vr_shared(void) {
                         // The Hammer Suit model's head is local +Y. Flip it
                         // around the handle axis so +Y points above the fist
                         // instead of below it while preserving the grip point.
-                        Vec3s localRotation = { (s16)0x8000, 0, 0 };
+                        // Keep the hammer head above the fist, then lean the
+                        // shaft back toward the glove so its held silhouette
+                        // follows the near-vertical grip line. This affects
+                        // only the rendered attachment; launch direction and
+                        // projectile trajectory remain unchanged.
+                        Vec3s localRotation = {
+                            (s16)0x8000,
+                            0,
+                            (s16)0x0B00
+                        };
                         Mat4 hammerMatrix;
                         mtxf_rotate_zxy_and_translate(
                             hammerMatrix,
