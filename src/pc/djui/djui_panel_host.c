@@ -9,6 +9,7 @@
 #include "djui_panel_rules.h"
 #include "game/save_file.h"
 #include "pc/network/network.h"
+#include "pc/network/coopnet/coopnet.h"
 #include "pc/utils/misc.h"
 #include "pc/configfile.h"
 #include "pc/update_checker.h"
@@ -18,12 +19,32 @@ static struct DjuiInputbox* sInputboxPort = NULL;
 #ifdef COOPNET
 static struct DjuiRect* sRectPassword = NULL;
 static struct DjuiInputbox* sInputboxPassword = NULL;
+static struct DjuiRect* sRectPublicChannel = NULL;
+static struct DjuiSelectionbox* sPublicChannelSelection = NULL;
+static unsigned int sPublicChannel = 0;
+
+static void djui_panel_host_update_coopnet_fields(void) {
+    const bool coopNet = configNetworkSystem == NS_COOPNET;
+    const bool publicLobby = sInputboxPassword == NULL ||
+        strlen(sInputboxPassword->buffer) == 0;
+    if (sRectPassword != NULL) {
+        djui_base_set_visible(&sRectPassword->base, coopNet);
+    }
+    if (sRectPublicChannel != NULL) {
+        djui_base_set_visible(&sRectPublicChannel->base, coopNet && publicLobby);
+    }
+    if (sInputboxPassword != NULL) {
+        djui_base_set_enabled(&sInputboxPassword->base, coopNet);
+    }
+    if (sPublicChannelSelection != NULL) {
+        djui_base_set_enabled(&sPublicChannelSelection->base, coopNet && publicLobby);
+    }
+}
 
 static void djui_panel_host_network_system_change(UNUSED struct DjuiBase* base) {
     djui_base_set_visible(&sRectPort->base, (configNetworkSystem == NS_SOCKET));
-    djui_base_set_visible(&sRectPassword->base, (configNetworkSystem == NS_COOPNET));
     djui_base_set_enabled(&sInputboxPort->base, (configNetworkSystem == NS_SOCKET));
-    djui_base_set_enabled(&sInputboxPassword->base, (configNetworkSystem == NS_COOPNET));
+    djui_panel_host_update_coopnet_fields();
 }
 #endif
 
@@ -60,6 +81,7 @@ static void djui_panel_host_password_text_change(UNUSED struct DjuiBase* caller)
     if (strlen(sInputboxPassword->buffer) >= 64) {
         djui_inputbox_set_text(sInputboxPassword, configPassword);
     }
+    djui_panel_host_update_coopnet_fields();
 }
 #endif
 
@@ -77,6 +99,18 @@ static void djui_panel_host_do_host(struct DjuiBase* caller) {
     }
 
     configHostPort = atoi(sInputboxPort->buffer);
+
+#ifdef COOPNET
+    if (configNetworkSystem == NS_COOPNET && gNetworkType != NT_SERVER) {
+        enum CoopNetLobbyChannel channel = COOPNET_LOBBY_PRIVATE;
+        if (strlen(configPassword) == 0) {
+            channel = sPublicChannel == 0
+                ? COOPNET_LOBBY_VR_PUBLIC
+                : COOPNET_LOBBY_STANDARD_PUBLIC;
+        }
+        ns_coopnet_set_lobby_channel(channel);
+    }
+#endif
 
     if (gNetworkType == NT_SERVER) {
         network_rehost_begin();
@@ -164,6 +198,25 @@ void djui_panel_host_create(struct DjuiBase* caller) {
             }
 #endif
         }
+
+#ifdef COOPNET
+        sRectPublicChannel = djui_rect_container_create(body, 32);
+        {
+            char* channelChoices[] = { "VR Public", "Standard Public" };
+            sPublicChannelSelection = djui_selectionbox_create(
+                &sRectPublicChannel->base,
+                "Public Lobby Type",
+                channelChoices,
+                2,
+                &sPublicChannel,
+                NULL
+            );
+            if (gNetworkType == NT_SERVER) {
+                djui_base_set_enabled(&sPublicChannelSelection->base, false);
+            }
+        }
+        djui_panel_host_update_coopnet_fields();
+#endif
 
         struct DjuiRect* rect2 = djui_rect_container_create(body, 32);
         {

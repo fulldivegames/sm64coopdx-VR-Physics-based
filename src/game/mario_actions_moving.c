@@ -16,6 +16,7 @@
 #include "pc/debuglog.h"
 #include "pc/configfile.h"
 #include "pc/network/network.h"
+#include "pc/network/coopnet/coopnet.h"
 #include "pc/lua/smlua.h"
 #include "pc/vr/vr.h"
 
@@ -188,7 +189,9 @@ static f32 vr_running_speed_scale(void) {
         return 1.0f;
     }
     return (f32)clamp(
-        configVrRunningSpeed,
+        ns_coopnet_vr_gameplay_allowed()
+            ? configVrRunningSpeed
+            : VR_RUNNING_SPEED_DEFAULT,
         VR_RUNNING_SPEED_MIN,
         VR_RUNNING_SPEED_MAX
     ) / 100.0f;

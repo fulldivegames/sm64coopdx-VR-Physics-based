@@ -19,6 +19,7 @@
 #include "pc/debuglog.h"
 #include "pc/configfile.h"
 #include "pc/network/network.h"
+#include "pc/network/coopnet/coopnet.h"
 #include "pc/lua/smlua.h"
 #include "pc/lua/smlua_hooks.h"
 #include "pc/vr/vr.h"
@@ -270,7 +271,9 @@ static void update_swimming_speed(struct MarioState *m, f32 decelThreshold) {
     f32 buoyancy = get_buoyancy(m);
     const f32 speedScale = vr_is_active()
         ? (f32)clamp(
-            configVrSwimmingSpeed,
+            ns_coopnet_vr_gameplay_allowed()
+                ? configVrSwimmingSpeed
+                : VR_SWIMMING_SPEED_DEFAULT,
             VR_SWIMMING_SPEED_MIN,
             VR_SWIMMING_SPEED_MAX
         ) / 100.0f

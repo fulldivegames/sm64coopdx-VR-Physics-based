@@ -19,6 +19,7 @@
 #include "pc/debuglog.h"
 #include "pc/configfile.h"
 #include "pc/network/network.h"
+#include "pc/network/coopnet/coopnet.h"
 #include "pc/lua/smlua.h"
 #include "pc/vr/vr.h"
 #include "hardcoded.h"
@@ -386,7 +387,9 @@ static f32 vr_flying_speed_scale(void) {
         return 1.0f;
     }
     return (f32)clamp(
-        configVrFlyingSpeed,
+        ns_coopnet_vr_gameplay_allowed()
+            ? configVrFlyingSpeed
+            : VR_FLYING_SPEED_DEFAULT,
         VR_FLYING_SPEED_MIN,
         VR_FLYING_SPEED_MAX
     ) / 100.0f;
@@ -447,7 +450,7 @@ static bool update_vr_headset_flying(struct MarioState* m) {
     m->angleVel[0] = 0;
     m->angleVel[1] = 0;
     m->faceAngle[2] = 0;
-    if (configVrCheatFreeFly) {
+    if (ns_coopnet_vr_gameplay_allowed() && configVrCheatFreeFly) {
         // Free Fly only modifies an already-active Wing Cap flight. Hold the
         // configured maximum base speed and point the complete velocity at
         // the headset, with no gravity or dive-to-build-speed requirement.

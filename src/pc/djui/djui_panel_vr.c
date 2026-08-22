@@ -6,6 +6,7 @@
 
 #include "pc/configfile.h"
 #include "pc/vr/vr.h"
+#include "pc/network/coopnet/coopnet.h"
 #include "data/dynos.c.h"
 #include "game/rendering_graph_node.h"
 #include "game/vr_hand_interaction.h"
@@ -47,6 +48,9 @@ static bool sVrMode = false;
     X(ending, "Ending / Credits", LEVEL_ENDING)
 
 static void djui_panel_vr_warp_to_level(s32 level) {
+    if (!ns_coopnet_vr_gameplay_allowed()) {
+        return;
+    }
     djui_panel_shutdown();
     dynos_warp_to_level(level, 1, 1);
 }
@@ -1395,6 +1399,33 @@ static void djui_panel_vr_cheats_create(struct DjuiBase* caller) {
         djui_three_panel_get_body(panel);
 
     {
+        if (!ns_coopnet_vr_gameplay_allowed()) {
+            struct DjuiText* warning = djui_text_create(
+                body,
+                "Cheats are disabled in Standard Public Lobbies for compatibility and fair play."
+            );
+            djui_base_set_size_type(
+                &warning->base,
+                DJUI_SVT_RELATIVE,
+                DJUI_SVT_ABSOLUTE
+            );
+            djui_base_set_size(&warning->base, 1.0f, 120.0f);
+            djui_base_set_color(&warning->base, 255, 210, 120, 255);
+            djui_text_set_alignment(
+                warning,
+                DJUI_HALIGN_CENTER,
+                DJUI_VALIGN_CENTER
+            );
+            djui_button_create(
+                body,
+                DLANG(MENU, BACK),
+                DJUI_BUTTON_STYLE_BACK,
+                djui_panel_menu_back
+            );
+            djui_panel_add(caller, panel, NULL);
+            return;
+        }
+
         djui_button_create(
             body,
             "Level Select",
@@ -1541,6 +1572,33 @@ static void djui_panel_vr_special_moves_create(
     struct DjuiBase* body = djui_three_panel_get_body(panel);
 
     {
+        if (!ns_coopnet_vr_gameplay_allowed()) {
+            struct DjuiText* warning = djui_text_create(
+                body,
+                "Special Moves are disabled in Standard Public Lobbies for compatibility and fair play."
+            );
+            djui_base_set_size_type(
+                &warning->base,
+                DJUI_SVT_RELATIVE,
+                DJUI_SVT_ABSOLUTE
+            );
+            djui_base_set_size(&warning->base, 1.0f, 120.0f);
+            djui_base_set_color(&warning->base, 255, 210, 120, 255);
+            djui_text_set_alignment(
+                warning,
+                DJUI_HALIGN_CENTER,
+                DJUI_VALIGN_CENTER
+            );
+            djui_button_create(
+                body,
+                DLANG(MENU, BACK),
+                DJUI_BUTTON_STYLE_BACK,
+                djui_panel_menu_back
+            );
+            djui_panel_add(caller, panel, NULL);
+            return;
+        }
+
         djui_checkbox_create(
             body,
             "Fire Flower (50% Item Boxes / 30% Cork Boxes)",

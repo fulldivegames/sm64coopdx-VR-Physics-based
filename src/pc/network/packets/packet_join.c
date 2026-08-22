@@ -12,6 +12,7 @@
 #include "pc/fs/fs.h"
 #include "PR/os_eeprom.h"
 #include "pc/network/version.h"
+#include "pc/network/coopnet/coopnet.h"
 #include "pc/djui/djui.h"
 #include "pc/djui/djui_panel.h"
 #include "pc/djui/djui_panel_modlist.h"
@@ -52,6 +53,15 @@ void network_send_join_request(void) {
     packet_write(&p, &configPlayerPalette, sizeof(struct PlayerPalette));
     packet_write(&p, &configPlayerName,    sizeof(u8) * MAX_CONFIG_STRING);
 
+#ifdef COOPNET
+    if (ns_coopnet_vr_public_session()) {
+        u32 protocolMagic = VR_COOPNET_PROTOCOL_MAGIC;
+        u16 protocolVersion = VR_COOPNET_PROTOCOL_VERSION;
+        packet_write(&p, &protocolMagic, sizeof(protocolMagic));
+        packet_write(&p, &protocolVersion, sizeof(protocolVersion));
+    }
+#endif
+
     network_send_to((gNetworkPlayerServer != NULL) ? gNetworkPlayerServer->localIndex : 0, &p);
     LOG_INFO("sending join request");
 }
@@ -71,6 +81,28 @@ void network_receive_join_request(struct Packet* p) {
         sJoinRequestPlayerPalette = DEFAULT_MARIO_PALETTE;
         snprintf(sJoinRequestPlayerName, MAX_CONFIG_STRING, "%s", "Player");
     }
+
+#ifdef COOPNET
+    if (ns_coopnet_vr_public_session()) {
+        u32 protocolMagic = 0;
+        u16 protocolVersion = 0;
+        const u16 protocolSize = sizeof(protocolMagic) + sizeof(protocolVersion);
+        if (p->cursor > p->dataLength ||
+            p->dataLength - p->cursor < protocolSize) {
+            LOG_INFO("rejecting non-VR client from VR public lobby");
+            network_send_kick(0, EKT_CLOSE_CONNECTION);
+            return;
+        }
+        packet_read(p, &protocolMagic, sizeof(protocolMagic));
+        packet_read(p, &protocolVersion, sizeof(protocolVersion));
+        if (protocolMagic != VR_COOPNET_PROTOCOL_MAGIC ||
+            protocolVersion != VR_COOPNET_PROTOCOL_VERSION) {
+            LOG_INFO("rejecting incompatible VR public client");
+            network_send_kick(0, EKT_CLOSE_CONNECTION);
+            return;
+        }
+    }
+#endif
 
     network_send_join(p);
 }
@@ -128,6 +160,15 @@ void network_send_join(struct Packet* joinRequestPacket) {
     packet_write(&p, &gServerSettings.pvpType, sizeof(u8));
     packet_write(&p, eeprom, sizeof(u8) * 512);
 
+#ifdef COOPNET
+    if (ns_coopnet_vr_public_session()) {
+        u32 protocolMagic = VR_COOPNET_PROTOCOL_MAGIC;
+        u16 protocolVersion = VR_COOPNET_PROTOCOL_VERSION;
+        packet_write(&p, &protocolMagic, sizeof(protocolMagic));
+        packet_write(&p, &protocolVersion, sizeof(protocolVersion));
+    }
+#endif
+
     network_send_to(globalIndex, &p);
     LOG_INFO("sending join packet");
 
@@ -180,6 +221,32 @@ void network_receive_join(struct Packet* p) {
     packet_read(p, &gServerSettings.pauseAnywhere, sizeof(u8));
     packet_read(p, &gServerSettings.pvpType, sizeof(u8));
     packet_read(p, eeprom, sizeof(u8) * 512);
+
+#ifdef COOPNET
+    if (ns_coopnet_vr_public_session()) {
+        u32 protocolMagic = 0;
+        u16 protocolVersion = 0;
+        const u16 protocolSize = sizeof(protocolMagic) + sizeof(protocolVersion);
+        if (p->cursor > p->dataLength ||
+            p->dataLength - p->cursor < protocolSize) {
+            network_shutdown(true, false, false, false);
+            djui_panel_join_message_error(
+                "\\#ffa0a0\\Error:\\#dcdcdc\\ This is not a compatible VR public lobby."
+            );
+            return;
+        }
+        packet_read(p, &protocolMagic, sizeof(protocolMagic));
+        packet_read(p, &protocolVersion, sizeof(protocolVersion));
+        if (protocolMagic != VR_COOPNET_PROTOCOL_MAGIC ||
+            protocolVersion != VR_COOPNET_PROTOCOL_VERSION) {
+            network_shutdown(true, false, false, false);
+            djui_panel_join_message_error(
+                "\\#ffa0a0\\Error:\\#dcdcdc\\ VR public lobby protocol mismatch."
+            );
+            return;
+        }
+    }
+#endif
 
     network_player_connected(NPT_SERVER, 0, 0, &DEFAULT_MARIO_PALETTE, "Player", "0");
     network_player_connected(NPT_LOCAL, myGlobalIndex, configPlayerModel, &configPlayerPalette, configPlayerName, get_local_discord_id());

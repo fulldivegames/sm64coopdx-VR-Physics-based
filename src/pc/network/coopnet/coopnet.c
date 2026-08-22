@@ -16,6 +16,7 @@
 #ifdef COOPNET
 
 #define MAX_COOPNET_DESCRIPTION_LENGTH 1024
+#define VR_COOPNET_GAME_NAME "sm64coopdx-vr-p1"
 
 uint64_t gCoopNetDesiredLobby = 0;
 char gCoopNetPassword[64] = "";
@@ -25,14 +26,46 @@ static uint64_t sLocalLobbyId = 0;
 static uint64_t sLocalLobbyOwnerId = 0;
 static enum NetworkType sNetworkType;
 static bool sReconnecting = false;
+static enum CoopNetLobbyChannel sLobbyChannel = COOPNET_LOBBY_STANDARD_PUBLIC;
 
 static CoopNetRc coopnet_initialize(void);
 
-bool ns_coopnet_query(QueryCallbackPtr callback, QueryFinishCallbackPtr finishCallback, const char* password) {
+static const char* coopnet_game_name(void) {
+    return sLobbyChannel == COOPNET_LOBBY_VR_PUBLIC
+        ? VR_COOPNET_GAME_NAME
+        : GAME_NAME;
+}
+
+void ns_coopnet_set_lobby_channel(enum CoopNetLobbyChannel channel) {
+    sLobbyChannel = channel;
+}
+
+enum CoopNetLobbyChannel ns_coopnet_get_lobby_channel(void) {
+    return sLobbyChannel;
+}
+
+bool ns_coopnet_is_standard_public_session(void) {
+    return gNetworkType != NT_NONE &&
+        gNetworkSystem == &gNetworkSystemCoopNet &&
+        sLobbyChannel == COOPNET_LOBBY_STANDARD_PUBLIC;
+}
+
+bool ns_coopnet_vr_gameplay_allowed(void) {
+    return !ns_coopnet_is_standard_public_session();
+}
+
+bool ns_coopnet_vr_public_session(void) {
+    return gNetworkType != NT_NONE &&
+        gNetworkSystem == &gNetworkSystemCoopNet &&
+        sLobbyChannel == COOPNET_LOBBY_VR_PUBLIC;
+}
+
+bool ns_coopnet_query(QueryCallbackPtr callback, QueryFinishCallbackPtr finishCallback, const char* password, enum CoopNetLobbyChannel channel) {
+    ns_coopnet_set_lobby_channel(channel);
     gCoopNetCallbacks.OnLobbyListGot = callback;
     gCoopNetCallbacks.OnLobbyListFinish = finishCallback;
     if (coopnet_initialize() != COOPNET_OK) { return false; }
-    if (coopnet_lobby_list_get(GAME_NAME, password) != COOPNET_OK) { return false; }
+    if (coopnet_lobby_list_get(coopnet_game_name(), password) != COOPNET_OK) { return false; }
     return true;
 }
 
@@ -212,12 +245,12 @@ void ns_coopnet_update(void) {
             if (sReconnecting) {
                 LOG_INFO("Update lobby");
                 coopnet_populate_description();
-                coopnet_lobby_update(sLocalLobbyId, GAME_NAME, get_version(), configPlayerName, mode, sCoopNetDescription);
+                coopnet_lobby_update(sLocalLobbyId, coopnet_game_name(), get_version(), configPlayerName, mode, sCoopNetDescription);
             } else {
                 LOG_INFO("Create lobby");
                 snprintf(gCoopNetPassword, 64, "%s", configPassword);
                 coopnet_populate_description();
-                coopnet_lobby_create(GAME_NAME, get_version(), configPlayerName, mode, (uint16_t)configAmountOfPlayers, gCoopNetPassword, sCoopNetDescription);
+                coopnet_lobby_create(coopnet_game_name(), get_version(), configPlayerName, mode, (uint16_t)configAmountOfPlayers, gCoopNetPassword, sCoopNetDescription);
             }
         } else if (sNetworkType == NT_CLIENT) {
             LOG_INFO("Join lobby");

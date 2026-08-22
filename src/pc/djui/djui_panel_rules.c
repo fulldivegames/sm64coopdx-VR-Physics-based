@@ -14,7 +14,7 @@ static void djui_panel_rules_deny(struct DjuiBase* caller) {
 
 static void djui_panel_rules_accept(struct DjuiBase* caller) {
     configRulesVersion = RULES_VERSION;
-    djui_panel_join_lobbies_create(caller, "");
+    djui_panel_join_lobbies_create(caller, "", ns_coopnet_get_lobby_channel());
 }
 
 void djui_panel_rules_create(struct DjuiBase* caller) {

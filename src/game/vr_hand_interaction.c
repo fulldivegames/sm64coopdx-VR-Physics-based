@@ -3331,6 +3331,7 @@ static bool vr_hand_interaction_try_physical_climb(
     f32 ceilingHeight = 0.0f;
     Vec3f ceilingContactPosition;
     const bool allowCheatSurface =
+        ns_coopnet_vr_gameplay_allowed() &&
         configVrCheatSurfaceClimbing && allowCheatContact;
     if (vr_hand_interaction_find_ceiling_contact(
             mario,
@@ -3972,7 +3973,8 @@ static void vr_hand_interaction_maintain_physical_climb(
               VR_PHYSICAL_CLIMB_CHEAT_CEILING ||
           sVrPhysicalClimbType ==
               VR_PHYSICAL_CLIMB_CHEAT_WALL) &&
-         !configVrCheatSurfaceClimbing) ||
+         (!ns_coopnet_vr_gameplay_allowed() ||
+          !configVrCheatSurfaceClimbing)) ||
         (sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_POLE &&
          (sVrPhysicalClimbPole == NULL ||
           (sVrPhysicalClimbPole->activeFlags &
@@ -4628,7 +4630,8 @@ static bool vr_hand_interaction_attack_object(
 
     if ((mario->action & ACT_FLAG_SWIMMING) != 0 &&
         (object->oInteractType & INTERACT_BREAKABLE) != 0 &&
-        !configVrCheatUnderwaterBoxPunching) {
+        (!ns_coopnet_vr_gameplay_allowed() ||
+         !configVrCheatUnderwaterBoxPunching)) {
         return false;
     }
 
@@ -5183,28 +5186,19 @@ static void vr_special_moves_reset_power(void) {
     }
 }
 
-static bool vr_special_moves_fire_flower_online_allowed(void) {
-#ifdef COOPNET
-    // CoopNet can mix this native build with unmodified Android clients and
-    // does not expose a reliable public/private distinction here. Disable the
-    // native power-up for every CoopNet session; direct matching-build
-    // connections remain supported.
-    if (gNetworkSystem == &gNetworkSystemCoopNet) {
-        return false;
-    }
-#endif
-    return true;
+static bool vr_special_moves_online_allowed(void) {
+    return ns_coopnet_vr_gameplay_allowed();
 }
 
 bool vr_special_moves_fire_flower_active(void) {
     return configVrSpecialFireFlower &&
         sVrFireFlowerPowered &&
-        vr_special_moves_fire_flower_online_allowed();
+        vr_special_moves_online_allowed();
 }
 
 bool vr_special_moves_grant_fire_flower(void) {
     if (!configVrSpecialFireFlower || !vr_is_active() ||
-        !vr_special_moves_fire_flower_online_allowed() ||
+        !vr_special_moves_online_allowed() ||
         gMarioStates[0].marioObj == NULL) {
         return false;
     }
@@ -5605,7 +5599,7 @@ enum VrBoxReward vr_special_moves_roll_box_reward(
     sVrRewardRolledBox = box;
     sVrRewardRolledBoxTimestamp = gGlobalTimer;
     sVrRolledBoxReward = VR_BOX_REWARD_ORIGINAL;
-    if (!vr_is_active() || !vr_special_moves_fire_flower_online_allowed() ||
+    if (!vr_is_active() || !vr_special_moves_online_allowed() ||
         box == NULL || owner == NULL || owner->playerIndex != 0 ||
         owner->marioObj == NULL) {
         return sVrRolledBoxReward;
@@ -5647,7 +5641,7 @@ enum VrBoxReward vr_special_moves_roll_box_reward(
 bool vr_special_moves_spawn_cheat_fire_flower(void) {
     struct MarioState* mario = &gMarioStates[0];
     if (!vr_is_active() ||
-        !vr_special_moves_fire_flower_online_allowed() ||
+        !vr_special_moves_online_allowed() ||
         mario->marioObj == NULL) {
         return false;
     }
@@ -5834,7 +5828,8 @@ static bool vr_special_moves_target_is_whomp(struct Object* target) {
 
 bool vr_special_moves_spawn_cheat_cap(enum VrCheatSpawnCap cap) {
     struct MarioState* mario = &gMarioStates[0];
-    if (mario->marioObj == NULL || mario->character == NULL) {
+    if (!vr_special_moves_online_allowed() ||
+        mario->marioObj == NULL || mario->character == NULL) {
         return false;
     }
 
@@ -5869,12 +5864,12 @@ bool vr_special_moves_spawn_cheat_cap(enum VrCheatSpawnCap cap) {
 
 bool vr_special_moves_hammer_suit_active(void) {
     return configVrSpecialHammerSuit && sVrHammerSuitPowered &&
-        vr_special_moves_fire_flower_online_allowed();
+        vr_special_moves_online_allowed();
 }
 
 bool vr_special_moves_grant_hammer_suit(void) {
     if (!configVrSpecialHammerSuit || !vr_is_active() ||
-        !vr_special_moves_fire_flower_online_allowed() ||
+        !vr_special_moves_online_allowed() ||
         gMarioStates[0].marioObj == NULL) {
         return false;
     }
@@ -5923,7 +5918,8 @@ static void vr_special_moves_update_hammer_suit_music(
 
 bool vr_special_moves_spawn_cheat_hammer_suit(void) {
     struct MarioState* mario = &gMarioStates[0];
-    if (!configVrSpecialHammerSuit || mario->marioObj == NULL) {
+    if (!vr_special_moves_online_allowed() ||
+        !configVrSpecialHammerSuit || mario->marioObj == NULL) {
         return false;
     }
     vr_special_moves_delete_object(&sVrHammerSuitPickupObject);
@@ -6842,7 +6838,8 @@ static bool vr_special_moves_try_rasengan_hit(
     const Vec3f velocity,
     struct Object* object
 ) {
-    if (!configVrSpecialRasengan || hand != VR_CONTROLLER_RIGHT ||
+    if (!vr_special_moves_online_allowed() ||
+        !configVrSpecialRasengan || hand != VR_CONTROLLER_RIGHT ||
         sVrRasenganObject == NULL || sVrRasenganTarget != NULL ||
         sVrRasenganChargeFrames <
             vr_special_moves_rasengan_ready_frames() ||
@@ -7748,7 +7745,8 @@ static bool vr_special_moves_update_rasengan_hand(
     bool leftPositionValid,
     bool leftHandBusy
 ) {
-    if (!configVrSpecialRasengan || !vr_is_active() || mario == NULL ||
+    if (!vr_special_moves_online_allowed() ||
+        !configVrSpecialRasengan || !vr_is_active() || mario == NULL ||
         vr_special_moves_fire_flower_active()) {
         vr_special_moves_clear_rasengan();
         return false;
@@ -8474,19 +8472,37 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         return;
     }
 
-    if (!configVrSpecialRasengan || !vr_is_active()) {
+    if (!vr_special_moves_online_allowed()) {
+        vr_special_moves_reset_power();
+        vr_special_moves_reset_hammer_suit();
+        vr_special_moves_clear_rasengan();
+        vr_special_moves_clear_rasen_shuriken_projectile();
+        for (u32 i = 0; i < VR_FIRE_FLOWER_PICKUP_COUNT; i++) {
+            vr_special_moves_delete_object(&sVrFireFlowerPickups[i]);
+            sVrFireFlowerPickupVelocityY[i] = 0.0f;
+            sVrFireFlowerPickupLanded[i] = false;
+            sVrFireFlowerPickupAge[i] = 0;
+        }
+        vr_special_moves_delete_object(&sVrHammerSuitPickupObject);
+        sVrHammerSuitPickupVelocityY = 0.0f;
+        sVrHammerSuitPickupLanded = false;
+        sVrHammerSuitPickupAge = 0;
+    }
+
+    if (!configVrSpecialRasengan || !vr_is_active() ||
+        !vr_special_moves_online_allowed()) {
         vr_special_moves_clear_rasen_shuriken_projectile();
     }
 
     if (!configVrSpecialFireFlower || !vr_is_active() ||
-        !vr_special_moves_fire_flower_online_allowed() ||
+        !vr_special_moves_online_allowed() ||
         (sVrFireFlowerPowered &&
          (sVrFireFlowerLevel != gCurrLevelNum ||
           sVrFireFlowerArea != gCurrAreaIndex))) {
         vr_special_moves_reset_power();
     }
     if (!configVrSpecialHammerSuit || !vr_is_active() ||
-        !vr_special_moves_fire_flower_online_allowed() ||
+        !vr_special_moves_online_allowed() ||
         (sVrHammerSuitPowered &&
          (sVrHammerSuitLevel != gCurrLevelNum ||
           sVrHammerSuitArea != gCurrAreaIndex))) {
@@ -8495,7 +8511,8 @@ void vr_hand_interaction_update(struct MarioState* mario) {
     vr_special_moves_update_fire_flower_music(mario);
     vr_special_moves_update_hammer_suit_music(mario);
     if (sVrFireFlowerPowered &&
-        !configVrCheatNoFireFlowerTimer &&
+        (!ns_coopnet_vr_gameplay_allowed() ||
+         !configVrCheatNoFireFlowerTimer) &&
         sVrFireFlowerTimer > 0 &&
         --sVrFireFlowerTimer == 0) {
         vr_special_moves_reset_power();
@@ -8507,6 +8524,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
     vr_special_moves_update_hammer_projectiles(mario);
     vr_special_moves_update_rasen_shuriken_projectile(mario);
     if ((!configVrSpecialRasengan ||
+         !vr_special_moves_online_allowed() ||
          vr_special_moves_fire_flower_active() ||
          vr_special_moves_hammer_suit_active()) &&
         sVrRasenganObject != NULL) {
@@ -8710,6 +8728,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
             &rasenganRightPreview
         );
     const bool rasenganRightGestureReady =
+        vr_special_moves_online_allowed() &&
         configVrSpecialRasengan &&
         !vr_special_moves_fire_flower_active() &&
         !vr_special_moves_hammer_suit_active() &&
