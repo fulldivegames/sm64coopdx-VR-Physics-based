@@ -800,6 +800,8 @@ static Vec3f sVrTrueFirstPersonForwardPrev = { 0.0f, 0.0f, 1.0f };
 static Vec3f sVrTrueFirstPersonForward = { 0.0f, 0.0f, 1.0f };
 static Vec3f sVrTrueFirstPersonUpPrev = { 0.0f, 1.0f, 0.0f };
 static Vec3f sVrTrueFirstPersonUp = { 0.0f, 1.0f, 0.0f };
+static u32 sVrTrueFirstPersonSyntheticAction = ACT_UNINITIALIZED;
+static u32 sVrTrueFirstPersonSyntheticActionStart = 0;
 static bool sVrMountedHatAnchorValid = false;
 static u32 sVrMountedHatAnchorTimestamp = 0;
 static Vec3f sVrMountedBodyUpPrev = { 0.0f, 1.0f, 0.0f };
@@ -1783,7 +1785,7 @@ static bool vr_true_first_person_rotation_action_active(u32 action) {
     }
 }
 
-static bool vr_get_true_first_person_body_basis(
+static bool vr_get_true_first_person_body_basis_legacy(
     Vec3f cameraForward,
     Vec3f cameraUp
 ) {
@@ -2013,6 +2015,226 @@ static bool vr_get_true_first_person_body_basis(
         cameraForward[0] = stableForward[0] * vertical;
         cameraForward[1] = -pitch;
         cameraForward[2] = stableForward[2] * vertical;
+    }
+    return true;
+}
+
+static bool vr_get_true_first_person_body_basis_deprecated(
+    Vec3f cameraForward,
+    Vec3f cameraUp
+) {
+    struct MarioState* mario = &gMarioStates[0];
+    if (!vr_is_active() ||
+        configVrCameraMode != VR_CAMERA_MODE_FIRST_PERSON ||
+        !configVrExperimentalTrueFirstPerson ||
+        cameraForward == NULL ||
+        cameraUp == NULL ||
+        mario->marioObj == NULL) {
+        sVrTrueFirstPersonSyntheticAction = ACT_UNINITIALIZED;
+        return false;
+    }
+
+    const u32 action = mario->action;
+    const bool frontFlip =
+        action == ACT_TRIPLE_JUMP ||
+        action == ACT_FLYING_TRIPLE_JUMP ||
+        action == ACT_SPECIAL_TRIPLE_JUMP ||
+        action == ACT_FORWARD_ROLLOUT;
+    const bool backFlip =
+        action == ACT_BACKFLIP ||
+        action == ACT_BACKWARD_ROLLOUT;
+    const bool sideFlip = action == ACT_SIDE_FLIP;
+    const bool dive = action == ACT_DIVE;
+    if (!frontFlip && !backFlip && !sideFlip && !dive) {
+        sVrTrueFirstPersonSyntheticAction = ACT_UNINITIALIZED;
+        return vr_get_true_first_person_body_basis_legacy(
+            cameraForward,
+            cameraUp
+        );
+    }
+
+    /*
+     * Start with the exact ordinary first-person camera heading. OpenXR adds
+     * live HMD rotation later, so injecting headset yaw here would apply it in
+     * the wrong coordinate space and force every action to look right.
+     * Mario's skeleton and animation matrices are intentionally excluded.
+     */
+    Vec3f stableForward = { 0.0f, 0.0f, 1.0f };
+    vr_adjust_first_person_camera_direction(stableForward);
+    stableForward[1] = 0.0f;
+    const f32 stableForwardLength = sqrtf(
+        stableForward[0] * stableForward[0] +
+        stableForward[2] * stableForward[2]
+    );
+    if (!isfinite(stableForwardLength) ||
+        stableForwardLength <= 0.001f) {
+        return false;
+    }
+    vec3f_mul(stableForward, 1.0f / stableForwardLength);
+    Vec3f stableRight = {
+        stableForward[2],
+        0.0f,
+        -stableForward[0]
+    };
+
+    /* A dive follows the ordinary view exactly and applies no rotation. */
+    if (dive) {
+        sVrTrueFirstPersonSyntheticAction = action;
+        vec3f_copy(cameraForward, stableForward);
+        vec3f_set(cameraUp, 0.0f, 1.0f, 0.0f);
+        return true;
+    }
+
+    if (sVrTrueFirstPersonSyntheticAction != action) {
+        sVrTrueFirstPersonSyntheticAction = action;
+        sVrTrueFirstPersonSyntheticActionStart = gGlobalTimer;
+    }
+
+    /*
+     * Drive one complete turn from an independent twenty-tick clock. This
+     * keeps the result stable across character packs and animation changes.
+     * Rendering interpolation keeps the rotation smooth above 30 Hz.
+     */
+    const f32 renderDelta = gRenderingInterpolated
+        ? clamp(gRenderingDelta, 0.0f, 1.0f)
+        : 1.0f;
+    const f32 elapsed =
+        (f32)(gGlobalTimer - sVrTrueFirstPersonSyntheticActionStart) +
+        renderDelta;
+    const f32 progress = clamp(elapsed / 20.0f, 0.0f, 1.0f);
+    s16 turnAngle = (s16)roundf(progress * 65535.0f);
+    if (backFlip) {
+        turnAngle = (s16)-turnAngle;
+    }
+
+    const f32 turnSin = sins(turnAngle);
+    const f32 turnCos = coss(turnAngle);
+    if (sideFlip) {
+        /*
+         * The engine look-at basis stores this view-local operation opposite
+         * to the conventional matrix label: this is the operation that is
+         * visually observed as a sideways roll in-headset.
+         */
+        const f32 lateralVelocity =
+            mario->vel[0] * stableRight[0] +
+            mario->vel[2] * stableRight[2];
+        if (lateralVelocity < 0.0f) {
+            turnAngle = (s16)-turnAngle;
+        }
+        const f32 sideSin = sins(turnAngle);
+        const f32 sideCos = coss(turnAngle);
+        for (u32 axis = 0; axis < 3; axis++) {
+            cameraForward[axis] = stableForward[axis] * sideCos;
+            cameraUp[axis] = stableForward[axis] * sideSin;
+        }
+        cameraForward[1] = -sideSin;
+        cameraUp[1] = sideCos;
+        return true;
+    }
+
+    /*
+     * In this engine's look-at storage, rotating the up vector across the
+     * horizontal right vector is the operation visually observed as a
+     * straight forward/backward somersault in-headset.
+     */
+    vec3f_copy(cameraForward, stableForward);
+    for (u32 axis = 0; axis < 3; axis++) {
+        cameraUp[axis] = -stableRight[axis] * turnSin;
+    }
+    cameraUp[1] += turnCos;
+    return true;
+}
+
+static bool vr_true_first_person_synthetic_action(u32 action) {
+    return action == ACT_TRIPLE_JUMP ||
+        action == ACT_FLYING_TRIPLE_JUMP ||
+        action == ACT_SPECIAL_TRIPLE_JUMP ||
+        action == ACT_BACKFLIP ||
+        action == ACT_SIDE_FLIP ||
+        action == ACT_DIVE ||
+        action == ACT_FORWARD_ROLLOUT ||
+        action == ACT_BACKWARD_ROLLOUT;
+}
+
+static bool vr_get_true_first_person_body_basis(
+    Vec3f cameraForward,
+    Vec3f cameraUp
+) {
+    const u32 action = gMarioStates[0].action;
+    if (vr_true_first_person_synthetic_action(action)) {
+        /* Keep the ordinary game camera completely unchanged. */
+        return false;
+    }
+    return vr_get_true_first_person_body_basis_legacy(
+        cameraForward,
+        cameraUp
+    );
+}
+
+static bool vr_get_true_first_person_view_rotation(Vec3s rotation) {
+    struct MarioState* mario = &gMarioStates[0];
+    const u32 action = mario->action;
+    const bool frontFlip =
+        action == ACT_TRIPLE_JUMP ||
+        action == ACT_FLYING_TRIPLE_JUMP ||
+        action == ACT_SPECIAL_TRIPLE_JUMP ||
+        action == ACT_FORWARD_ROLLOUT;
+    const bool backFlip =
+        action == ACT_BACKFLIP ||
+        action == ACT_BACKWARD_ROLLOUT;
+    const bool sideFlip = action == ACT_SIDE_FLIP;
+
+    vec3s_copy(rotation, gVec3sZero);
+    if (!vr_is_active() ||
+        configVrCameraMode != VR_CAMERA_MODE_FIRST_PERSON ||
+        !configVrExperimentalTrueFirstPerson ||
+        (!frontFlip && !backFlip && !sideFlip)) {
+        if (action != ACT_DIVE) {
+            sVrTrueFirstPersonSyntheticAction = ACT_UNINITIALIZED;
+        }
+        return false;
+    }
+
+    if (sVrTrueFirstPersonSyntheticAction != action) {
+        sVrTrueFirstPersonSyntheticAction = action;
+        sVrTrueFirstPersonSyntheticActionStart = gGlobalTimer;
+    }
+    const f32 renderDelta = gRenderingInterpolated
+        ? clamp(gRenderingDelta, 0.0f, 1.0f)
+        : 1.0f;
+    const f32 elapsed =
+        (f32)(gGlobalTimer - sVrTrueFirstPersonSyntheticActionStart) +
+        renderDelta;
+    s16 angle = (s16)roundf(
+        clamp(elapsed / 20.0f, 0.0f, 1.0f) * 65535.0f
+    );
+
+    /* Camera-local X is pitch; camera-local Z is roll. */
+    if (frontFlip || backFlip) {
+        rotation[0] = backFlip ? (s16)-angle : angle;
+    } else {
+        Vec3f ordinaryForward = { 0.0f, 0.0f, 1.0f };
+        vr_adjust_first_person_camera_direction(ordinaryForward);
+        ordinaryForward[1] = 0.0f;
+        const f32 length = sqrtf(
+            ordinaryForward[0] * ordinaryForward[0] +
+            ordinaryForward[2] * ordinaryForward[2]
+        );
+        if (length > 0.001f) {
+            vec3f_mul(ordinaryForward, 1.0f / length);
+            const Vec3f ordinaryRight = {
+                ordinaryForward[2],
+                0.0f,
+                -ordinaryForward[0]
+            };
+            const f32 lateralVelocity =
+                mario->vel[0] * ordinaryRight[0] +
+                mario->vel[2] * ordinaryRight[2];
+            if (lateralVelocity < 0.0f) {
+                angle = (s16)-angle;
+            }
+        }
+        rotation[2] = angle;
     }
     return true;
 }
@@ -3317,6 +3539,25 @@ static bool vr_build_head_view_matrix(
     } else if (!vr_build_head_rotation_matrix(matrix) ||
                !vr_get_head_translation(headTranslation)) {
         return false;
+    }
+
+    if (!menuScene) {
+        Vec3s syntheticRotation;
+        if (vr_get_true_first_person_view_rotation(
+                syntheticRotation
+            )) {
+            Mat4 rotationMatrix;
+            Mat4 combinedMatrix;
+            Vec3f zeroTranslation = { 0.0f, 0.0f, 0.0f };
+            mtxf_rotate_xyz_and_translate(
+                rotationMatrix,
+                zeroTranslation,
+                syntheticRotation
+            );
+            /* Append in headset-local space: no yaw or heading is replaced. */
+            mtxf_mul(combinedMatrix, matrix, rotationMatrix);
+            mtxf_copy(matrix, combinedMatrix);
+        }
     }
 
     if (!menuScene) {
@@ -5143,7 +5384,11 @@ static bool vr_hide_local_first_person_mario_part(void) {
         configVrExperimentalTrueFirstPerson &&
         (action == ACT_BACKFLIP ||
          action == ACT_SIDE_FLIP ||
-         action == ACT_TRIPLE_JUMP);
+         action == ACT_TRIPLE_JUMP ||
+         action == ACT_FLYING_TRIPLE_JUMP ||
+         action == ACT_SPECIAL_TRIPLE_JUMP ||
+         action == ACT_FORWARD_ROLLOUT ||
+         action == ACT_BACKWARD_ROLLOUT);
 
     // True First Person keeps the animated skeleton available for its camera
     // anchor, but the model itself would pass directly through the player's
