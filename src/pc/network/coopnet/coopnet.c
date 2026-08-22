@@ -17,6 +17,9 @@
 
 #define MAX_COOPNET_DESCRIPTION_LENGTH 1024
 #define VR_COOPNET_GAME_NAME "sm64coopdx-vr-p1"
+#ifdef __ANDROID__
+#define ANDROID_COOPNET_GAME_NAME "sm64coop-android"
+#endif
 
 uint64_t gCoopNetDesiredLobby = 0;
 char gCoopNetPassword[64] = "";
@@ -31,9 +34,18 @@ static enum CoopNetLobbyChannel sLobbyChannel = COOPNET_LOBBY_STANDARD_PUBLIC;
 static CoopNetRc coopnet_initialize(void);
 
 static const char* coopnet_game_name(void) {
-    return sLobbyChannel == COOPNET_LOBBY_VR_PUBLIC
-        ? VR_COOPNET_GAME_NAME
-        : GAME_NAME;
+    if (sLobbyChannel == COOPNET_LOBBY_VR_PUBLIC) {
+        // Matching PC VR and standalone builds intentionally share this pool.
+        return VR_COOPNET_GAME_NAME;
+    }
+#ifdef __ANDROID__
+    if (sLobbyChannel == COOPNET_LOBBY_STANDARD_PUBLIC) {
+        // The reference Android port maintains a separate public directory.
+        // Private rooms continue using GAME_NAME for direct PC cross-play.
+        return ANDROID_COOPNET_GAME_NAME;
+    }
+#endif
+    return GAME_NAME;
 }
 
 void ns_coopnet_set_lobby_channel(enum CoopNetLobbyChannel channel) {
