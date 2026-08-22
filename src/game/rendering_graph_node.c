@@ -1957,8 +1957,20 @@ static bool vr_get_true_first_person_body_basis(
     // line is not a reliable flip axis (arms swing independently and could
     // turn a front flip into a sideways roll). Head-to-torso supplies the
     // tilt amount; the selected facing source supplies the horizontal plane.
-    Vec3f stableForward = { 0.0f, 0.0f, 1.0f };
-    vr_adjust_first_person_camera_direction(stableForward);
+    // Flip around the player's current front-facing horizontal axis. The
+    // stabilized camera helper intentionally excludes live HMD yaw because
+    // OpenXR applies it later during ordinary view rendering; that is the
+    // wrong basis for an animated body flip and can turn a backflip/triple
+    // jump into a sideways roll when the headset is not aligned with the
+    // camera base. Use the live headset-facing yaw without locomotion
+    // calibration so pitch flips always remain forward/back relative to the
+    // player's actual present view.
+    const s16 headsetForwardYaw = vr_get_first_person_headset_yaw();
+    Vec3f stableForward = {
+        sins(headsetForwardYaw),
+        0.0f,
+        coss(headsetForwardYaw)
+    };
     Vec3f stableRight = {
         stableForward[2],
         0.0f,

@@ -14,6 +14,7 @@ extern u16 gLocalBubbleCounter;
 struct WallCollisionData;
 
 s16 vr_get_first_person_view_yaw(void);
+s16 vr_get_first_person_headset_yaw(void);
 bool vr_get_first_person_view_direction(
     struct MarioState* m,
     Vec3f direction
