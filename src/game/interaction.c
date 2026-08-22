@@ -1690,6 +1690,91 @@ u32 interact_player_pvp(struct MarioState* attacker, struct MarioState* victim) 
     return FALSE;
 }
 
+bool interact_player_physical_punch(
+    struct MarioState* attacker,
+    struct MarioState* victim,
+    s16 attackYaw
+) {
+    return interact_player_vr_attack(
+        attacker,
+        victim,
+        attackYaw,
+        VR_PLAYER_ATTACK_PUNCH
+    );
+}
+
+bool interact_player_vr_attack(
+    struct MarioState* attacker,
+    struct MarioState* victim,
+    s16 attackYaw,
+    u8 attackType
+) {
+    if (attacker == NULL || victim == NULL || attacker == victim ||
+        attacker->marioObj == NULL || victim->marioObj == NULL ||
+        !is_player_active(attacker) || !is_player_active(victim) ||
+        gCurrentArea == NULL || gCurrentArea->localAreaTimer < 60 ||
+        attackType > VR_PLAYER_ATTACK_HAMMER ||
+        victim->invincTimer != 0 || victim->hurtCounter != 0 ||
+        (victim->action & (ACT_FLAG_INTANGIBLE | ACT_FLAG_INVULNERABLE)) != 0) {
+        return false;
+    }
+
+    const u32 vanishFlags = MARIO_VANISH_CAP | MARIO_CAP_ON_HEAD;
+    if ((attacker->flags & vanishFlags) == vanishFlags ||
+        (victim->flags & vanishFlags) == vanishFlags) {
+        return false;
+    }
+
+    bool allowAttack = true;
+    smlua_call_event_hooks(
+        HOOK_ALLOW_PVP_ATTACK,
+        attacker,
+        victim,
+        attackType == VR_PLAYER_ATTACK_PUNCH ? INT_PUNCH : INT_KICK,
+        &allowAttack
+    );
+    if (!allowAttack) {
+        return false;
+    }
+
+    // The hand sweep is authoritative for overlap, but damage and knockback
+    // still travel through the native PVP path. Temporarily presenting the
+    // remote attacker as punching preserves server PVP mode, metal/vanish
+    // rules, damage scaling, Lua hooks, and the normal knockback actions.
+    const u32 oldFlags = attacker->flags;
+    const s16 oldYaw = attacker->marioObj->oFaceAngleYaw;
+    const s32 oldDamage = attacker->marioObj->oDamageOrCoinValue;
+    attacker->flags |= MARIO_PUNCHING;
+    attacker->marioObj->oFaceAngleYaw = attackYaw;
+    static const s32 sVrAttackDamage[] = { 1, 2, 2, 3, 2 };
+    attacker->marioObj->oDamageOrCoinValue =
+        sVrAttackDamage[attackType];
+    if (attacker->flags & MARIO_METAL_CAP) {
+        attacker->marioObj->oDamageOrCoinValue *= 2;
+    }
+
+    victim->interactObj = attacker->marioObj;
+    victim->invincTimer = max(victim->invincTimer, 3);
+    take_damage_and_knock_back(victim, attacker->marioObj);
+    if (attackType == VR_PLAYER_ATTACK_RASENGAN ||
+        attackType == VR_PLAYER_ATTACK_RASEN_SHURIKEN) {
+        victim->forwardVel = fmaxf(victim->forwardVel, 48.0f);
+        victim->vel[1] = fmaxf(victim->vel[1], 28.0f);
+    }
+    victim->interactObj = NULL;
+
+    attacker->marioObj->oDamageOrCoinValue = oldDamage;
+    attacker->marioObj->oFaceAngleYaw = oldYaw;
+    attacker->flags = oldFlags;
+    smlua_call_event_hooks(
+        HOOK_ON_PVP_ATTACK,
+        attacker,
+        victim,
+        attackType == VR_PLAYER_ATTACK_PUNCH ? INT_PUNCH : INT_KICK
+    );
+    return true;
+}
+
 u32 interact_igloo_barrier(struct MarioState *m, UNUSED u32 interactType, struct Object *o) {
     if (!m || !o) { return FALSE; }
     //! Sets used object without changing action (LOTS of interesting glitches,

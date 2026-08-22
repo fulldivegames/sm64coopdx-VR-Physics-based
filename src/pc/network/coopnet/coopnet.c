@@ -17,9 +17,7 @@
 
 #define MAX_COOPNET_DESCRIPTION_LENGTH 1024
 #define VR_COOPNET_GAME_NAME "sm64coopdx-vr-p1"
-#ifdef __ANDROID__
 #define ANDROID_COOPNET_GAME_NAME "sm64coop-android"
-#endif
 
 uint64_t gCoopNetDesiredLobby = 0;
 char gCoopNetPassword[64] = "";
@@ -30,6 +28,12 @@ static uint64_t sLocalLobbyOwnerId = 0;
 static enum NetworkType sNetworkType;
 static bool sReconnecting = false;
 static enum CoopNetLobbyChannel sLobbyChannel = COOPNET_LOBBY_STANDARD_PUBLIC;
+// The lobby browser may query a different directory while CoopNet remains
+// connected. Keep the channel chosen for the live network session separate so
+// packet compatibility and gameplay restrictions cannot change underneath an
+// in-progress join.
+static enum CoopNetLobbyChannel sActiveLobbyChannel = COOPNET_LOBBY_STANDARD_PUBLIC;
+static bool sActiveLobbyChannelValid = false;
 
 static CoopNetRc coopnet_initialize(void);
 
@@ -38,18 +42,22 @@ static const char* coopnet_game_name(void) {
         // Matching PC VR and standalone builds intentionally share this pool.
         return VR_COOPNET_GAME_NAME;
     }
-#ifdef __ANDROID__
     if (sLobbyChannel == COOPNET_LOBBY_STANDARD_PUBLIC) {
-        // The reference Android port maintains a separate public directory.
-        // Private rooms continue using GAME_NAME for direct PC cross-play.
+        // Standalone and PC VR share the Android public directory. Private
+        // rooms continue using GAME_NAME, and VR public keeps its own pool.
         return ANDROID_COOPNET_GAME_NAME;
     }
-#endif
     return GAME_NAME;
 }
 
 void ns_coopnet_set_lobby_channel(enum CoopNetLobbyChannel channel) {
     sLobbyChannel = channel;
+}
+
+void ns_coopnet_commit_lobby_channel(enum CoopNetLobbyChannel channel) {
+    sLobbyChannel = channel;
+    sActiveLobbyChannel = channel;
+    sActiveLobbyChannelValid = true;
 }
 
 enum CoopNetLobbyChannel ns_coopnet_get_lobby_channel(void) {
@@ -58,8 +66,8 @@ enum CoopNetLobbyChannel ns_coopnet_get_lobby_channel(void) {
 
 bool ns_coopnet_is_standard_public_session(void) {
     return gNetworkType != NT_NONE &&
-        gNetworkSystem == &gNetworkSystemCoopNet &&
-        sLobbyChannel == COOPNET_LOBBY_STANDARD_PUBLIC;
+        sActiveLobbyChannelValid &&
+        sActiveLobbyChannel == COOPNET_LOBBY_STANDARD_PUBLIC;
 }
 
 bool ns_coopnet_vr_gameplay_allowed(void) {
@@ -68,8 +76,8 @@ bool ns_coopnet_vr_gameplay_allowed(void) {
 
 bool ns_coopnet_vr_public_session(void) {
     return gNetworkType != NT_NONE &&
-        gNetworkSystem == &gNetworkSystemCoopNet &&
-        sLobbyChannel == COOPNET_LOBBY_VR_PUBLIC;
+        sActiveLobbyChannelValid &&
+        sActiveLobbyChannel == COOPNET_LOBBY_VR_PUBLIC;
 }
 
 bool ns_coopnet_query(QueryCallbackPtr callback, QueryFinishCallbackPtr finishCallback, const char* password, enum CoopNetLobbyChannel channel) {
@@ -130,6 +138,9 @@ static void coopnet_on_lobby_joined(uint64_t lobbyId, uint64_t userId, uint64_t 
     coopnet_save_dest_id(userId, destId);
 
     if (userId == coopnet_get_local_user_id() && gNetworkType == NT_CLIENT) {
+        // Every lobby type uses CoopNet's normal mod synchronization. This is
+        // required for VR-public PC/standalone sessions just as it is for
+        // private, direct, and standard public sessions.
         network_send_mod_list_request();
     }
 #ifdef DISCORD_SDK
@@ -192,6 +203,9 @@ static void coopnet_on_error(enum MPacketErrorNumber error, uint64_t tag) {
 static bool ns_coopnet_initialize(enum NetworkType networkType, bool reconnecting) {
     sNetworkType = networkType;
     sReconnecting = reconnecting;
+    if (!reconnecting && networkType != NT_NONE) {
+        ns_coopnet_commit_lobby_channel(sLobbyChannel);
+    }
     if (reconnecting) { return true; }
     return coopnet_is_connected()
         ? true
@@ -321,6 +335,7 @@ static void ns_coopnet_shutdown(bool reconnecting) {
 
     sLocalLobbyId = 0;
     sLocalLobbyOwnerId = 0;
+    sActiveLobbyChannelValid = false;
 }
 
 static CoopNetRc coopnet_initialize(void) {

@@ -420,6 +420,17 @@ Useful for implementing enemy attacks, hazards, and ensuring Mario receives prop
 |descriptionEnd| */
 u32 take_damage_and_knock_back(struct MarioState *m, struct Object *o);
 
+enum VrPlayerAttackType {
+    VR_PLAYER_ATTACK_PUNCH = 0,
+    VR_PLAYER_ATTACK_FIREBALL,
+    VR_PLAYER_ATTACK_RASENGAN,
+    VR_PLAYER_ATTACK_RASEN_SHURIKEN,
+    VR_PLAYER_ATTACK_HAMMER,
+};
+
+bool interact_player_physical_punch(struct MarioState* attacker, struct MarioState* victim, s16 attackYaw);
+bool interact_player_vr_attack(struct MarioState* attacker, struct MarioState* victim, s16 attackYaw, u8 attackType);
+
 /* |description|
 Determines the type of cap an object represents. Depending on the object's behavior, it returns a cap type (normal, metal, wing, vanish).
 Useful for handling the logic of picking up, wearing, or losing different kinds of caps

@@ -108,7 +108,7 @@ static void djui_panel_host_do_host(struct DjuiBase* caller) {
                 ? COOPNET_LOBBY_VR_PUBLIC
                 : COOPNET_LOBBY_STANDARD_PUBLIC;
         }
-        ns_coopnet_set_lobby_channel(channel);
+        ns_coopnet_commit_lobby_channel(channel);
     }
 #endif
 

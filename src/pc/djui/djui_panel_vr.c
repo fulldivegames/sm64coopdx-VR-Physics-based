@@ -329,6 +329,7 @@ static void djui_panel_vr_special_moves_defaults(
     struct DjuiBase* caller
 ) {
     (void)caller;
+    configVrSpecialMovesEnabled = true;
     configVrSpecialFireFlower = true;
     configVrSpecialFireFlowerMusic = true;
     configVrSpecialHammerSuit = true;
@@ -351,6 +352,7 @@ static void djui_panel_vr_immersion_defaults(struct DjuiBase* caller) {
     configVrImmersiveCarrySpeed = false;
     configVrImmersiveStarSpawnFocus = false;
     configVrImmersiveGhostPunchArm = true;
+    configVrImmersiveMatchMarioHeight = false;
     configVrExperimentalSideFlipFollow = true;
     configVrExperimentalWallJumpTurn = true;
     configVrPhysicalCrouching = true;
@@ -1399,10 +1401,16 @@ static void djui_panel_vr_cheats_create(struct DjuiBase* caller) {
         djui_three_panel_get_body(panel);
 
     {
+        djui_checkbox_create(
+            body,
+            "Enable Special Moves",
+            &configVrSpecialMovesEnabled,
+            NULL
+        );
         if (!ns_coopnet_vr_gameplay_allowed()) {
             struct DjuiText* warning = djui_text_create(
                 body,
-                "Cheats are disabled in Standard Public Lobbies for compatibility and fair play."
+                "Cheats and power-ups are disabled in Standard Public Lobbies for compatibility and fair play."
             );
             djui_base_set_size_type(
                 &warning->base,
@@ -1757,6 +1765,12 @@ static void djui_panel_vr_immersion_movement_create(
         body,
         "Ghost Arm for Button Punches",
         &configVrImmersiveGhostPunchArm,
+        NULL
+    );
+    djui_checkbox_create(
+        body,
+        "Match Multiplayer Mario Height",
+        &configVrImmersiveMatchMarioHeight,
         NULL
     );
     djui_button_create(

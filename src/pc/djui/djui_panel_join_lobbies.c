@@ -69,6 +69,10 @@ static void djui_lobby_on_hover_end(UNUSED struct DjuiBase* base) {
 void djui_panel_join_lobby(struct DjuiBase* caller) {
     gCoopNetDesiredLobby = (uint64_t)caller->tag;
     snprintf(gCoopNetPassword, 64, "%s", sPassword);
+    // Lock the directory represented by this panel into the network session
+    // before initialization. A separate browser query must never make a
+    // standard-public join use the VR-public protocol (or vice versa).
+    ns_coopnet_commit_lobby_channel(sLobbyChannel);
     network_reset_reconnect_and_rehost();
     network_set_system(NS_COOPNET);
     network_init(NT_CLIENT, false);
@@ -98,6 +102,7 @@ void djui_panel_join_query(uint64_t aLobbyId, UNUSED uint64_t aOwnerId, uint16_t
     struct DjuiLobbyEntry* entry = djui_lobby_entry_create(layoutBase, (char*)aHostName, (char*)mode, playerText, (char*)aDescription, disabled, djui_panel_join_lobby, djui_lobby_on_hover, djui_lobby_on_hover_end);
     entry->base.tag = (s64)aLobbyId;
     djui_paginated_update_page_buttons(sLobbyPaginated);
+
 }
 
 void djui_panel_join_query_finish(void) {
@@ -162,6 +167,18 @@ void djui_panel_join_lobbies_create(struct DjuiBase* caller, const char* passwor
         true);
     struct DjuiBase* body = djui_three_panel_get_body(panel);
     {
+        if (!private && channel == COOPNET_LOBBY_STANDARD_PUBLIC) {
+            struct DjuiText* warning = djui_text_create(
+                body,
+                "Cheats / power-ups disabled.\nPlay regular public lobbies at your own risk."
+            );
+            djui_base_set_size_type(&warning->base, DJUI_SVT_RELATIVE, DJUI_SVT_ABSOLUTE);
+            djui_base_set_size(&warning->base, 1.0f, 72.0f);
+            djui_base_set_color(&warning->base, 255, 190, 120, 255);
+            djui_text_set_drop_shadow(warning, 64, 64, 64, 100);
+            djui_text_set_alignment(warning, DJUI_HALIGN_CENTER, DJUI_VALIGN_CENTER);
+        }
+
         sLobbyPaginated = djui_paginated_create(body, 10);
         sLobbyLayout = sLobbyPaginated->layout;
         djui_flow_layout_set_margin(sLobbyLayout, 4);
