@@ -1247,6 +1247,8 @@ static bool render_frame(QuestApp *app) {
             }
             layer_count = 1;
         }
+    } else {
+        quest_game_pump_network();
     }
 
     XrFrameEndInfo end_info = {
@@ -1428,6 +1430,7 @@ void android_main(struct android_app *android_app) {
             break;
         } else if (!can_render) {
             quest_input_suspend();
+            quest_game_pump_network();
         }
     }
 

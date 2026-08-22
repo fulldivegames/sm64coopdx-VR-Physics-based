@@ -13,12 +13,20 @@
   Native ARM64/OpenXR VR for Meta Quest. No PC is required after installation.
 </p>
 
+> **Current public release: v0.7.7 — Multiplayer Update**
+
 > [!WARNING]
 > This is an active, vibe-coded, yet fairly polished fan project. The standalone edition has been tested on **Meta Quest 3 only**. It has **not been tested on Quest 2 by me**, and neither edition has been tested across every multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur. If you have any performance issues on default settings in the base game, a reset usually fixes things (You should be getting a stable 120 FPS on Quest 3, on most if not all base game maps)
 
 > [!WARNING]
 > Standalone co-op, Chat, and its VR keyboard are still experimental. Text or other menu elements may occasionally appear blurry or visually incorrect; restarting the app or headset usually clears these issues. Co-op can also produce minor visual bugs. Large lobbies may reduce performance, and gameplay-changing server mods can cause visual problems, broken behavior, or crashes. Disconnecting may recover the session; otherwise, fully restart the game. Controller keyboard text chat is available.
 > There is a known crash while opening Jolly Roger Bay for the first time. It should work on restart, will be fixed in next update.
+
+### Multiplayer and public-lobby safety
+
+This is an unofficial, unauthorized fan build and is not endorsed by the SM64 Co-Op DX or Nintendo teams. **Public VR Lobbies** are intended for this project's Quest standalone and PC VR builds. **Regular Public Lobbies** use the compatible Android public directory; all VR cheats and power-ups/special moves are disabled there. Play regular public lobbies at your own risk and follow the server rules. Private lobbies and direct connections remain available for invited cross-platform sessions.
+
+VR nametags are disabled by default in v0.7.7 because their world-space placement still needs additional work. They can be enabled manually in the multiplayer HUD settings for testing.
 
 This repository contains the standalone Android/Quest port of [sm64coopdx-VR (Physics-based)](https://github.com/fulldivegames/sm64coopdx-VR-Physics-based), derived from [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx). It runs the game natively on the headset through OpenXR and OpenGL ES while retaining the original project's multiplayer foundation, Lua/mod support where compatible, first- and third-person cameras, tracked hands, and physical VR interactions.
 There are videos on my YouTube channel: https://www.youtube.com/@fulldivegames667 that show off the mod.

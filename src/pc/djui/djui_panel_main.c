@@ -3,6 +3,7 @@
 #include "djui_panel_host.h"
 #include "djui_panel_join.h"
 #include "djui_panel_options.h"
+#include "djui_panel_vr.h"
 #include "djui_panel_menu.h"
 #include "djui_panel_confirm.h"
 #include "djui_hud_utils.h"
@@ -40,7 +41,7 @@ static void djui_panel_main_create_vr_version_status(
     snprintf(
         versionText,
         sizeof(versionText),
-        "SM64 Co-Op DX VR Standalone %s",
+        "SM64 Co-Op DX VR %s",
         get_vr_version()
     );
 
@@ -180,6 +181,8 @@ void djui_panel_main_create(struct DjuiBase* caller) {
 
             struct DjuiButton* button2 = djui_button_create(body, DLANG(MAIN, JOIN), DJUI_BUTTON_STYLE_NORMAL, djui_panel_join_create);
             if (!configExCoopTheme) { djui_base_set_location(&button2->base, 0, -30); }
+            struct DjuiButton* vrButton = djui_button_create(body, "VR SETTINGS", DJUI_BUTTON_STYLE_NORMAL, djui_panel_vr_create);
+            if (!configExCoopTheme) { djui_base_set_location(&vrButton->base, 0, -30); }
             struct DjuiButton* button3 = djui_button_create(body, DLANG(MAIN, OPTIONS), DJUI_BUTTON_STYLE_NORMAL, djui_panel_options_create);
             if (!configExCoopTheme) { djui_base_set_location(&button3->base, 0, -30); }
             struct DjuiButton* button4 = djui_button_create(body, DLANG(MAIN, QUIT), DJUI_BUTTON_STYLE_BACK, djui_panel_main_quit);

@@ -251,6 +251,14 @@ static u32 sVrUiMatrixCapacity = 0;
 static Mtx** sVrHudMatrices = NULL;
 static u32 sVrHudMatrixCount = 0;
 static u32 sVrHudMatrixCapacity = 0;
+struct VrWorldLabelMatrix {
+    Mtx* matrix;
+    Vec3f previousPosition;
+    Vec3f currentPosition;
+};
+static struct VrWorldLabelMatrix* sVrWorldLabelMatrices = NULL;
+static u32 sVrWorldLabelMatrixCount = 0;
+static u32 sVrWorldLabelMatrixCapacity = 0;
 static Mtx* sVrControllerHandMatrices[VR_CONTROLLER_COUNT] = { 0 };
 static bool sVrControllerHandClosed[VR_CONTROLLER_COUNT] = { false };
 
@@ -2527,6 +2535,17 @@ static void vr_build_game_camera_matrix(
     Vec3f focus,
     s16 roll
 ) {
+    // The VR camera mode remains saved while VR is disabled so it is ready
+    // the next time the headset is enabled. It must not, however, replace the
+    // normal single-screen camera. Doing so renders a first-person view while
+    // Mario's vanilla stick yaw is still based on the third-person camera,
+    // making every flat-screen direction appear exactly 180 degrees reversed.
+    if (!vr_is_active()) {
+        sVrFirstPersonAnchorValid = false;
+        mtxf_lookat(matrix, position, focus, roll);
+        return;
+    }
+
     Vec3f cameraPosition;
     Vec3f cameraFocus;
     vec3f_copy(cameraPosition, position);
@@ -3329,6 +3348,110 @@ static bool vr_build_head_view_matrix(
     return true;
 }
 
+static bool vr_world_pos_to_eye_ndc(
+    Vec3f worldPosition,
+    u32 eyeIndex,
+    bool centerEye,
+    Vec3f ndcPosition
+) {
+    if (!vr_is_active() || gCamera == NULL) {
+        return false;
+    }
+
+    Mat4 headView;
+    if (eyeIndex >= 2 || !vr_build_head_view_matrix(eyeIndex, headView)) {
+        return false;
+    }
+
+    // Center-eye projection is used only for visibility/sorting before the
+    // shared display list is built. The projection matrix itself is patched
+    // once per submitted eye below and deliberately keeps the eye offset.
+    float eyeOffset[3] = { 0 };
+    if (centerEye && vr_get_eye_offset(eyeIndex, eyeOffset)) {
+        const float worldUnitsPerMeter = vr_is_menu_scene() ? 850.0f : 100.0f;
+        headView[3][0] += eyeOffset[0] * worldUnitsPerMeter;
+        headView[3][1] += eyeOffset[1] * worldUnitsPerMeter;
+        headView[3][2] += eyeOffset[2] * worldUnitsPerMeter;
+    }
+
+    Vec3f cameraPosition;
+    Vec3f headPosition;
+    cameraPosition[0] =
+        gCamera->mtx[0][0] * worldPosition[0] +
+        gCamera->mtx[1][0] * worldPosition[1] +
+        gCamera->mtx[2][0] * worldPosition[2] +
+        gCamera->mtx[3][0];
+    cameraPosition[1] =
+        gCamera->mtx[0][1] * worldPosition[0] +
+        gCamera->mtx[1][1] * worldPosition[1] +
+        gCamera->mtx[2][1] * worldPosition[2] +
+        gCamera->mtx[3][1];
+    cameraPosition[2] =
+        gCamera->mtx[0][2] * worldPosition[0] +
+        gCamera->mtx[1][2] * worldPosition[1] +
+        gCamera->mtx[2][2] * worldPosition[2] +
+        gCamera->mtx[3][2];
+
+    headPosition[0] =
+        headView[0][0] * cameraPosition[0] +
+        headView[1][0] * cameraPosition[1] +
+        headView[2][0] * cameraPosition[2] +
+        headView[3][0];
+    headPosition[1] =
+        headView[0][1] * cameraPosition[0] +
+        headView[1][1] * cameraPosition[1] +
+        headView[2][1] * cameraPosition[2] +
+        headView[3][1];
+    headPosition[2] =
+        headView[0][2] * cameraPosition[0] +
+        headView[1][2] * cameraPosition[1] +
+        headView[2][2] * cameraPosition[2] +
+        headView[3][2];
+
+    if (headPosition[2] >= -0.001f) {
+        return false;
+    }
+
+    float eyeTangents[4] = { 0 };
+    if (!vr_get_eye_tangents(eyeIndex, eyeTangents)) {
+        return false;
+    }
+
+    const float fovScale =
+        (float)clamp(configVrFov, 70U, 120U) / 100.0f;
+    float tanLeft = eyeTangents[0] * fovScale;
+    float tanRight = eyeTangents[1] * fovScale;
+    float tanDown = eyeTangents[2] * fovScale;
+    float tanUp = eyeTangents[3] * fovScale;
+    if (centerEye) {
+        float otherEye[4] = { 0 };
+        if (!vr_get_eye_tangents(eyeIndex ^ 1U, otherEye)) {
+            return false;
+        }
+        tanLeft = (eyeTangents[0] + otherEye[0]) * 0.5f * fovScale;
+        tanRight = (eyeTangents[1] + otherEye[1]) * 0.5f * fovScale;
+        tanDown = (eyeTangents[2] + otherEye[2]) * 0.5f * fovScale;
+        tanUp = (eyeTangents[3] + otherEye[3]) * 0.5f * fovScale;
+    }
+    const float tanWidth = tanRight - tanLeft;
+    const float tanHeight = tanUp - tanDown;
+    if (tanWidth <= 0.000001f || tanHeight <= 0.000001f) {
+        return false;
+    }
+
+    const float inverseDepth = 1.0f / -headPosition[2];
+    const float xSlope = headPosition[0] * inverseDepth;
+    const float ySlope = headPosition[1] * inverseDepth;
+    ndcPosition[0] = ((xSlope - tanLeft) / tanWidth) * 2.0f - 1.0f;
+    ndcPosition[1] = ((ySlope - tanDown) / tanHeight) * 2.0f - 1.0f;
+    ndcPosition[2] = headPosition[2];
+    return true;
+}
+
+bool vr_world_pos_to_ndc(Vec3f worldPosition, Vec3f ndcPosition) {
+    return vr_world_pos_to_eye_ndc(worldPosition, 0, true, ndcPosition);
+}
+
 static void patch_mtx_vr_billboards(uint32_t eyeIndex) {
     if (sVrBillboardHead == NULL) {
         return;
@@ -3481,6 +3604,7 @@ void patch_mtx_before(void) {
     init_mtx();
     sVrUiMatrixCount = 0;
     sVrHudMatrixCount = 0;
+    sVrWorldLabelMatrixCount = 0;
 
     if (sPerspectiveNode != NULL) {
         sPerspectiveNode->prevFov = sPerspectiveNode->fov;
@@ -3551,6 +3675,37 @@ void register_mtx_vr_hud(Mtx *matrix) {
     }
 
     sVrHudMatrices[sVrHudMatrixCount++] = matrix;
+}
+
+void register_mtx_vr_world_label(
+    Mtx *matrix,
+    Vec3f previousPosition,
+    Vec3f currentPosition
+) {
+    if (matrix == NULL || previousPosition == NULL || currentPosition == NULL) {
+        return;
+    }
+
+    if (sVrWorldLabelMatrixCount >= sVrWorldLabelMatrixCapacity) {
+        u32 newCapacity = sVrWorldLabelMatrixCapacity == 0
+            ? 16
+            : sVrWorldLabelMatrixCapacity * 2;
+        struct VrWorldLabelMatrix* grown = realloc(
+            sVrWorldLabelMatrices,
+            sizeof(*grown) * newCapacity
+        );
+        if (grown == NULL) {
+            return;
+        }
+        sVrWorldLabelMatrices = grown;
+        sVrWorldLabelMatrixCapacity = newCapacity;
+    }
+
+    struct VrWorldLabelMatrix* label =
+        &sVrWorldLabelMatrices[sVrWorldLabelMatrixCount++];
+    label->matrix = matrix;
+    vec3f_copy(label->previousPosition, previousPosition);
+    vec3f_copy(label->currentPosition, currentPosition);
 }
 
 bool vr_get_controller_world_hammer_head_from_state(
@@ -3723,9 +3878,79 @@ static bool vr_build_hand_ui_projection(
     return true;
 }
 
+static bool vr_build_world_label_projection(
+    uint32_t eyeIndex,
+    struct VrWorldLabelMatrix* label,
+    Mtx* fixedProjection
+) {
+    if (eyeIndex >= 2 || label == NULL || label->matrix == NULL ||
+        fixedProjection == NULL || gCamera == NULL) {
+        return false;
+    }
+
+    // Interpolate the remote player's world anchor at render rate. This is
+    // deliberately independent of the HUD plane: the resulting label has
+    // real stereo depth and remains attached above the player when the local
+    // headset translates or rotates.
+    Vec3f center;
+    if (gRenderingInterpolated) {
+        delta_interpolate_vec3f(
+            center,
+            label->previousPosition,
+            label->currentPosition,
+            clamp(gRenderingDelta, 0.0f, 1.0f)
+        );
+    } else {
+        vec3f_copy(center, label->currentPosition);
+    }
+
+    Vec3f eyeNdc;
+    if (!vr_world_pos_to_eye_ndc(center, eyeIndex, false, eyeNdc)) {
+        return false;
+    }
+
+    // Keep the glyph renderer orthographic and move only its center to the
+    // target's true per-eye projection. This gives the two eyes the correct
+    // depth disparity without turning the DJUI text into a giant world-space
+    // quad (the source of the detached/doubled tags).
+    const f32 boundsWidth = (f32)SCREEN_WIDTH;
+    const f32 boundsHeight = (f32)SCREEN_HEIGHT;
+    const f32 boundsCenterX = (f32)SCREEN_WIDTH * 0.5f -
+        eyeNdc[0] * boundsWidth * 0.5f;
+    const f32 boundsCenterY = (f32)SCREEN_HEIGHT * 0.5f -
+        eyeNdc[1] * boundsHeight * 0.5f;
+    guOrtho(
+        fixedProjection,
+        boundsCenterX - boundsWidth * 0.5f,
+        boundsCenterX + boundsWidth * 0.5f,
+        boundsCenterY - boundsHeight * 0.5f,
+        boundsCenterY + boundsHeight * 0.5f,
+        -10.0f,
+        10.0f,
+        1.0f
+    );
+    return true;
+}
+
 static void patch_mtx_vr_ui(uint32_t eyeIndex) {
-    if (sVrUiMatrixCount == 0 && sVrHudMatrixCount == 0) {
+    if (sVrUiMatrixCount == 0 && sVrHudMatrixCount == 0 &&
+        sVrWorldLabelMatrixCount == 0) {
         return;
+    }
+
+    for (u32 i = 0; i < sVrWorldLabelMatrixCount; i++) {
+        Mtx worldProjection;
+        if (vr_build_world_label_projection(
+                eyeIndex,
+                &sVrWorldLabelMatrices[i],
+                &worldProjection
+            )) {
+            memcpy(
+                sVrWorldLabelMatrices[i].matrix,
+                &worldProjection,
+                sizeof(worldProjection)
+            );
+        }
     }
 
     float left = 0.0f;

@@ -6,8 +6,10 @@
 #include "engine/math_util.h"
 #include "game/obj_behaviors.h"
 #include "game/camera.h"
+#include "game/rendering_graph_node.h"
 #include "pc/lua/utils/smlua_misc_utils.h"
 #include "pc/lua/smlua_hooks.h"
+#include "pc/vr/vr.h"
 
 #define FADE_SCALE 4.f
 
@@ -15,8 +17,84 @@ struct StateExtras {
     Vec3f prevPos;
     f32 prevScale;
     bool inited;
+    bool worldSpace;
 };
 static struct StateExtras sStateExtras[MAX_PLAYERS];
+
+static bool nametag_load_world_projection(
+    Vec3f previousPosition,
+    Vec3f currentPosition
+) {
+    Mtx* matrix = (Mtx*)alloc_display_list(sizeof(Mtx));
+    if (matrix == NULL) {
+        return false;
+    }
+
+    // This is only the non-XR fallback value. Each eye replaces it with a
+    // perspective billboard matrix built from the player's actual world
+    // anchor immediately before that eye is submitted.
+    guOrtho(
+        matrix,
+        0.0f,
+        SCREEN_WIDTH,
+        0.0f,
+        SCREEN_HEIGHT,
+        -10.0f,
+        10.0f,
+        1.0f
+    );
+    register_mtx_vr_world_label(
+        matrix,
+        previousPosition,
+        currentPosition
+    );
+    gSPMatrix(
+        gDisplayListHead++,
+        VIRTUAL_TO_PHYSICAL(matrix),
+        G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH
+    );
+    return true;
+}
+
+static void nametag_restore_vr_ui_projection(void) {
+    Mtx* matrix = (Mtx*)alloc_display_list(sizeof(Mtx));
+    if (matrix == NULL) {
+        return;
+    }
+
+    guOrtho(
+        matrix,
+        0.0f,
+        SCREEN_WIDTH,
+        0.0f,
+        SCREEN_HEIGHT,
+        -10.0f,
+        10.0f,
+        1.0f
+    );
+    register_mtx_vr_ui(matrix);
+    gSPMatrix(
+        gDisplayListHead++,
+        VIRTUAL_TO_PHYSICAL(matrix),
+        G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH
+    );
+}
+
+static bool nametag_world_pos_to_screen(Vec3f pos, Vec3f out) {
+    if (!vr_is_active()) {
+        return djui_hud_world_pos_to_screen_pos(pos, out);
+    }
+    Vec3f ndc;
+    if (!vr_world_pos_to_ndc(pos, ndc) ||
+        ndc[0] < -1.2f || ndc[0] > 1.2f ||
+        ndc[1] < -1.2f || ndc[1] > 1.2f) {
+        return false;
+    }
+    out[0] = (ndc[0] + 1.0f) * 0.5f * djui_hud_get_screen_width();
+    out[1] = (1.0f - ndc[1]) * 0.5f * djui_hud_get_screen_height();
+    out[2] = ndc[2];
+    return true;
+}
 
 void djui_hud_print_outlined_text_interpolated(const char* text, f32 prevX, f32 prevY, f32 prevScale, f32 x, f32 y, f32 scale, u8 r, u8 g, u8 b, u8 a, f32 outlineDarkness) {
     f32 offset = 1 * (scale * 2);
@@ -54,6 +132,7 @@ void nametags_render(void) {
     struct NametagInfo {
         Vec3f pos;
         f32 scale;
+        f32 sortDepth;
         char name[MAX_CONFIG_STRING];
     };
     struct NametagInfo nametags[MAX_PLAYERS] = {0};
@@ -83,15 +162,29 @@ void nametags_render(void) {
             continue;
         }
 
-        if (m->marioBodyState->mirrorMario || m->marioBodyState->updateHeadPosTime != gGlobalTimer) { continue; }
+        if (m->marioBodyState->mirrorMario) { continue; }
 
         Vec3f pos;
         Vec3f out;
-        vec3f_copy(pos, m->marioBodyState->headPos);
-        pos[1] += 100;
+        f32 modelScale = 1.0f;
+        if (m->marioObj != NULL &&
+            m->marioObj->header.gfx.scale[1] > 0.01f) {
+            modelScale = m->marioObj->header.gfx.scale[1];
+        }
+        // Use the remote model's stable interpolated root. Animated head-joint
+        // storage is updated at game-tick cadence and can briefly contain a
+        // stale/eye-specific value, which makes a stereo label flash or jump.
+        // This is the same stable owner transform used by attached effects.
+        if (m->marioObj != NULL) {
+            vec3f_copy(pos, m->marioObj->header.gfx.pos);
+            pos[1] += 220.0f * modelScale;
+        } else {
+            vec3f_copy(pos, m->pos);
+            pos[1] += 220.0f * modelScale;
+        }
 
         if ((i != 0 || (i == 0 && m->action != ACT_FIRST_PERSON)) &&
-            djui_hud_world_pos_to_screen_pos(pos, out)) {
+            nametag_world_pos_to_screen(pos, out)) {
 
             char name[MAX_CONFIG_STRING];
             const char* hookedString = NULL;
@@ -101,16 +194,22 @@ void nametags_render(void) {
             } else {
                 snprintf(name, MAX_CONFIG_STRING, "%s", np->name);
             }
-            if (!djui_hud_world_pos_to_screen_pos(pos, out)) {
-                continue;
+            const bool worldSpace = vr_is_active();
+            // XR labels still use per-eye world projection, but their glyph
+            // size must shrink with depth just like flat-screen nametags.
+            // A fixed 0.75 N64-text scale made distant names fill the view and
+            // appear to follow the headset instead of the remote player.
+            f32 scale = (worldSpace ? -140.0f : -300.0f) /
+                out[2] * djui_hud_get_fov_coeff();
+            if (worldSpace) {
+                scale = clamp(scale, 0.10f, 0.32f);
             }
-
-            f32 scale = -300 / out[2] * djui_hud_get_fov_coeff();
+            const f32 sortDepth = out[2];
 
             s32 j = 0;
             for (; j < numNametags; ++j) {
                 const struct NametagInfo *nametag = &nametags[sortedNametagIndices[j]];
-                if (scale < nametag->scale) {
+                if (sortDepth < nametag->sortDepth) {
                     memmove(sortedNametagIndices + j + 1, sortedNametagIndices + j, sizeof(s32) * (numNametags - j));
                     break;
                 }
@@ -118,8 +217,9 @@ void nametags_render(void) {
             sortedNametagIndices[j] = i;
 
             struct NametagInfo *nametag = &nametags[i];
-            vec3f_copy(nametag->pos, out);
+            vec3f_copy(nametag->pos, worldSpace ? pos : out);
             nametag->scale = scale;
+            nametag->sortDepth = sortDepth;
             memcpy(nametag->name, name, sizeof(name));
             djui_text_remove_alpha(nametag->name);
 
@@ -138,10 +238,18 @@ void nametags_render(void) {
 
         // init interpolation
         struct StateExtras* e = &sStateExtras[playerIndex];
-        if (!e->inited) {
+        const bool worldSpace = vr_is_active();
+        if (!e->inited || e->worldSpace != worldSpace) {
             vec3f_copy(e->prevPos, nametag->pos);
             e->prevScale = nametag->scale;
             e->inited = true;
+            e->worldSpace = worldSpace;
+        }
+        if (worldSpace && !nametag_load_world_projection(
+                e->prevPos,
+                nametag->pos
+            )) {
+            continue;
         }
 
         // Apply viewport for credits
@@ -156,20 +264,52 @@ void nametags_render(void) {
 
         f32 width, height;
         djui_hud_measure_text(nametag->name, &width, &height);
+        const f32 currCenterX = worldSpace
+            ? (f32)SCREEN_WIDTH * 0.5f
+            : nametag->pos[0];
+        const f32 currCenterY = worldSpace
+            ? (f32)SCREEN_HEIGHT * 0.5f
+            : nametag->pos[1];
+        const f32 prevCenterX = worldSpace
+            ? (f32)SCREEN_WIDTH * 0.5f
+            : e->prevPos[0];
+        const f32 prevCenterY = worldSpace
+            ? (f32)SCREEN_HEIGHT * 0.5f
+            : e->prevPos[1];
         f32 currHalfWidth = width * nametag->scale * 0.5f;
         f32 currHalfHeight = height * nametag->scale * 0.5f;
-        f32 currNametagPosY = nametag->pos[1] - currHalfHeight;
+        f32 currNametagPosY = currCenterY - currHalfHeight;
         f32 prevHalfWidth = width * e->prevScale * 0.5f;
         f32 prevHalfHeight = height * e->prevScale * 0.5f;
-        f32 prevNametagPosY = e->prevPos[1] - prevHalfHeight;
+        f32 prevNametagPosY = prevCenterY - prevHalfHeight;
         const u8 *color = network_get_player_text_color(m->playerIndex);
         u8 alpha = (playerIndex == 0 ? 255 : MIN(np->fadeOpacity << 3, 255)) * clamp(FADE_SCALE - nametag->scale, 0.f, 1.f);
 
-        // render name
-        djui_hud_print_outlined_text_interpolated(nametag->name,
-              e->prevPos[0] - prevHalfWidth, prevNametagPosY,   e->prevScale,
-            nametag->pos[0] - currHalfWidth, currNametagPosY, nametag->scale,
-            color[0], color[1], color[2], alpha, 0.25);
+        // Multiple outline copies separate perceptibly in stereo and create
+        // the doubled/flashing tag effect. VR uses one character-mounted text
+        // pass; flat mode keeps the established outlined presentation.
+        if (worldSpace) {
+            djui_hud_set_color(color[0], color[1], color[2], alpha);
+            djui_hud_set_text_color(color[0], color[1], color[2], alpha);
+            djui_hud_print_text_interpolated(
+                nametag->name,
+                prevCenterX - prevHalfWidth,
+                prevNametagPosY,
+                e->prevScale,
+                e->prevScale,
+                currCenterX - currHalfWidth,
+                currNametagPosY,
+                nametag->scale,
+                nametag->scale
+            );
+            djui_hud_set_color(255, 255, 255, 255);
+            djui_hud_set_text_color(255, 255, 255, 255);
+        } else {
+            djui_hud_print_outlined_text_interpolated(nametag->name,
+                  prevCenterX - prevHalfWidth, prevNametagPosY,   e->prevScale,
+                  currCenterX - currHalfWidth, currNametagPosY, nametag->scale,
+                color[0], color[1], color[2], alpha, 0.25);
+        }
 
         // render power meter
         if (playerIndex != 0 && gNametagsSettings.showHealth) {
@@ -177,8 +317,8 @@ void nametags_render(void) {
             f32 currHealthSize = 90 * nametag->scale;
             f32 prevHealthSize = 90 * e->prevScale;
             hud_render_power_meter_interpolated_world(m->health,
-                  e->prevPos[0] - (prevHealthSize * 0.5f), prevNametagPosY - 72 *   e->prevScale, prevHealthSize, prevHealthSize,
-                nametag->pos[0] - (currHealthSize * 0.5f), currNametagPosY - 72 * nametag->scale, currHealthSize, currHealthSize
+                  prevCenterX - (prevHealthSize * 0.5f), prevNametagPosY - 72 *   e->prevScale, prevHealthSize, prevHealthSize,
+                  currCenterX - (currHealthSize * 0.5f), currNametagPosY - 72 * nametag->scale, currHealthSize, currHealthSize
             );
         }
 
@@ -190,6 +330,12 @@ void nametags_render(void) {
 
         vec3f_copy(e->prevPos, nametag->pos);
         e->prevScale = nametag->scale;
+    }
+
+    if (vr_is_active() && numNametags > 0) {
+        // Subsequent Lua HUD elements still belong on the configured menu/HUD
+        // plane; do not let the last player's world projection leak into them.
+        nametag_restore_vr_ui_projection();
     }
 }
 

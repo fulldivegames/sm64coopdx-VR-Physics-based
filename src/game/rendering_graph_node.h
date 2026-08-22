@@ -47,6 +47,12 @@ void geo_process_node_and_siblings(struct GraphNode *firstNode);
 void geo_process_root(struct GraphNodeRoot *node, Vp *b, Vp *c, s32 clearColor);
 void register_mtx_vr_ui(Mtx *matrix);
 void register_mtx_vr_hud(Mtx *matrix);
+void register_mtx_vr_world_label(
+    Mtx *matrix,
+    Vec3f previousPosition,
+    Vec3f currentPosition
+);
+bool vr_world_pos_to_ndc(Vec3f worldPosition, Vec3f ndcPosition);
 void vr_reset_first_person_calibration(void);
 void vr_handle_camera_mode_change(void);
 void vr_adjust_first_person_camera_direction(Vec3f direction);

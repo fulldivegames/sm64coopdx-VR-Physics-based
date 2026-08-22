@@ -24,6 +24,7 @@ bool ns_coopnet_query(QueryCallbackPtr callback, QueryFinishCallbackPtr finishCa
 bool ns_coopnet_is_connected(void);
 void ns_coopnet_update(void);
 void ns_coopnet_set_lobby_channel(enum CoopNetLobbyChannel channel);
+void ns_coopnet_commit_lobby_channel(enum CoopNetLobbyChannel channel);
 enum CoopNetLobbyChannel ns_coopnet_get_lobby_channel(void);
 bool ns_coopnet_is_standard_public_session(void);
 bool ns_coopnet_vr_gameplay_allowed(void);

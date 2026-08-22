@@ -82,6 +82,7 @@ static bool sReady;
 static bool sConfigLoaded;
 static bool sCompletedGameTick;
 static int64_t sLastTickNs;
+static int64_t sLastNetworkPumpNs;
 static s16 sAudioBuffer[QUEST_SAMPLES_HIGH * 2 * 2];
 static int64_t sPerfWindowStartNs;
 static uint64_t sPerfTickTotalNs;
@@ -363,6 +364,7 @@ bool quest_game_initialize(void) {
     network_init(NT_NONE, false);
 
     sLastTickNs = monotonic_ns();
+    sLastNetworkPumpNs = sLastTickNs;
     sCompletedGameTick = false;
     sReady = true;
     LOGI("Full SM64 game runtime initialized.");
@@ -391,6 +393,7 @@ void quest_game_tick(void) {
     if (now - sLastTickNs < 33333333LL) return;
     sLastTickNs += 33333333LL;
     if (now - sLastTickNs > 100000000LL) sLastTickNs = now;
+    sLastNetworkPumpNs = now;
     const int64_t tickStart = monotonic_ns();
     // Reset the logical game canvas before the engine builds its display
     // list. Leaving the previous portrait eye dimensions here clips/culls the
@@ -411,6 +414,19 @@ void quest_game_tick(void) {
     sPerfTickTotalNs += tickNs;
     if (tickNs > sPerfTickMaxNs) sPerfTickMaxNs = tickNs;
     sPerfTickCount++;
+}
+
+void quest_game_pump_network(void) {
+    if (!sReady) return;
+    const int64_t now = monotonic_ns();
+    if (now - sLastNetworkPumpNs < 33333333LL) return;
+    sLastNetworkPumpNs = now;
+
+    // Quest passthrough and system overlays can make OpenXR stop requesting
+    // rendered frames without pausing the Android process. Keep CoopNet join,
+    // receive, reliable-packet, and keepalive work moving while leaving the
+    // actual game simulation paused until immersive rendering resumes.
+    network_update();
 }
 
 bool quest_game_render_eye(uint32_t eye, uint32_t width, uint32_t height) {

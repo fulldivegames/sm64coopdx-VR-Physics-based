@@ -4,6 +4,7 @@
 #include "coopnet_id.h"
 #include "pc/network/network.h"
 #include "pc/network/version.h"
+#include "pc/configfile.h"
 #include "pc/djui/djui_language.h"
 #include "pc/djui/djui_popup.h"
 #include "pc/mods/mods.h"
@@ -30,6 +31,8 @@ static uint64_t sLocalLobbyOwnerId = 0;
 static enum NetworkType sNetworkType;
 static bool sReconnecting = false;
 static enum CoopNetLobbyChannel sLobbyChannel = COOPNET_LOBBY_STANDARD_PUBLIC;
+static enum CoopNetLobbyChannel sActiveLobbyChannel = COOPNET_LOBBY_STANDARD_PUBLIC;
+static bool sActiveLobbyChannelValid = false;
 
 static CoopNetRc coopnet_initialize(void);
 
@@ -52,14 +55,20 @@ void ns_coopnet_set_lobby_channel(enum CoopNetLobbyChannel channel) {
     sLobbyChannel = channel;
 }
 
+void ns_coopnet_commit_lobby_channel(enum CoopNetLobbyChannel channel) {
+    sLobbyChannel = channel;
+    sActiveLobbyChannel = channel;
+    sActiveLobbyChannelValid = true;
+}
+
 enum CoopNetLobbyChannel ns_coopnet_get_lobby_channel(void) {
     return sLobbyChannel;
 }
 
 bool ns_coopnet_is_standard_public_session(void) {
     return gNetworkType != NT_NONE &&
-        gNetworkSystem == &gNetworkSystemCoopNet &&
-        sLobbyChannel == COOPNET_LOBBY_STANDARD_PUBLIC;
+        sActiveLobbyChannelValid &&
+        sActiveLobbyChannel == COOPNET_LOBBY_STANDARD_PUBLIC;
 }
 
 bool ns_coopnet_vr_gameplay_allowed(void) {
@@ -68,8 +77,8 @@ bool ns_coopnet_vr_gameplay_allowed(void) {
 
 bool ns_coopnet_vr_public_session(void) {
     return gNetworkType != NT_NONE &&
-        gNetworkSystem == &gNetworkSystemCoopNet &&
-        sLobbyChannel == COOPNET_LOBBY_VR_PUBLIC;
+        sActiveLobbyChannelValid &&
+        sActiveLobbyChannel == COOPNET_LOBBY_VR_PUBLIC;
 }
 
 bool ns_coopnet_query(QueryCallbackPtr callback, QueryFinishCallbackPtr finishCallback, const char* password, enum CoopNetLobbyChannel channel) {
@@ -130,6 +139,9 @@ static void coopnet_on_lobby_joined(uint64_t lobbyId, uint64_t userId, uint64_t 
     coopnet_save_dest_id(userId, destId);
 
     if (userId == coopnet_get_local_user_id() && gNetworkType == NT_CLIENT) {
+        // Every lobby type uses CoopNet's normal mod synchronization. This is
+        // required for VR-public PC/standalone sessions just as it is for
+        // private, direct, and standard public sessions.
         network_send_mod_list_request();
     }
 #ifdef DISCORD_SDK
@@ -192,6 +204,9 @@ static void coopnet_on_error(enum MPacketErrorNumber error, uint64_t tag) {
 static bool ns_coopnet_initialize(enum NetworkType networkType, bool reconnecting) {
     sNetworkType = networkType;
     sReconnecting = reconnecting;
+    if (!reconnecting && networkType != NT_NONE) {
+        ns_coopnet_commit_lobby_channel(sLobbyChannel);
+    }
     if (reconnecting) { return true; }
     return coopnet_is_connected()
         ? true
@@ -329,6 +344,7 @@ static void ns_coopnet_shutdown(bool reconnecting) {
 
     sLocalLobbyId = 0;
     sLocalLobbyOwnerId = 0;
+    sActiveLobbyChannelValid = false;
 }
 
 static CoopNetRc coopnet_initialize(void) {

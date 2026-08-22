@@ -111,6 +111,7 @@ bool         configVrShowFps                      = false;
 bool         configVrFlameOptimizations           = true;
 bool         configVrUltraPerformanceMode         = false;
 unsigned int configVrQuestRefreshRate              = 2;
+bool         configVrSpecialMovesEnabled           = true;
 bool         configVrSpecialFireFlower             = true;
 bool         configVrSpecialFireFlowerMusic        = true;
 bool         configVrSpecialHammerSuit              = true;
@@ -162,6 +163,7 @@ bool         configVrImmersiveLookDownTransparency = true;
 bool         configVrImmersiveCarrySpeed          = false;
 bool         configVrImmersiveStarSpawnFocus       = false;
 bool         configVrImmersiveGhostPunchArm        = true;
+bool         configVrImmersiveMatchMarioHeight     = false;
 bool         configVrMovementOverhaul             = false;
 bool         configVrMarioPunchSound              = true;
 bool         configVrMotionControlledDive         = true;
@@ -389,7 +391,7 @@ unsigned int configNetworkSystem                  = 0;
 unsigned int configPlayerInteraction              = 1;
 unsigned int configPlayerKnockbackStrength        = 25;
 unsigned int configStayInLevelAfterStar           = 0;
-bool         configNametags                       = true;
+bool         configNametags                       = false;
 bool         configModDevMode                     = false;
 unsigned int configBouncyLevelBounds              = 0;
 bool         configSkipIntro                      = 0;
@@ -411,6 +413,8 @@ char         configPassword[MAX_CONFIG_STRING]    = "";
 char         configDestId[MAX_CONFIG_STRING]      = "0";
 #ifdef __ANDROID__
 unsigned int configCoopNetLobbyPrivacy            = 0;
+#else
+static unsigned int sConfigCoopNetPcIdentityVersion = 0;
 #endif
 // DJUI settings
 unsigned int configDjuiTheme                      = DJUI_THEME_DARK;
@@ -466,6 +470,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_flame_optimizations",          .type = CONFIG_TYPE_BOOL, .boolValue = &configVrFlameOptimizations},
     {.name = "vr_ultra_performance_mode",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrUltraPerformanceMode},
     {.name = "vr_quest_refresh_rate",           .type = CONFIG_TYPE_UINT, .uintValue = &configVrQuestRefreshRate},
+    {.name = "vr_special_moves_enabled",        .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialMovesEnabled},
     {.name = "vr_special_fire_flower",          .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialFireFlower},
     {.name = "vr_special_fire_flower_music",    .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialFireFlowerMusic},
     {.name = "vr_special_hammer_suit",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialHammerSuit},
@@ -517,6 +522,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_immersive_carry_speed",         .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveCarrySpeed},
     {.name = "vr_immersive_star_spawn_focus",    .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveStarSpawnFocus},
     {.name = "vr_immersive_ghost_punch_arm",     .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveGhostPunchArm},
+    {.name = "vr_immersive_match_mario_height",  .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveMatchMarioHeight},
     {.name = "vr_mario_punch_sound",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMarioPunchSound},
     {.name = "vr_motion_controlled_dive",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControlledDive},
     {.name = "vr_motion_controlled_ground_dive",.type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControlledGroundDive},
@@ -699,6 +705,8 @@ static const struct ConfigOption options[] = {
     {.name = "coopnet_dest",                   .type = CONFIG_TYPE_STRING, .stringValue = (char*)&configDestId, .maxStringLength = MAX_CONFIG_STRING},
 #ifdef __ANDROID__
     {.name = "coopnet_lobby_privacy",          .type = CONFIG_TYPE_UINT, .uintValue = &configCoopNetLobbyPrivacy},
+#else
+    {.name = "coopnet_pc_identity_version",    .type = CONFIG_TYPE_UINT,   .uintValue = &sConfigCoopNetPcIdentityVersion},
 #endif
     // DJUI settings
     {.name = "djui_theme",                     .type = CONFIG_TYPE_UINT,   .uintValue   = &configDjuiTheme},
@@ -1154,6 +1162,22 @@ static void configfile_migrate_vr_effect_defaults(void) {
     configVrTwirlTornadoEffect = true;
     sConfigVrEffectsDefaultVersion = 1;
 }
+
+#ifndef __ANDROID__
+static void configfile_migrate_coopnet_pc_identity(void) {
+    if (sConfigCoopNetPcIdentityVersion >= 1) {
+        return;
+    }
+
+    // Older PC/standalone installs could inherit the same persisted CoopNet
+    // destination ID. CoopNet treats them as one client and disconnects the
+    // second device before it can create or list lobbies. Request a fresh,
+    // PC-specific identity once; the server persists the replacement ID.
+    snprintf(configDestId, MAX_CONFIG_STRING, "%s", "0");
+    sConfigCoopNetPcIdentityVersion = 1;
+}
+#endif
+
 // Loads the config file specified by 'filename'
 static void configfile_load_internal(const char *filename, bool* error) {
     fs_file_t *file;
@@ -1291,6 +1315,9 @@ NEXT_OPTION:
     configfile_migrate_vr_interaction_tuning();
     configfile_migrate_vr_star_focus_default();
     configfile_migrate_vr_effect_defaults();
+#ifndef __ANDROID__
+    configfile_migrate_coopnet_pc_identity();
+#endif
 
     if (configGraphicsBackend < GAPI_GL || configGraphicsBackend > GAPI_MAX) { configGraphicsBackend = GAPI_GL; }
 

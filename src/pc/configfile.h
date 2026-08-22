@@ -66,11 +66,10 @@
 #define VR_RUNNING_SPEED_DEFAULT  100U
 #ifdef __ANDROID__
 #define VR_RENDER_SCALE_MIN        10U
-#define VR_RENDER_SCALE_MAX       100U
 #else
 #define VR_RENDER_SCALE_MIN        25U
-#define VR_RENDER_SCALE_MAX       100U
 #endif
+#define VR_RENDER_SCALE_MAX       100U
 
 typedef struct {
     unsigned int x, y, w, h;
@@ -207,6 +206,7 @@ extern bool         configVrCheatShakingHatWingCap;
 extern bool         configVrCheatUnderwaterBoxPunching;
 extern bool         configVrCheatFreeFly;
 extern bool         configVrCheatNoFireFlowerTimer;
+extern bool         configVrSpecialMovesEnabled;
 extern bool         configVrSpecialFireFlower;
 extern bool         configVrSpecialFireFlowerMusic;
 extern bool         configVrSpecialHammerSuit;
@@ -230,6 +230,7 @@ extern bool         configVrImmersiveLookDownTransparency;
 extern bool         configVrImmersiveCarrySpeed;
 extern bool         configVrImmersiveStarSpawnFocus;
 extern bool         configVrImmersiveGhostPunchArm;
+extern bool         configVrImmersiveMatchMarioHeight;
 extern bool         configVrMovementOverhaul;
 extern bool         configVrMarioPunchSound;
 extern bool         configVrMotionControlledDive;

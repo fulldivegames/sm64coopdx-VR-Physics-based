@@ -15,6 +15,7 @@
 #include "object_fields.h"
 #include "object_helpers.h"
 #include "object_list_processor.h"
+#include "obj_behaviors.h"
 #include "rendering_graph_node.h"
 #include "sound_init.h"
 #include "sm64.h"
@@ -22,8 +23,10 @@
 #include "vr_hand_interaction.h"
 
 #include "pc/configfile.h"
+#include "pc/djui/djui.h"
 #include "pc/lua/smlua_hooks.h"
 #include "pc/network/network.h"
+#include "pc/network/network_player.h"
 #include "pc/network/coopnet/coopnet.h"
 #include "pc/network/packets/packet.h"
 #include "pc/vr/vr.h"
@@ -154,6 +157,8 @@
 )
 
 static u8 sVrFistActiveFrames[VR_CONTROLLER_COUNT] = { 0 };
+static u8 sVrPhysicalPlayerHitCooldown[VR_CONTROLLER_COUNT] = { 0 };
+static u8 sVrSpecialPlayerHitCooldown[MAX_PLAYERS] = { 0 };
 static bool sVrFistPreviousPositionValid[VR_CONTROLLER_COUNT] = {
     false,
     false
@@ -2349,6 +2354,32 @@ static struct Object* vr_hand_interaction_find_grab_target(
                 nearestObject = object;
                 nearestDistanceSquared = distanceSquared;
             }
+        }
+    }
+
+    // Player objects are not guaranteed to be linked into a normal actor
+    // list. Mods such as Grab Anybody can explicitly opt a player into the
+    // native grabbable contract; scan only those opted-in player objects and
+    // leave ordinary INTERACT_PLAYER objects untouched.
+    for (s32 playerIndex = 1; playerIndex < MAX_PLAYERS; playerIndex++) {
+        struct MarioState* targetMario = &gMarioStates[playerIndex];
+        struct Object* object = targetMario->marioObj;
+        f32 distanceSquared;
+        if (!is_player_active(targetMario) ||
+            !vr_hand_interaction_object_can_be_grabbed(mario, object) ||
+            !vr_hand_interaction_grab_overlaps_object(
+                handPosition,
+                handRadius,
+                VR_OBJECT_GRAB_EXTRA_REACH,
+                object,
+                &distanceSquared
+            )) {
+            continue;
+        }
+        if (nearestObject == NULL ||
+            distanceSquared < nearestDistanceSquared) {
+            nearestObject = object;
+            nearestDistanceSquared = distanceSquared;
         }
     }
 
@@ -4609,6 +4640,57 @@ static bool vr_hand_interaction_sweep_overlaps_object(
     return false;
 }
 
+static bool vr_hand_interaction_sweep_overlaps_player(
+    const struct VrFistSweep* sweep,
+    f32 fistRadius,
+    f32 fistLength,
+    struct MarioState* player
+) {
+    if (sweep == NULL || player == NULL || player->marioObj == NULL) {
+        return false;
+    }
+    struct Object* object = player->marioObj;
+    f32 modelScale = object->header.gfx.scale[1];
+    if (modelScale < 0.25f) {
+        modelScale = 1.0f;
+    }
+    const f32 playerRadius = fmaxf(
+        fmaxf(object->hitboxRadius, object->hurtboxRadius),
+        64.0f * modelScale
+    );
+    // Remote room-scale motion can move the rendered Mario away from the
+    // simulation root. Test the fist against the transform the player sees.
+    const f32 playerX = object->header.gfx.pos[0];
+    const f32 playerBottom = object->header.gfx.pos[1];
+    const f32 playerZ = object->header.gfx.pos[2];
+    const f32 playerTop = playerBottom + 225.0f * modelScale;
+    const f32 collisionRadius = playerRadius + fistRadius;
+    const f32 collisionRadiusSquared = collisionRadius * collisionRadius;
+
+    if (playerX < sweep->minimum[0] - collisionRadius ||
+        playerX > sweep->maximum[0] + collisionRadius ||
+        playerZ < sweep->minimum[2] - collisionRadius ||
+        playerZ > sweep->maximum[2] + collisionRadius ||
+        playerTop < sweep->minimum[1] - fistLength ||
+        playerBottom > sweep->maximum[1] + fistRadius) {
+        return false;
+    }
+
+    for (u32 sample = 0; sample <= VR_FIST_SWEEP_SAMPLES; sample++) {
+        const f32 x = sweep->start[0] + sweep->step[0] * sample;
+        const f32 y = sweep->start[1] + sweep->step[1] * sample;
+        const f32 z = sweep->start[2] + sweep->step[2] * sample;
+        const f32 dx = x - playerX;
+        const f32 dz = z - playerZ;
+        if (dx * dx + dz * dz <= collisionRadiusSquared &&
+            y + fistRadius >= playerBottom &&
+            y + fistRadius - fistLength <= playerTop) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool vr_hand_interaction_attack_object(
     struct MarioState* mario,
     u32 hand,
@@ -4729,6 +4811,47 @@ static bool vr_hand_interaction_process_lists(
             (f32)VR_FIST_SWEEP_SAMPLES;
         sweep.minimum[axis] = fminf(start[axis], end[axis]);
         sweep.maximum[axis] = fmaxf(start[axis], end[axis]);
+    }
+
+    // The isolated VR-public channel guarantees this packet is understood by
+    // both standalone and PC VR. Let the victim's owning peer apply native
+    // PVP damage/knockback after this physical hand sweep proves contact.
+    if (ns_coopnet_vr_public_session() &&
+        sVrPhysicalPlayerHitCooldown[hand] == 0) {
+        for (s32 playerIndex = 1;
+             playerIndex < MAX_PLAYERS;
+             playerIndex++) {
+            struct MarioState* victim = &gMarioStates[playerIndex];
+            struct Object* victimObject = victim->marioObj;
+            if (!is_player_active(victim) || victimObject == NULL ||
+                !gNetworkPlayers[playerIndex].connected ||
+                !gNetworkPlayers[playerIndex].currAreaSyncValid ||
+                !vr_hand_interaction_sweep_overlaps_player(
+                    &sweep,
+                    fistRadius,
+                    fistLength,
+                    victim
+                )) {
+                continue;
+            }
+
+            const s16 attackYaw = atan2s(
+                victim->pos[2] - mario->pos[2],
+                victim->pos[0] - mario->pos[0]
+            );
+            network_send_vr_player_hit(
+                gNetworkPlayers[playerIndex].globalIndex,
+                attackYaw,
+                VR_PLAYER_ATTACK_PUNCH
+            );
+            sVrPhysicalPlayerHitCooldown[hand] = 10;
+            play_sound(
+                SOUND_ACTION_HIT_2,
+                victimObject->header.gfx.cameraToObject
+            );
+            vr_apply_haptic(hand, 0.55f, 0.06f, -1.0f);
+            return true;
+        }
     }
 
     for (s32 listIndex = 0;
@@ -5187,7 +5310,72 @@ static void vr_special_moves_reset_power(void) {
 }
 
 static bool vr_special_moves_online_allowed(void) {
-    return ns_coopnet_vr_gameplay_allowed();
+    // No abilities in the title/file-select scene, and no custom gameplay in
+    // flat-screen public CoopNet rooms. Solo play, direct/private sessions and
+    // the isolated VR-public channel remain supported.
+    return configVrSpecialMovesEnabled &&
+        !gDjuiInMainMenu &&
+        ns_coopnet_vr_gameplay_allowed() &&
+        gCurrentArea != NULL &&
+        gMarioStates[0].marioObj != NULL &&
+        is_player_active(&gMarioStates[0]);
+}
+
+static bool vr_special_moves_try_player_hit(
+    struct MarioState* attacker,
+    const Vec3f position,
+    f32 attackRadius,
+    u8 attackType
+) {
+    if (attacker == NULL || position == NULL ||
+        !ns_coopnet_vr_public_session() ||
+        !vr_special_moves_online_allowed()) {
+        return false;
+    }
+
+    for (s32 playerIndex = 1; playerIndex < MAX_PLAYERS; playerIndex++) {
+        struct MarioState* victim = &gMarioStates[playerIndex];
+        struct Object* victimObject = victim->marioObj;
+        if (!is_player_active(victim) || victimObject == NULL ||
+            !gNetworkPlayers[playerIndex].connected ||
+            !gNetworkPlayers[playerIndex].currAreaSyncValid ||
+            sVrSpecialPlayerHitCooldown[playerIndex] != 0) {
+            continue;
+        }
+
+        f32 modelScale = victimObject->header.gfx.scale[1];
+        if (modelScale < 0.25f) {
+            modelScale = 1.0f;
+        }
+        const f32 victimRadius = 52.0f * modelScale + attackRadius;
+        const f32 victimBottom = victim->pos[1];
+        const f32 victimTop = victimBottom + 225.0f * modelScale;
+        const f32 dx = position[0] - victim->pos[0];
+        const f32 dz = position[2] - victim->pos[2];
+        if (dx * dx + dz * dz > victimRadius * victimRadius ||
+            position[1] + attackRadius < victimBottom ||
+            position[1] - attackRadius > victimTop) {
+            continue;
+        }
+
+        const s16 attackYaw = atan2s(
+            victim->pos[2] - attacker->pos[2],
+            victim->pos[0] - attacker->pos[0]
+        );
+        network_send_vr_player_hit(
+            gNetworkPlayers[playerIndex].globalIndex,
+            attackYaw,
+            attackType
+        );
+        sVrSpecialPlayerHitCooldown[playerIndex] =
+            attackType == VR_PLAYER_ATTACK_RASEN_SHURIKEN ? 45 : 20;
+        play_sound(
+            SOUND_ACTION_HIT_2,
+            victimObject->header.gfx.cameraToObject
+        );
+        return true;
+    }
+    return false;
 }
 
 bool vr_special_moves_fire_flower_active(void) {
@@ -6256,6 +6444,16 @@ static bool vr_special_moves_projectile_hits_enemy(
     if (mario == NULL || projectile == NULL || gObjectLists == NULL) {
         return false;
     }
+    if (vr_special_moves_try_player_hit(
+            mario,
+            &projectile->oPosX,
+            hammerImpact ? 45.0f : 32.0f,
+            hammerImpact
+                ? VR_PLAYER_ATTACK_HAMMER
+                : VR_PLAYER_ATTACK_FIREBALL
+        )) {
+        return true;
+    }
     for (s32 listIndex = 0; listIndex < NUM_OBJ_LISTS; listIndex++) {
         struct ObjectNode* list = &gObjectLists[listIndex];
         for (struct ObjectNode* node = list->next;
@@ -6435,6 +6633,14 @@ static bool vr_special_moves_hammer_melee_contact(
     const f32 gloveScale =
         (f32)clamp(configVrGloveSize, 25U, 250U) / 70.0f;
     const f32 hammerRadius = VR_HAMMER_MELEE_RADIUS * gloveScale;
+    if (vr_special_moves_try_player_hit(
+            mario,
+            hammerHead,
+            hammerRadius,
+            VR_PLAYER_ATTACK_HAMMER
+        )) {
+        return true;
+    }
     for (s32 listIndex = 0;
          listIndex < NUM_OBJ_LISTS && contact == NULL;
          listIndex++) {
@@ -6907,6 +7113,16 @@ static bool vr_special_moves_check_rasengan_contact(
     const f32 sphereX = sVrRasenganObject->oPosX;
     const f32 sphereY = sVrRasenganObject->oPosY;
     const f32 sphereZ = sVrRasenganObject->oPosZ;
+    if (vr_special_moves_try_player_hit(
+            mario,
+            &sVrRasenganObject->oPosX,
+            VR_RASENGAN_CONTACT_RADIUS,
+            VR_PLAYER_ATTACK_RASENGAN
+        )) {
+        vr_apply_haptic(VR_CONTROLLER_RIGHT, 0.95f, 0.16f, -1.0f);
+        vr_special_moves_clear_rasengan();
+        return true;
+    }
     for (s32 listIndex = 0; listIndex < NUM_OBJ_LISTS; listIndex++) {
         struct ObjectNode* list = &gObjectLists[listIndex];
         struct ObjectNode* node = list->next;
@@ -7546,6 +7762,14 @@ static bool vr_special_moves_rasen_shuriken_hits_enemy(
     if (mario == NULL || projectile == NULL || gObjectLists == NULL) {
         return false;
     }
+    if (vr_special_moves_try_player_hit(
+            mario,
+            &projectile->oPosX,
+            35.0f,
+            VR_PLAYER_ATTACK_RASEN_SHURIKEN
+        )) {
+        return true;
+    }
     for (s32 listIndex = 0; listIndex < NUM_OBJ_LISTS; listIndex++) {
         struct ObjectNode* list = &gObjectLists[listIndex];
         struct ObjectNode* node = list->next;
@@ -7627,6 +7851,13 @@ static void vr_special_moves_update_rasen_shuriken_projectile(
             // later receive one hit; a target continuously inside from the
             // first frame through the fade receives one final second hit.
             vr_special_moves_rasen_shuriken_damage_area(mario, projectile);
+            vr_special_moves_try_player_hit(
+                mario,
+                &projectile->oPosX,
+                VR_RASEN_SHURIKEN_EXPLOSION_SCALE *
+                    VR_RASENGAN_MODEL_RADIUS,
+                VR_PLAYER_ATTACK_RASEN_SHURIKEN
+            );
         }
         return;
     }
@@ -8470,6 +8701,17 @@ void vr_hand_interaction_update(struct MarioState* mario) {
     // must not reset the local player's tracked fist state.
     if (mario == NULL || mario->playerIndex != 0) {
         return;
+    }
+
+    for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
+        if (sVrPhysicalPlayerHitCooldown[hand] > 0) {
+            sVrPhysicalPlayerHitCooldown[hand]--;
+        }
+    }
+    for (u32 playerIndex = 1; playerIndex < MAX_PLAYERS; playerIndex++) {
+        if (sVrSpecialPlayerHitCooldown[playerIndex] > 0) {
+            sVrSpecialPlayerHitCooldown[playerIndex]--;
+        }
     }
 
     if (!vr_special_moves_online_allowed()) {
