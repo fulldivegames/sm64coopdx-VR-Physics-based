@@ -10,7 +10,11 @@
 
 #ifdef COOPNET
 static void djui_panel_join_public_lobbies(struct DjuiBase* caller) {
-    djui_panel_join_lobbies_create(caller, "");
+    djui_panel_join_lobbies_create(caller, "", COOPNET_LOBBY_STANDARD_PUBLIC);
+}
+
+static void djui_panel_join_vr_public_lobbies(struct DjuiBase* caller) {
+    djui_panel_join_lobbies_create(caller, "", COOPNET_LOBBY_VR_PUBLIC);
 }
 #endif
 
@@ -21,6 +25,7 @@ void djui_panel_join_create(struct DjuiBase* caller) {
     struct DjuiThreePanel* panel = djui_panel_menu_create(DLANG(JOIN, JOIN_TITLE), false);
     struct DjuiBase* body = djui_three_panel_get_body(panel);
     {
+        djui_button_create(body, "Public VR Lobbies", DJUI_BUTTON_STYLE_NORMAL, djui_panel_join_vr_public_lobbies);
         djui_button_create(body, DLANG(JOIN, PUBLIC_LOBBIES), DJUI_BUTTON_STYLE_NORMAL, djui_panel_join_public_lobbies);
         djui_button_create(body, DLANG(JOIN, PRIVATE_LOBBIES), DJUI_BUTTON_STYLE_NORMAL, djui_panel_join_private_create);
         djui_button_create(body, DLANG(JOIN, DIRECT), DJUI_BUTTON_STYLE_NORMAL, djui_panel_join_direct_create);

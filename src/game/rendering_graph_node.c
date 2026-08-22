@@ -27,6 +27,7 @@
 #include "pc/vr/vr.h"
 #include "pc/utils/misc.h"
 #include "pc/debuglog.h"
+#include "pc/network/coopnet/coopnet.h"
 #include "skybox.h"
 #include "first_person_cam.h"
 #include "bettercamera.h"
@@ -350,6 +351,7 @@ static void vr_update_painting_exit_hat_shake(
     const Vec3f velocity
 ) {
     if (sVrPaintingExitHatWingCap ||
+        !ns_coopnet_vr_gameplay_allowed() ||
         !configVrCheatShakingHatWingCap ||
         !configVrImmersiveRemovableCap ||
         velocity == NULL ||

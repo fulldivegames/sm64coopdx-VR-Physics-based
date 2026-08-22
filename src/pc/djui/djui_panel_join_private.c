@@ -12,7 +12,7 @@
 static struct DjuiInputbox* sInputboxPassword = NULL;
 
 static void djui_panel_join_private_lobbies(struct DjuiBase* caller) {
-    djui_panel_join_lobbies_create(caller, sInputboxPassword->buffer);
+    djui_panel_join_lobbies_create(caller, sInputboxPassword->buffer, COOPNET_LOBBY_PRIVATE);
 }
 
 void djui_panel_join_private_create(struct DjuiBase* caller) {

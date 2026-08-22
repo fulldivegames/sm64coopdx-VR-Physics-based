@@ -17,7 +17,7 @@ static void djui_panel_rules_accept(struct DjuiBase* caller) {
     // Persist acceptance immediately. On standalone, closing the app from a
     // menu does not always pass through the normal panel-shutdown save path.
     configfile_save(configfile_name());
-    djui_panel_join_lobbies_create(caller, "");
+    djui_panel_join_lobbies_create(caller, "", ns_coopnet_get_lobby_channel());
 }
 
 void djui_panel_rules_create(struct DjuiBase* caller) {

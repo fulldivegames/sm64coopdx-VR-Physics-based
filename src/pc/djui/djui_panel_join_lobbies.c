@@ -23,6 +23,7 @@ static struct DjuiButton* sRefreshButton = NULL;
 static struct DjuiThreePanel* sDescriptionPanel = NULL;
 static struct DjuiText* sTooltip = NULL;
 static char* sPassword = NULL;
+static enum CoopNetLobbyChannel sLobbyChannel = COOPNET_LOBBY_STANDARD_PUBLIC;
 
 static void djui_panel_join_lobby_description_create(void) {
     f32 bodyHeight = 600;
@@ -134,16 +135,18 @@ void djui_panel_join_lobbies_refresh(UNUSED struct DjuiBase* caller) {
     djui_text_set_text(sRefreshButton->text, DLANG(LOBBIES, REFRESHING));
     djui_base_set_enabled(&sRefreshButton->base, false);
     djui_paginated_update_page_buttons(sLobbyPaginated);
-    ns_coopnet_query(djui_panel_join_query, djui_panel_join_query_finish, sPassword);
+    ns_coopnet_query(djui_panel_join_query, djui_panel_join_query_finish, sPassword, sLobbyChannel);
 }
 
 void djui_panel_join_lobbies_value_changed(UNUSED struct DjuiBase* caller) {
     djui_panel_join_lobbies_refresh(NULL);
 }
 
-void djui_panel_join_lobbies_create(struct DjuiBase* caller, const char* password) {
+void djui_panel_join_lobbies_create(struct DjuiBase* caller, const char* password, enum CoopNetLobbyChannel channel) {
     if (sPassword) { free(sPassword); sPassword = NULL; }
     sPassword = strdup(password);
+    sLobbyChannel = channel;
+    ns_coopnet_set_lobby_channel(channel);
     bool private = (strlen(password) > 0);
     if (!private && configRulesVersion != RULES_VERSION) {
         djui_panel_rules_create(caller);
@@ -154,7 +157,8 @@ void djui_panel_join_lobbies_create(struct DjuiBase* caller, const char* passwor
 
     struct DjuiBase* defaultBase = NULL;
     struct DjuiThreePanel* panel = djui_panel_menu_create(
-        private ? DLANG(LOBBIES, PRIVATE_LOBBIES) : DLANG(LOBBIES, PUBLIC_LOBBIES),
+        private ? DLANG(LOBBIES, PRIVATE_LOBBIES) :
+            (channel == COOPNET_LOBBY_VR_PUBLIC ? "Public VR Lobbies" : DLANG(LOBBIES, PUBLIC_LOBBIES)),
         true);
     struct DjuiBase* body = djui_three_panel_get_body(panel);
     {
@@ -162,7 +166,7 @@ void djui_panel_join_lobbies_create(struct DjuiBase* caller, const char* passwor
         sLobbyLayout = sLobbyPaginated->layout;
         djui_flow_layout_set_margin(sLobbyLayout, 4);
 
-        bool querying = ns_coopnet_query(djui_panel_join_query, djui_panel_join_query_finish, password);
+        bool querying = ns_coopnet_query(djui_panel_join_query, djui_panel_join_query_finish, password, channel);
         if (!querying) {
             struct DjuiText* text = djui_text_create(&sLobbyLayout->base, DLANG(NOTIF, COOPNET_CONNECTION_FAILED));
             djui_base_set_size_type(&text->base, DJUI_SVT_RELATIVE, DJUI_SVT_RELATIVE);

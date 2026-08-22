@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stddef.h>
+#include <math.h>
 #include "../network.h"
 #include "object_fields.h"
 #include "object_constants.h"
@@ -13,6 +14,7 @@
 #include "game/object_list_processor.h"
 #include "game/mario_misc.h"
 #include "pc/configfile.h"
+#include "pc/network/coopnet/coopnet.h"
 #include "pc/djui/djui.h"
 #include "pc/djui/djui_language.h"
 #include "pc/debuglog.h"
@@ -229,6 +231,26 @@ void network_send_player(u8 localIndex) {
 
     struct PacketPlayerData data = { 0 };
     read_packet_data(&data, &gMarioStates[localIndex]);
+
+    // Standard public lobbies may include unmodified flat-screen clients.
+    // Preserve the local VR movement state exactly, but serialize a conventional
+    // forward-walking pose while backpedaling so remote players do not see
+    // Mario sprinting backward. This modifies only the packet copy.
+    if (ns_coopnet_is_standard_public_session() &&
+        vr_first_person_backpedal_active(&gMarioStates[localIndex])) {
+        const f32 horizontalSpeed = sqrtf(
+            data.vel[0] * data.vel[0] + data.vel[2] * data.vel[2]
+        );
+        if (horizontalSpeed > 0.01f) {
+            const s16 travelYaw = atan2s(data.vel[2], data.vel[0]);
+            data.action = ACT_WALKING;
+            data.prevAction = ACT_WALKING;
+            data.faceAngle[1] = travelYaw;
+            data.intendedYaw = travelYaw;
+            data.slideYaw = travelYaw;
+            data.forwardVel = horizontalSpeed;
+        }
+    }
 
     struct Packet p = { 0 };
     packet_init(&p, PACKET_PLAYER, false, PLMT_AREA);
