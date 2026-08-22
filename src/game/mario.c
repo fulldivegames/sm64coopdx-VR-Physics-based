@@ -694,6 +694,12 @@ s16 vr_get_first_person_view_yaw(void) {
     );
 }
 
+s16 vr_get_first_person_headset_yaw(void) {
+    return vr_get_first_person_aim_yaw_from_head_yaw(
+        vr_first_person_facing_yaw_offset()
+    );
+}
+
 static bool vr_get_first_person_direction(
     struct MarioState* m,
     Vec3f direction,
