@@ -232,12 +232,11 @@ void network_send_player(u8 localIndex) {
     struct PacketPlayerData data = { 0 };
     read_packet_data(&data, &gMarioStates[localIndex]);
 
-    // Standard public lobbies may include unmodified flat-screen clients.
     // Preserve the local VR movement state exactly, but serialize a conventional
-    // forward-walking pose while backpedaling so remote players do not see
-    // Mario sprinting backward. This modifies only the packet copy.
-    if (ns_coopnet_is_standard_public_session() &&
-        vr_first_person_backpedal_active(&gMarioStates[localIndex])) {
+    // forward-walking pose while backpedaling so every remote player sees Mario
+    // facing along his travel direction. This modifies only the packet copy and
+    // therefore cannot affect local input, momentum, actions, or camera behavior.
+    if (vr_first_person_backpedal_active(&gMarioStates[localIndex])) {
         const f32 horizontalSpeed = sqrtf(
             data.vel[0] * data.vel[0] + data.vel[2] * data.vel[2]
         );
