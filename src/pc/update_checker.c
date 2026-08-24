@@ -18,10 +18,10 @@
 
 #if defined(__ANDROID__)
 #define VR_UPDATE_API_URL \
-    "https://api.github.com/repos/fulldivegames/sm64coopdx-VR-Standalone/releases?per_page=20"
+    "https://api.github.com/repos/fulldivegames/sm64coopdx-VR-Standalone-Physics-based/releases?per_page=20"
 #else
 #define VR_UPDATE_API_URL \
-    "https://api.github.com/repos/fulldivegames/sm64coopdx-VR-Standalone/releases/latest"
+    "https://api.github.com/repos/fulldivegames/sm64coopdx-VR-Standalone-Physics-based/releases/latest"
 #define VR_UPDATE_TAG_PREFIX ""
 #endif
 #define VR_UPDATE_RESPONSE_LIMIT (512 * 1024)

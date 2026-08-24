@@ -66,7 +66,7 @@ public final class QuestNativeActivity extends NativeActivity {
     private static final String US_ROM_SHA1 =
             "9bef1128717f958171a4afac3ed78ee2bb4e86ce";
     private static final String RELEASES_API =
-            "https://api.github.com/repos/fulldivegames/sm64coopdx-VR-Standalone/releases?per_page=20";
+            "https://api.github.com/repos/fulldivegames/sm64coopdx-VR-Standalone-Physics-based/releases?per_page=20";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {

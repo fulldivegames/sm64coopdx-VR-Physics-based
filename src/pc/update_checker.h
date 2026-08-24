@@ -4,7 +4,7 @@
 #include <stdbool.h>
 
 #define VR_RELEASES_URL \
-    "https://github.com/fulldivegames/sm64coopdx-VR-Standalone/releases/latest"
+    "https://github.com/fulldivegames/sm64coopdx-VR-Standalone-Physics-based/releases/latest"
 
 enum VrUpdateStatus {
     VR_UPDATE_NOT_CHECKED,
