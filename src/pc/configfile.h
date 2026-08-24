@@ -25,6 +25,10 @@
 #define VR_HUD_ANCHOR_LEFT_HAND  1U
 #define VR_HUD_ANCHOR_RIGHT_HAND 2U
 #define VR_HUD_ANCHOR_COUNT      3U
+#define VR_COLOR_FILTER_NONE        0U
+#define VR_COLOR_FILTER_VIRTUAL_BOY 1U
+#define VR_COLOR_FILTER_GAME_BOY    2U
+#define VR_COLOR_FILTER_COUNT       3U
 
 // Camera height is stored directly in world units above Mario's gameplay
 // anchor, so the value shown in Camera Settings matches the applied height.
@@ -185,6 +189,7 @@ extern unsigned int configVrHudOpacity;
 extern unsigned int configVrHudSpread;
 extern unsigned int configVrMenuAnchor;
 extern unsigned int configVrHudAnchor;
+extern unsigned int configVrColorFilter;
 extern bool         configVrMotionControllerInput;
 extern unsigned int configVrMoveStick;
 extern unsigned int configVrCameraStick;
