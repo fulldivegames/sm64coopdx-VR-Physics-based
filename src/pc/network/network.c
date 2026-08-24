@@ -560,6 +560,7 @@ void network_update_coopnet(void) {
 #endif
 
 void network_update(void) {
+    voice_chat_update();
     if (gNetworkStartupTimer > 0) {
         gNetworkStartupTimer--;
     }
