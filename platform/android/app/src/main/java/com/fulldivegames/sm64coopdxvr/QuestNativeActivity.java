@@ -33,6 +33,14 @@ import org.json.JSONArray;
 
 
 public final class QuestNativeActivity extends NativeActivity {
+    // NativeActivity loads this library for the game loop, but that native
+    // load is not associated with this Java class loader on every Quest OS
+    // version. Load the same library here as well so JNI speech callbacks can
+    // be resolved from Java. Android treats the second load as idempotent.
+    static {
+        System.loadLibrary("sm64coopdxvr");
+    }
+
     private static final String TAG = "SM64CoopDXVR";
     private static final int OPEN_ROM_REQUEST = 6401;
     private static final int MICROPHONE_PERMISSION_REQUEST = 6402;
