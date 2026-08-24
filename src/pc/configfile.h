@@ -283,6 +283,7 @@ extern unsigned int configEnvVolume;
 extern bool         configFadeoutDistantSounds;
 extern bool         configMuteFocusLoss;
 extern unsigned int configSoundOutput;
+extern bool         configVoiceChatEnabled;
 extern bool         configVoiceMicMuted;
 extern unsigned int configVoiceMicLevel;
 extern unsigned int configVoicePlayerVolume;

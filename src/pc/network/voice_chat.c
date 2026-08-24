@@ -65,7 +65,7 @@ static void voice_capture_callback(ma_device* device, void* output,
 }
 
 void voice_chat_init(void) {
-    if (sCaptureInitialized || sCapturePaused) return;
+    if (!configVoiceChatEnabled || sCaptureInitialized || sCapturePaused) return;
     atomic_store(&sCaptureRead, 0);
     atomic_store(&sCaptureWrite, 0);
     if (!sCaptureContextInitialized) {
@@ -225,20 +225,29 @@ static void voice_send_frame(const s16* samples) {
 
 void voice_chat_update(void) {
     static bool wasAllowed;
-    bool allowed = voice_chat_session_allowed();
+    static bool wasEnabled = true;
+    bool enabled = configVoiceChatEnabled;
+    bool allowed = enabled && voice_chat_session_allowed();
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         if (sSpeakingFrames[i] > 0) sSpeakingFrames[i]--;
     }
     if (!allowed) {
+        if (!enabled && sCaptureInitialized) {
+            ma_device_uninit(&sCaptureDevice);
+            sCaptureInitialized = false;
+        }
         if (wasAllowed) {
             memset(sCapable, 0, sizeof(sCapable));
             memset(sPlayback, 0, sizeof(sPlayback));
             sCapabilityTimer = 0.0f;
         }
         wasAllowed = false;
+        wasEnabled = enabled;
         atomic_store(&sCaptureRead, atomic_load(&sCaptureWrite));
         return;
     }
+    if (!wasEnabled) voice_chat_init();
+    wasEnabled = true;
     if (!sCapturePaused && !sCaptureInitialized && ++sCaptureRetryFrames >= 150) {
         sCaptureRetryFrames = 0;
         voice_chat_init();
@@ -275,7 +284,8 @@ void voice_chat_receive_capability(struct Packet* packet) {
     packet_read(packet, &globalIndex, sizeof(globalIndex));
     packet_read(packet, &version, sizeof(version));
     if (packet->error || globalIndex >= MAX_PLAYERS ||
-        packet_spoofed(packet, globalIndex) || !voice_chat_session_allowed()) return;
+        packet_spoofed(packet, globalIndex) || !configVoiceChatEnabled ||
+        !voice_chat_session_allowed()) return;
     sCapable[globalIndex] = version == VOICE_PROTOCOL_VERSION;
 }
 
@@ -285,7 +295,8 @@ void voice_chat_receive_audio(struct Packet* packet) {
     packet_read(packet, &globalIndex, sizeof(globalIndex));
     packet_read(packet, encoded, sizeof(encoded));
     if (packet->error || globalIndex >= MAX_PLAYERS || sMuted[globalIndex] ||
-        packet_spoofed(packet, globalIndex) || !voice_chat_session_allowed()) return;
+        packet_spoofed(packet, globalIndex) || !configVoiceChatEnabled ||
+        !voice_chat_session_allowed()) return;
     sCapable[globalIndex] = true;
     struct VoicePlaybackQueue* queue = &sPlayback[globalIndex];
     int peak = 0;
@@ -301,7 +312,7 @@ void voice_chat_receive_audio(struct Packet* packet) {
 }
 
 void voice_chat_mix_output(s16* stereoSamples, size_t frameCount) {
-    if (stereoSamples == NULL || !voice_chat_session_allowed() ||
+    if (stereoSamples == NULL || !configVoiceChatEnabled || !voice_chat_session_allowed() ||
         configVoicePlayerVolume == 0) return;
     const float gain = (float)configVoicePlayerVolume / 100.0f;
     for (size_t frame = 0; frame < frameCount; frame++) {
@@ -326,7 +337,7 @@ bool voice_chat_player_muted(u8 globalIndex) {
 }
 
 bool voice_chat_player_speaking(u8 globalIndex) {
-    return globalIndex < MAX_PLAYERS && sSpeakingFrames[globalIndex] > 0;
+    return configVoiceChatEnabled && globalIndex < MAX_PLAYERS && sSpeakingFrames[globalIndex] > 0;
 }
 
 void voice_chat_set_player_muted(u8 globalIndex, bool muted) {
