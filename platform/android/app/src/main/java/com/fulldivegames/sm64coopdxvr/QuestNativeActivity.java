@@ -59,6 +59,7 @@ public final class QuestNativeActivity extends NativeActivity {
     private SpeechRecognizer speechRecognizer;
     private boolean speechListening;
     private boolean speechModelDownloadRequested;
+    private boolean speechStartPendingAfterModelDownload;
 
     private static native void nativeOnSpeechRecognitionResult(String text);
     private static native void nativeOnSpeechRecognitionState(boolean listening);
@@ -173,6 +174,11 @@ public final class QuestNativeActivity extends NativeActivity {
                 @Override public void onEvent(int eventType, Bundle params) { }
             });
         }
+        startSpeechRecognitionNow();
+    }
+
+    private void startSpeechRecognitionNow() {
+        if (speechRecognizer == null) return;
         Intent intent = createSpeechRecognitionIntent();
         try {
             speechListening = true;
@@ -204,6 +210,7 @@ public final class QuestNativeActivity extends NativeActivity {
                     Toast.LENGTH_LONG).show();
             return;
         }
+        speechStartPendingAfterModelDownload = true;
         if (speechModelDownloadRequested) {
             Toast.makeText(this,
                     "Quest is still preparing the English dictation model.",
@@ -221,9 +228,13 @@ public final class QuestNativeActivity extends NativeActivity {
 
                             @Override public void onSuccess() {
                                 speechModelDownloadRequested = false;
-                                Toast.makeText(QuestNativeActivity.this,
-                                        "Dictation is ready. Press Mic again.",
-                                        Toast.LENGTH_LONG).show();
+                                if (speechStartPendingAfterModelDownload) {
+                                    speechStartPendingAfterModelDownload = false;
+                                    Toast.makeText(QuestNativeActivity.this,
+                                            "Dictation is ready. Listening now.",
+                                            Toast.LENGTH_SHORT).show();
+                                    startSpeechRecognitionNow();
+                                }
                             }
 
                             @Override public void onScheduled() {
@@ -234,6 +245,7 @@ public final class QuestNativeActivity extends NativeActivity {
 
                             @Override public void onError(int error) {
                                 speechModelDownloadRequested = false;
+                                speechStartPendingAfterModelDownload = false;
                                 Log.w(TAG, "Speech model download failed with error " + error);
                                 Toast.makeText(QuestNativeActivity.this,
                                         "Quest could not download its dictation model.",
@@ -248,6 +260,7 @@ public final class QuestNativeActivity extends NativeActivity {
             }
         } catch (RuntimeException exception) {
             speechModelDownloadRequested = false;
+            speechStartPendingAfterModelDownload = false;
             Log.e(TAG, "Could not request speech model download", exception);
             Toast.makeText(this,
                     "Quest could not request its dictation model.",
