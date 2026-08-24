@@ -1185,7 +1185,7 @@ static const struct BuiltinTexInfo sDynosBuiltinTexs[] = {
 
     // Playerlist Exclusives
     define_builtin_tex(texture_ping_empty, "textures/segment2/custom_ping_empty.rgba16.png", 16, 16, G_IM_FMT_RGBA, G_IM_SIZ_16b),
-    define_builtin_tex(texture_voice_speaking, "textures/segment2/custom_voice_speaking.rgba16.png", 96, 64, G_IM_FMT_RGBA, G_IM_SIZ_16b),
+    define_builtin_tex(texture_voice_speaking, "textures/segment2/custom_voice_speaking.rgba16.png", 128, 64, G_IM_FMT_RGBA, G_IM_SIZ_16b),
     define_builtin_tex(texture_ping_one, "textures/segment2/custom_ping_one.rgba16.png", 16, 16, G_IM_FMT_RGBA, G_IM_SIZ_16b),
     define_builtin_tex(texture_ping_two, "textures/segment2/custom_ping_two.rgba16.png", 16, 16, G_IM_FMT_RGBA, G_IM_SIZ_16b),
     define_builtin_tex(texture_ping_three, "textures/segment2/custom_ping_three.rgba16.png", 16, 16, G_IM_FMT_RGBA, G_IM_SIZ_16b),
