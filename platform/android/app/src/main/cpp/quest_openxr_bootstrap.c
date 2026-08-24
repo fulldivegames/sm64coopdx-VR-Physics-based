@@ -115,6 +115,11 @@ static bool openxr_extension_available(const char *name) {
 
 static QuestApp *sActiveQuestApp;
 
+ANativeActivity *quest_android_get_activity(void) {
+    if (sActiveQuestApp == NULL || sActiveQuestApp->android_app == NULL) return NULL;
+    return sActiveQuestApp->android_app->activity;
+}
+
 void quest_android_request_exit(void) {
     if (sActiveQuestApp == NULL) return;
     sActiveQuestApp->exit_requested = true;

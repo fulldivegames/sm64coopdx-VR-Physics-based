@@ -133,6 +133,7 @@ add_library(
     quest_android_shims.c
     quest_audio.c
     quest_game_runtime.c
+    quest_speech_input.c
     quest_vr_bridge.c
     ${SM64_ROOT}/src/pc/rom_assets.c
     ${SM64_ROOT}/src/pc/ultra_reimplementation.c

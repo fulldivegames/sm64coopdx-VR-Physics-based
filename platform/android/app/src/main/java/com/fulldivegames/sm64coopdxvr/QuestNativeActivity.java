@@ -2,6 +2,7 @@ package com.fulldivegames.sm64coopdxvr;
 
 import android.app.NativeActivity;
 import android.Manifest;
+import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
@@ -9,6 +10,9 @@ import android.os.Bundle;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.Settings;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
 import android.util.Log;
 import android.widget.Toast;
 
@@ -21,6 +25,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Locale;
 
@@ -42,6 +47,11 @@ public final class QuestNativeActivity extends NativeActivity {
     private static final String SHADER_WARMUP_PENDING_FILE =
             "first-boot-after-rom.pending";
     private boolean requestedSharedStorageAccess;
+    private SpeechRecognizer speechRecognizer;
+    private boolean speechListening;
+
+    private static native void nativeOnSpeechRecognitionResult(String text);
+    private static native void nativeOnSpeechRecognitionState(boolean listening);
     private static final String US_ROM_SHA1 =
             "9bef1128717f958171a4afac3ed78ee2bb4e86ce";
     private static final String RELEASES_API =
@@ -81,6 +91,102 @@ public final class QuestNativeActivity extends NativeActivity {
             requestedSharedStorageAccess = true;
             requestSharedStorageAccess();
         }
+    }
+
+    public void startSpeechRecognitionFromNative() {
+        runOnUiThread(this::toggleSpeechRecognition);
+    }
+
+    private void toggleSpeechRecognition() {
+        if (speechListening && speechRecognizer != null) {
+            speechRecognizer.cancel();
+            speechListening = false;
+            nativeOnSpeechRecognitionState(false);
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 23 &&
+                checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+                    PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] { Manifest.permission.RECORD_AUDIO },
+                    MICROPHONE_PERMISSION_REQUEST);
+            nativeOnSpeechRecognitionState(false);
+            return;
+        }
+        if (speechRecognizer == null) {
+            try {
+                if (Build.VERSION.SDK_INT >= 31 &&
+                        SpeechRecognizer.isOnDeviceRecognitionAvailable(this)) {
+                    speechRecognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(this);
+                } else if (SpeechRecognizer.isRecognitionAvailable(this)) {
+                    speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+                } else {
+                    ComponentName questService = ComponentName.unflattenFromString(
+                        "com.oculus.systemintelligence/" +
+                        ".android.speech.OnDeviceRecognitionService");
+                    speechRecognizer = SpeechRecognizer.createSpeechRecognizer(
+                        this, questService);
+                }
+            } catch (RuntimeException exception) {
+                Log.e(TAG, "Could not create speech recognizer", exception);
+                nativeOnSpeechRecognitionState(false);
+                Toast.makeText(this, "Dictation is unavailable on this headset.",
+                        Toast.LENGTH_SHORT).show();
+                return;
+            }
+            speechRecognizer.setRecognitionListener(new RecognitionListener() {
+                @Override public void onReadyForSpeech(Bundle params) {
+                    speechListening = true;
+                    nativeOnSpeechRecognitionState(true);
+                }
+                @Override public void onBeginningOfSpeech() { }
+                @Override public void onRmsChanged(float rmsdB) { }
+                @Override public void onBufferReceived(byte[] buffer) { }
+                @Override public void onEndOfSpeech() { }
+                @Override public void onError(int error) {
+                    speechListening = false;
+                    nativeOnSpeechRecognitionState(false);
+                    Log.w(TAG, "Dictation failed with speech error " + error);
+                }
+                @Override public void onResults(Bundle results) {
+                    speechListening = false;
+                    ArrayList<String> matches = results.getStringArrayList(
+                            SpeechRecognizer.RESULTS_RECOGNITION);
+                    if (matches != null && !matches.isEmpty()) {
+                        nativeOnSpeechRecognitionResult(matches.get(0));
+                    }
+                    nativeOnSpeechRecognitionState(false);
+                }
+                @Override public void onPartialResults(Bundle partialResults) { }
+                @Override public void onEvent(int eventType, Bundle params) { }
+            });
+        }
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE,
+                Locale.getDefault().toLanguageTag());
+        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
+        try {
+            speechListening = true;
+            nativeOnSpeechRecognitionState(true);
+            speechRecognizer.startListening(intent);
+        } catch (RuntimeException exception) {
+            speechListening = false;
+            nativeOnSpeechRecognitionState(false);
+            Log.e(TAG, "Could not start dictation", exception);
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (speechRecognizer != null) {
+            speechRecognizer.destroy();
+            speechRecognizer = null;
+        }
+        speechListening = false;
+        nativeOnSpeechRecognitionState(false);
+        super.onDestroy();
     }
 
     private void prepareSharedContentDirectories() {

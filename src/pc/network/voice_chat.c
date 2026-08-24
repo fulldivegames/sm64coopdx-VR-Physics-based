@@ -38,6 +38,7 @@ static bool sMuted[MAX_PLAYERS];
 static u8 sSpeakingFrames[MAX_PLAYERS];
 static f32 sCapabilityTimer;
 static u32 sCaptureRetryFrames;
+static bool sCapturePaused;
 
 bool voice_chat_session_allowed(void) {
     return gNetworkType != NT_NONE && gNetworkPlayerLocal != NULL &&
@@ -64,7 +65,7 @@ static void voice_capture_callback(ma_device* device, void* output,
 }
 
 void voice_chat_init(void) {
-    if (sCaptureInitialized) return;
+    if (sCaptureInitialized || sCapturePaused) return;
     atomic_store(&sCaptureRead, 0);
     atomic_store(&sCaptureWrite, 0);
     if (!sCaptureContextInitialized) {
@@ -105,6 +106,20 @@ void voice_chat_init(void) {
     }
     sCaptureInitialized = true;
     LOG_INFO("Voice chat microphone started at %d Hz", VOICE_RATE);
+}
+
+void voice_chat_set_capture_paused(bool paused) {
+    if (sCapturePaused == paused) return;
+    sCapturePaused = paused;
+    if (paused) {
+        if (sCaptureInitialized) {
+            ma_device_uninit(&sCaptureDevice);
+            sCaptureInitialized = false;
+        }
+        atomic_store(&sCaptureRead, atomic_load(&sCaptureWrite));
+    } else {
+        voice_chat_init();
+    }
 }
 
 void voice_chat_shutdown(void) {
@@ -224,7 +239,7 @@ void voice_chat_update(void) {
         atomic_store(&sCaptureRead, atomic_load(&sCaptureWrite));
         return;
     }
-    if (!sCaptureInitialized && ++sCaptureRetryFrames >= 150) {
+    if (!sCapturePaused && !sCaptureInitialized && ++sCaptureRetryFrames >= 150) {
         sCaptureRetryFrames = 0;
         voice_chat_init();
     } else if (sCaptureInitialized) {
