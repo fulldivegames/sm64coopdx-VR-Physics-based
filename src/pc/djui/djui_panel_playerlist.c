@@ -20,6 +20,7 @@ extern ALIGNED8 const Texture texture_ping_two[];
 extern ALIGNED8 const Texture texture_ping_three[];
 extern ALIGNED8 const Texture texture_ping_four[];
 extern ALIGNED8 const Texture texture_ping_full[];
+extern ALIGNED8 const Texture texture_voice_speaking[];
 
 struct DjuiThreePanel* gDjuiPlayerList = NULL;
 bool gAttemptingToOpenPlayerlist = false;
@@ -197,12 +198,22 @@ static void djui_panel_playerlist_voice_row_render(struct DjuiBase* base,
         ? get_level_name(np->currCourseNum, np->currLevelNum, np->currAreaIndex)
         : np->overrideLocation;
     char row[256];
-    snprintf(row, sizeof(row), "%s%s  |  %s  |  %d ms  |  %s",
-        voice_chat_player_speaking(np->globalIndex) ? "|))) " : "",
+    snprintf(row, sizeof(row), "%s  |  %s  |  %d ms  |  %s",
         np->name, location, np->ping,
         voice_chat_player_muted(np->globalIndex)
             ? "MUTED (select to unmute)" : "Select to mute");
     djui_text_set_text(((struct DjuiButton*)base)->text, row);
+}
+
+static void djui_panel_playerlist_voice_icon_render(struct DjuiBase* base,
+                                                    UNUSED bool* unused) {
+    bool visible = false;
+    if (base != NULL && base->tag >= 0 && base->tag < MAX_PLAYERS) {
+        struct NetworkPlayer* np = network_player_from_global_index((u8)base->tag);
+        visible = np != NULL && np->connected &&
+                  voice_chat_player_speaking(np->globalIndex);
+    }
+    djui_base_set_color(base, 255, 255, 255, visible ? 128 : 0);
 }
 
 void djui_panel_playerlist_menu_create(struct DjuiBase* caller) {
@@ -250,6 +261,20 @@ void djui_panel_playerlist_menu_create(struct DjuiBase* caller) {
                 djui_panel_playerlist_toggle_voice_mute);
             button->base.tag = np->globalIndex;
             button->base.on_render_pre = djui_panel_playerlist_voice_row_render;
+            djui_text_set_alignment(button->text, DJUI_HALIGN_LEFT, DJUI_VALIGN_CENTER);
+            djui_base_set_padding(&button->text->base, 0, 4, 0, 104);
+
+            struct DjuiImage* speaking = djui_image_create(
+                &button->rect->base, texture_voice_speaking,
+                96, 64, G_IM_FMT_RGBA, G_IM_SIZ_16b);
+            djui_base_set_size_type(&speaking->base, DJUI_SVT_ABSOLUTE, DJUI_SVT_ABSOLUTE);
+            djui_base_set_size(&speaking->base, 90, 60);
+            djui_base_set_location(&speaking->base, 6, 0);
+            djui_base_set_alignment(&speaking->base, DJUI_HALIGN_LEFT, DJUI_VALIGN_CENTER);
+            djui_base_set_color(&speaking->base, 255, 255, 255, 128);
+            djui_image_set_linear_filter(speaking, true);
+            speaking->base.tag = np->globalIndex;
+            speaking->base.on_render_pre = djui_panel_playerlist_voice_icon_render;
         }
         connected++;
     }

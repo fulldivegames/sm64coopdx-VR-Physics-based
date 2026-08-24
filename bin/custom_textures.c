@@ -58,3 +58,7 @@ ALIGNED8 const Texture texture_ping_four[] = {
 ALIGNED8 const Texture texture_ping_full[] = {
 #include "textures/segment2/custom_ping_full.rgba16.inc.c"
 };
+
+ALIGNED8 const Texture texture_voice_speaking[] = {
+#include "textures/segment2/custom_voice_speaking.rgba16.inc.c"
+};

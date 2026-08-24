@@ -196,7 +196,9 @@ static void voice_send_frame(const s16* samples) {
     for (u32 i = 0; i < MAX_PLAYERS; i++) {
         struct NetworkPlayer* player = &gNetworkPlayers[i];
         if (!player->connected || player == gNetworkPlayerLocal ||
-            player->globalIndex >= MAX_PLAYERS || !sCapable[player->globalIndex]) continue;
+            player->globalIndex >= MAX_PLAYERS ||
+            sMuted[player->globalIndex] ||
+            !sCapable[player->globalIndex]) continue;
         struct Packet packet = { 0 };
         packet_init(&packet, PACKET_VR_VOICE_AUDIO, false, PLMT_NONE);
         u8 globalIndex = gNetworkPlayerLocal->globalIndex;
