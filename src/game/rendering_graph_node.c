@@ -4543,7 +4543,7 @@ void patch_mtx_vr_shared(void) {
                         // wooden handle in the closed glove rather than the
                         // shaft directly underneath the hammer head.
                         Vec3f localPosition = {
-                            74.0f,
+                            86.0f,
                             -82.0f * relativeScale,
                             14.0f
                         };

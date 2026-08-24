@@ -256,25 +256,30 @@ void djui_panel_playerlist_menu_create(struct DjuiBase* caller) {
                 ? "  |  MUTED (select to unmute)"
                 : "  |  Select to mute",
                 sizeof(row) - strlen(row) - 1);
-            struct DjuiButton* button = djui_button_create(
-                body, row, DJUI_BUTTON_STYLE_NORMAL,
-                djui_panel_playerlist_toggle_voice_mute);
-            button->base.tag = np->globalIndex;
-            button->base.on_render_pre = djui_panel_playerlist_voice_row_render;
-            djui_text_set_alignment(button->text, DJUI_HALIGN_LEFT, DJUI_VALIGN_CENTER);
-            djui_base_set_padding(&button->text->base, 0, 4, 0, 104);
+
+            struct DjuiFlowLayout* voiceRow = djui_flow_layout_create(body);
+            djui_base_set_size_type(&voiceRow->base, DJUI_SVT_RELATIVE, DJUI_SVT_ABSOLUTE);
+            djui_base_set_size(&voiceRow->base, 1.0f, 64.0f);
+            djui_base_set_color(&voiceRow->base, 0, 0, 0, 0);
+            djui_flow_layout_set_flow_direction(voiceRow, DJUI_FLOW_DIR_RIGHT);
+            djui_flow_layout_set_margin(voiceRow, 4);
 
             struct DjuiImage* speaking = djui_image_create(
-                &button->rect->base, texture_voice_speaking,
-                96, 64, G_IM_FMT_RGBA, G_IM_SIZ_16b);
+                &voiceRow->base, texture_voice_speaking,
+                128, 64, G_IM_FMT_RGBA, G_IM_SIZ_16b);
             djui_base_set_size_type(&speaking->base, DJUI_SVT_ABSOLUTE, DJUI_SVT_ABSOLUTE);
-            djui_base_set_size(&speaking->base, 90, 60);
-            djui_base_set_location(&speaking->base, 6, 0);
+            djui_base_set_size(&speaking->base, 120, 60);
             djui_base_set_alignment(&speaking->base, DJUI_HALIGN_LEFT, DJUI_VALIGN_CENTER);
             djui_base_set_color(&speaking->base, 255, 255, 255, 128);
             djui_image_set_linear_filter(speaking, true);
             speaking->base.tag = np->globalIndex;
             speaking->base.on_render_pre = djui_panel_playerlist_voice_icon_render;
+
+            struct DjuiButton* button = djui_button_create(
+                &voiceRow->base, row, DJUI_BUTTON_STYLE_NORMAL,
+                djui_panel_playerlist_toggle_voice_mute);
+            button->base.tag = np->globalIndex;
+            button->base.on_render_pre = djui_panel_playerlist_voice_row_render;
         }
         connected++;
     }
