@@ -1,7 +1,9 @@
 package com.fulldivegames.sm64coopdxvr;
 
 import android.app.NativeActivity;
+import android.Manifest;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
@@ -28,6 +30,7 @@ import org.json.JSONArray;
 public final class QuestNativeActivity extends NativeActivity {
     private static final String TAG = "SM64CoopDXVR";
     private static final int OPEN_ROM_REQUEST = 6401;
+    private static final int MICROPHONE_PERMISSION_REQUEST = 6402;
     private static final String ROM_NAME = "baserom.us.z64";
     private static final String SHARED_MOD_DIRECTORY = "/sdcard/SM64VR/mods";
     private static final String SHARED_DYNOS_PACK_DIRECTORY =
@@ -49,6 +52,13 @@ public final class QuestNativeActivity extends NativeActivity {
         installBundledResources();
         normalizeCustomPaletteNames();
         super.onCreate(savedInstanceState);
+        if (Build.VERSION.SDK_INT >= 23 &&
+                checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+                    PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                    new String[] { Manifest.permission.RECORD_AUDIO },
+                    MICROPHONE_PERMISSION_REQUEST);
+        }
         prepareSharedContentDirectories();
         checkForStandaloneUpdate();
         File rom = new File(getExternalFilesDir(null), ROM_NAME);

@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "pc/utils/miniaudio.h"
+#include "pc/network/voice_chat.h"
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "SM64CoopDXVR", __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "SM64CoopDXVR", __VA_ARGS__)
@@ -67,6 +68,7 @@ static bool quest_audio_init(void) {
         return false;
     }
     sInitialized = true;
+    voice_chat_init();
     LOGI("Android audio output started at 32000 Hz stereo.");
     return true;
 }
@@ -94,10 +96,12 @@ static void quest_audio_play(const uint8_t *buffer, size_t length) {
             : QUEST_AUDIO_FRAMES - write_index;
         memcpy(&sSamples[write_index * 2u], source,
                first_count * 2u * sizeof(int16_t));
+        voice_chat_mix_output(&sSamples[write_index * 2u], first_count);
         const uint32_t second_count = frames - first_count;
         if (second_count > 0) {
             memcpy(sSamples, source + first_count * 2u,
                    second_count * 2u * sizeof(int16_t));
+            voice_chat_mix_output(sSamples, second_count);
         }
     }
     atomic_store_explicit(&sWriteFrame, write + frames, memory_order_release);
@@ -105,6 +109,7 @@ static void quest_audio_play(const uint8_t *buffer, size_t length) {
 
 static void quest_audio_shutdown(void) {
     if (!sInitialized) return;
+    voice_chat_shutdown();
     ma_device_uninit(&sDevice);
     sInitialized = false;
 }

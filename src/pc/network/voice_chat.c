@@ -37,6 +37,7 @@ static bool sCapable[MAX_PLAYERS];
 static bool sMuted[MAX_PLAYERS];
 static u8 sSpeakingFrames[MAX_PLAYERS];
 static f32 sCapabilityTimer;
+static u32 sCaptureRetryFrames;
 
 bool voice_chat_session_allowed(void) {
     return gNetworkType != NT_NONE && gNetworkPlayerLocal != NULL &&
@@ -192,7 +193,7 @@ static void voice_send_frame(const s16* samples) {
         if (scaled < -32768) scaled = -32768;
         encoded[i] = mulaw_encode((s16)scaled);
     }
-    for (u32 i = 1; i < MAX_PLAYERS; i++) {
+    for (u32 i = 0; i < MAX_PLAYERS; i++) {
         struct NetworkPlayer* player = &gNetworkPlayers[i];
         if (!player->connected || player == gNetworkPlayerLocal ||
             player->globalIndex >= MAX_PLAYERS || !sCapable[player->globalIndex]) continue;
@@ -220,6 +221,12 @@ void voice_chat_update(void) {
         wasAllowed = false;
         atomic_store(&sCaptureRead, atomic_load(&sCaptureWrite));
         return;
+    }
+    if (!sCaptureInitialized && ++sCaptureRetryFrames >= 150) {
+        sCaptureRetryFrames = 0;
+        voice_chat_init();
+    } else if (sCaptureInitialized) {
+        sCaptureRetryFrames = 0;
     }
     if (!wasAllowed) {
         voice_send_capability();
