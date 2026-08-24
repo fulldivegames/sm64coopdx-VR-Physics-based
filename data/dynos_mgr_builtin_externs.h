@@ -1558,6 +1558,7 @@ extern ALIGNED8 const Texture texture_font_jp[];
 extern ALIGNED8 const Texture texture_font_jp_aliased[];
 extern ALIGNED8 const Texture texture_coopdx_logo[];
 extern ALIGNED8 const Texture texture_ping_empty[];
+extern ALIGNED8 const Texture texture_voice_speaking[];
 extern ALIGNED8 const Texture texture_ping_one[];
 extern ALIGNED8 const Texture texture_ping_two[];
 extern ALIGNED8 const Texture texture_ping_three[];
