@@ -81,6 +81,8 @@ enum PacketType {
     // Physics-based VR extension. Only emitted inside the isolated VR lobby
     // channel, where both peers advertise the same built-in protocol.
     PACKET_VR_PHYSICAL_HIT,
+    PACKET_VR_VOICE_CAPABILITY,
+    PACKET_VR_VOICE_AUDIO,
 
     ///
     PACKET_CUSTOM = 255,
@@ -239,6 +241,10 @@ void network_receive_custom(struct Packet* p);
 // packet_vr_physical_hit.c
 void network_send_vr_player_hit(u8 victimGlobalIndex, s16 attackYaw, u8 attackType);
 void network_receive_vr_physical_hit(struct Packet* p);
+
+// voice_chat.c
+void voice_chat_receive_capability(struct Packet* p);
+void voice_chat_receive_audio(struct Packet* p);
 
 // packet_chat.c
 void network_send_chat(char* message, u8 globalIndex);

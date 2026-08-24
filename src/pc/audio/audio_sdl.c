@@ -1,8 +1,11 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include <SDL2/SDL.h>
 
 #include "audio_api.h"
+#include "pc/network/voice_chat.h"
 
 static SDL_AudioDeviceID dev;
 
@@ -25,6 +28,7 @@ static bool audio_sdl_init(void) {
         return false;
     }
     SDL_PauseAudioDevice(dev, 0);
+    voice_chat_init();
     return true;
 }
 
@@ -38,13 +42,23 @@ static int audio_sdl_get_desired_buffered(void) {
 
 static void audio_sdl_play(const uint8_t *buf, size_t len) {
     if (audio_sdl_buffered() < 6000) {
-        // Don't fill the audio buffer too much in case this happens
-        SDL_QueueAudio(dev, buf, len);
+        static uint8_t* mixed = NULL;
+        static size_t capacity = 0;
+        if (capacity < len) {
+            void* resized = realloc(mixed, len);
+            if (resized == NULL) return;
+            mixed = resized;
+            capacity = len;
+        }
+        memcpy(mixed, buf, len);
+        voice_chat_mix_output((s16*)mixed, len / 4u);
+        SDL_QueueAudio(dev, mixed, len);
     }
 }
 
 static void audio_sdl_shutdown(void)
 {
+    voice_chat_shutdown();
     if (SDL_WasInit(SDL_INIT_AUDIO)) {
         if (dev != 0) {
             SDL_CloseAudioDevice(dev);

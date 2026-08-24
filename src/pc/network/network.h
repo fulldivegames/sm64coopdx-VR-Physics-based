@@ -8,6 +8,7 @@
 #include "network_player.h"
 #include "network_utils.h"
 #include "packets/packet.h"
+#include "voice_chat.h"
 #include "sync_object.h"
 #include "pc/utils/string_linked_list.h"
 #include "../cliopts.h"

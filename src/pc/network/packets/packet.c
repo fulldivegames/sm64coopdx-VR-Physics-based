@@ -94,6 +94,8 @@ void packet_process(struct Packet* p) {
         case PACKET_COMMAND:                 network_receive_chat_command(p);            break;
         case PACKET_MODERATOR:               network_receive_moderator(p);               break;
         case PACKET_VR_PHYSICAL_HIT:          network_receive_vr_physical_hit(p);          break;
+        case PACKET_VR_VOICE_CAPABILITY:      voice_chat_receive_capability(p);            break;
+        case PACKET_VR_VOICE_AUDIO:           voice_chat_receive_audio(p);                 break;
         case PACKET_KEEP_ALIVE:              network_receive_keep_alive(p);              break;
         case PACKET_LEAVING:                 network_receive_leaving(p);                 break;
         case PACKET_SAVE_FILE:               network_receive_save_file(p);               break;

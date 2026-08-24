@@ -275,6 +275,10 @@ unsigned int configEnvVolume                      = MAX_VOLUME;
 bool         configFadeoutDistantSounds           = false;
 bool         configMuteFocusLoss                  = false;
 unsigned int configSoundOutput                    = 0; // 0 = Stereo, 1 = Mono, 2 = Headset
+bool         configVoiceMicMuted                  = false;
+unsigned int configVoiceMicLevel                  = 100;
+unsigned int configVoicePlayerVolume              = 100;
+unsigned int configVoiceMicDevice                 = 0;
 // control binds
 static const unsigned int defaultConfigKeyA[MAX_BINDS]          = { 0x0026,     0x1000,     0x1103     };
 static const unsigned int defaultConfigKeyB[MAX_BINDS]          = { 0x0033,     0x1001,     0x1101     };
@@ -573,6 +577,10 @@ static const struct ConfigOption options[] = {
     {.name = "fade_distant_sounds",            .type = CONFIG_TYPE_BOOL, .boolValue = &configFadeoutDistantSounds},
     {.name = "mute_focus_loss",                .type = CONFIG_TYPE_BOOL, .boolValue = &configMuteFocusLoss},
     {.name = "sound_output",                   .type = CONFIG_TYPE_UINT, .uintValue = &configSoundOutput},
+    {.name = "voice_mic_muted",                .type = CONFIG_TYPE_BOOL, .boolValue = &configVoiceMicMuted},
+    {.name = "voice_mic_level",                .type = CONFIG_TYPE_UINT, .uintValue = &configVoiceMicLevel},
+    {.name = "voice_player_volume",            .type = CONFIG_TYPE_UINT, .uintValue = &configVoicePlayerVolume},
+    {.name = "voice_mic_device",               .type = CONFIG_TYPE_UINT, .uintValue = &configVoiceMicDevice},
     // control binds
     {.name = "key_a",                          .type = CONFIG_TYPE_BIND, .uintValue = configKeyA},
     {.name = "key_b",                          .type = CONFIG_TYPE_BIND, .uintValue = configKeyB},

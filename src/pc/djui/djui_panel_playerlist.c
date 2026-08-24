@@ -4,6 +4,7 @@
 #include "djui_panel.h"
 #include "djui_panel_menu.h"
 #include "djui_panel_playerlist.h"
+#include "pc/network/voice_chat.h"
 #include "djui_panel_modlist.h"
 #include "game/level_info.h"
 #include "game/mario_misc.h"
@@ -180,6 +181,30 @@ void djui_panel_playerlist_create(UNUSED struct DjuiBase* caller) {
     }
 }
 
+static void djui_panel_playerlist_toggle_voice_mute(struct DjuiBase* caller) {
+    if (caller == NULL || caller->tag < 0 || caller->tag >= MAX_PLAYERS) return;
+    u8 globalIndex = (u8)caller->tag;
+    voice_chat_set_player_muted(globalIndex,
+        !voice_chat_player_muted(globalIndex));
+}
+
+static void djui_panel_playerlist_voice_row_render(struct DjuiBase* base,
+                                                   UNUSED bool* unused) {
+    if (base == NULL || base->tag < 0 || base->tag >= MAX_PLAYERS) return;
+    struct NetworkPlayer* np = network_player_from_global_index((u8)base->tag);
+    if (np == NULL || !np->connected) return;
+    const char* location = np->overrideLocation[0] == '\0'
+        ? get_level_name(np->currCourseNum, np->currLevelNum, np->currAreaIndex)
+        : np->overrideLocation;
+    char row[256];
+    snprintf(row, sizeof(row), "%s%s  |  %s  |  %d ms  |  %s",
+        voice_chat_player_speaking(np->globalIndex) ? "|))) " : "",
+        np->name, location, np->ping,
+        voice_chat_player_muted(np->globalIndex)
+            ? "MUTED (select to unmute)" : "Select to mute");
+    djui_text_set_text(((struct DjuiButton*)base)->text, row);
+}
+
 void djui_panel_playerlist_menu_create(struct DjuiBase* caller) {
     struct DjuiThreePanel* panel =
         djui_panel_menu_create(DLANG(PLAYER_LIST, PLAYERS), false);
@@ -209,18 +234,23 @@ void djui_panel_playerlist_menu_create(struct DjuiBase* caller) {
             location,
             np->ping
         );
-        struct DjuiText* text = djui_text_create(body, row);
-        djui_base_set_size_type(
-            &text->base,
-            DJUI_SVT_RELATIVE,
-            DJUI_SVT_ABSOLUTE
-        );
-        djui_base_set_size(&text->base, 1.0f, 32.0f);
-        djui_text_set_alignment(
-            text,
-            DJUI_HALIGN_LEFT,
-            DJUI_VALIGN_CENTER
-        );
+        if (np == gNetworkPlayerLocal) {
+            strncat(row, "  |  You", sizeof(row) - strlen(row) - 1);
+            struct DjuiText* text = djui_text_create(body, row);
+            djui_base_set_size_type(&text->base, DJUI_SVT_RELATIVE, DJUI_SVT_ABSOLUTE);
+            djui_base_set_size(&text->base, 1.0f, 32.0f);
+            djui_text_set_alignment(text, DJUI_HALIGN_LEFT, DJUI_VALIGN_CENTER);
+        } else {
+            strncat(row, voice_chat_player_muted(np->globalIndex)
+                ? "  |  MUTED (select to unmute)"
+                : "  |  Select to mute",
+                sizeof(row) - strlen(row) - 1);
+            struct DjuiButton* button = djui_button_create(
+                body, row, DJUI_BUTTON_STYLE_NORMAL,
+                djui_panel_playerlist_toggle_voice_mute);
+            button->base.tag = np->globalIndex;
+            button->base.on_render_pre = djui_panel_playerlist_voice_row_render;
+        }
         connected++;
     }
     if (connected == 0) {
@@ -237,5 +267,7 @@ void djui_panel_playerlist_menu_create(struct DjuiBase* caller) {
             DJUI_VALIGN_CENTER
         );
     }
+    djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK,
+                       djui_panel_menu_back);
     djui_panel_add(caller, panel, NULL);
 }
