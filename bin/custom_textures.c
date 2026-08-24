@@ -60,5 +60,5 @@ ALIGNED8 const Texture texture_ping_full[] = {
 };
 
 ALIGNED8 const Texture texture_voice_speaking[] = {
-#include "textures/segment2/custom_voice_speaking.rgba16.inc.c"
+#include "textures/segment2/custom_voice_speaking.rgba32.inc.c"
 };

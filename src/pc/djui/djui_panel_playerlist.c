@@ -266,9 +266,9 @@ void djui_panel_playerlist_menu_create(struct DjuiBase* caller) {
 
             struct DjuiImage* speaking = djui_image_create(
                 &voiceRow->base, texture_voice_speaking,
-                128, 64, G_IM_FMT_RGBA, G_IM_SIZ_16b);
+                64, 32, G_IM_FMT_RGBA, G_IM_SIZ_32b);
             djui_base_set_size_type(&speaking->base, DJUI_SVT_ABSOLUTE, DJUI_SVT_ABSOLUTE);
-            djui_base_set_size(&speaking->base, 120, 60);
+            djui_base_set_size(&speaking->base, 64, 32);
             djui_base_set_alignment(&speaking->base, DJUI_HALIGN_LEFT, DJUI_VALIGN_CENTER);
             djui_base_set_color(&speaking->base, 255, 255, 255, 128);
             djui_image_set_linear_filter(speaking, true);
