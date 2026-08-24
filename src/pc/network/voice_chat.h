@@ -19,3 +19,4 @@ bool voice_chat_session_allowed(void);
 u32 voice_chat_input_device_count(void);
 const char* voice_chat_input_device_name(u32 index);
 void voice_chat_select_input_device(u32 index);
+void voice_chat_set_capture_paused(bool paused);

@@ -719,7 +719,7 @@ BACKEND_LDFLAGS :=
 ifeq ($(WINDOWS_BUILD),1)
   DXBITS := `cat $(ENDIAN_BITWIDTH) | tr ' ' '\n' | tail -1`
   BACKEND_LDFLAGS += -ld3dcompiler -ldxgi -ldxguid
-  BACKEND_LDFLAGS += -lsetupapi -ldinput8 -luser32 -lgdi32 -limm32 -lole32 -loleaut32 -lshell32 -lwinmm -lversion -luuid -static
+  BACKEND_LDFLAGS += -lsetupapi -ldinput8 -luser32 -lgdi32 -limm32 -lole32 -loleaut32 -lsapi -lshell32 -lwinmm -lversion -luuid -static
 endif
 
 # SDL2 Flags
@@ -750,7 +750,7 @@ else
 endif
 
 ifeq ($(WINDOWS_BUILD),1)
-  BACKEND_LDFLAGS += `$(SDLCONFIG) --static-libs` -lsetupapi -luser32 -limm32 -lole32 -loleaut32 -lshell32 -lshlwapi -lwinmm -lversion
+  BACKEND_LDFLAGS += `$(SDLCONFIG) --static-libs` -lsetupapi -luser32 -limm32 -lole32 -loleaut32 -lsapi -lshell32 -lshlwapi -lwinmm -lversion
 else
   BACKEND_LDFLAGS += `$(SDLCONFIG) --libs`
 endif

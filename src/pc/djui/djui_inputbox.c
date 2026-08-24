@@ -8,6 +8,15 @@
 #include "pc/pc_main.h"
 #include "game/segment2.h"
 #include "pc/controller/controller_keyboard.h"
+#include "pc/network/voice_chat.h"
+
+#ifdef __ANDROID__
+extern bool quest_speech_recognition_start(void);
+extern bool quest_speech_recognition_poll(char* text, size_t textSize);
+extern bool quest_speech_recognition_is_listening(void);
+#elif defined(_WIN32)
+#include "pc/pc_speech_input.h"
+#endif
 
 #define DJUI_INPUTBOX_YOFF (-3)
 #define DJUI_INPUTBOX_MAX_BLINK 50
@@ -31,6 +40,7 @@ enum DjuiKeyboardAction {
     DJUI_KEY_LEFT,
     DJUI_KEY_RIGHT,
     DJUI_KEY_DELETE,
+    DJUI_KEY_MICROPHONE,
 };
 
 struct DjuiKeyboardKey {
@@ -88,6 +98,9 @@ static const struct DjuiKeyboardKey sKeyboardRow3[] = {
 };
 
 static const struct DjuiKeyboardKey sKeyboardRow4[] = {
+#if defined(__ANDROID__) || defined(_WIN32)
+    KEY_WIDE("Mic", 1.4f, DJUI_KEY_MICROPHONE),
+#endif
     KEY_WIDE("Cancel", 2.0f, DJUI_KEY_ESCAPE),
     KEY_WIDE("Space", 8.8f, DJUI_KEY_SPACE),
     KEY_WIDE("Left", 1.3f, DJUI_KEY_LEFT),
@@ -119,6 +132,38 @@ static u8 sKeyboardHeldFrames;
 static u8 sKeyboardHeldActionFrames;
 static bool sKeyboardShift;
 static bool sKeyboardCaps;
+static bool sKeyboardDictationActive;
+
+static void djui_keyboard_dictation_finish(bool cancel) {
+    if (!sKeyboardDictationActive) return;
+#ifdef __ANDROID__
+    if (cancel && quest_speech_recognition_is_listening()) {
+        quest_speech_recognition_start();
+    }
+#elif defined(_WIN32)
+    if (cancel) pc_speech_recognition_cancel();
+#else
+    (void)cancel;
+#endif
+    sKeyboardDictationActive = false;
+    voice_chat_set_capture_paused(false);
+}
+
+static void djui_keyboard_dictation_start(void) {
+    if (sKeyboardDictationActive) {
+        djui_keyboard_dictation_finish(true);
+        return;
+    }
+    voice_chat_set_capture_paused(true);
+#ifdef __ANDROID__
+    sKeyboardDictationActive = quest_speech_recognition_start();
+#elif defined(_WIN32)
+    sKeyboardDictationActive = pc_speech_recognition_start();
+#else
+    sKeyboardDictationActive = false;
+#endif
+    if (!sKeyboardDictationActive) voice_chat_set_capture_paused(false);
+}
 
 static const struct DjuiKeyboardKey* djui_keyboard_selected_key(void) {
     const struct DjuiKeyboardRow* row = &sKeyboardRows[sKeyboardRow];
@@ -231,6 +276,9 @@ static void djui_keyboard_type_selected(void) {
         case DJUI_KEY_DELETE:
             djui_interactable_on_key_down(SCANCODE_DELETE);
             break;
+        case DJUI_KEY_MICROPHONE:
+            djui_keyboard_dictation_start();
+            break;
     }
 }
 
@@ -243,7 +291,8 @@ static bool djui_keyboard_selected_key_repeats(void) {
     return action != DJUI_KEY_ESCAPE &&
            action != DJUI_KEY_CAPS &&
            action != DJUI_KEY_ENTER &&
-           action != DJUI_KEY_SHIFT;
+           action != DJUI_KEY_SHIFT &&
+           action != DJUI_KEY_MICROPHONE;
 }
 
 bool djui_inputbox_onscreen_keyboard_is_active(void) {
@@ -254,7 +303,28 @@ bool djui_inputbox_onscreen_keyboard_is_active(void) {
 void djui_inputbox_onscreen_keyboard_update(OSContPad* pad, u16 pressed) {
     if (!djui_inputbox_onscreen_keyboard_is_active() || pad == NULL) return;
 
+    if (sKeyboardDictationActive) {
+        char speechText[512] = { 0 };
+        bool ready = false;
+#ifdef __ANDROID__
+        ready = quest_speech_recognition_poll(speechText, sizeof(speechText));
+        const bool listening = quest_speech_recognition_is_listening();
+#elif defined(_WIN32)
+        ready = pc_speech_recognition_poll(speechText, sizeof(speechText));
+        const bool listening = pc_speech_recognition_is_listening();
+#else
+        const bool listening = false;
+#endif
+        if (ready) {
+            djui_interactable_on_text_input(speechText);
+            djui_keyboard_dictation_finish(false);
+        } else if (!listening) {
+            djui_keyboard_dictation_finish(false);
+        }
+    }
+
     if (pressed & PAD_BUTTON_B) {
+        djui_keyboard_dictation_finish(true);
         djui_interactable_on_key_down(SCANCODE_ESCAPE);
         return;
     }
@@ -403,7 +473,10 @@ void djui_inputbox_onscreen_keyboard_render(void) {
     }
 
     djui_hud_set_color(154, 177, 204, 255);
-    djui_hud_print_text("Stick/D-pad: Select   A: Type   B: Cancel",
+    const char* helpText = sKeyboardDictationActive
+        ? "Listening... speak now   B: Cancel"
+        : "Stick/D-pad: Select   A: Type   B: Cancel";
+    djui_hud_print_text(helpText,
                         panelX + 16.0f, panelY + panelHeight - 16.0f,
                         0.38f, 0.38f);
     gDPPipeSync(gDisplayListHead++);
@@ -747,6 +820,7 @@ void djui_inputbox_on_focus_begin(struct DjuiBase* base) {
 }
 
 void djui_inputbox_on_focus_end(UNUSED struct DjuiBase* base) {
+    djui_keyboard_dictation_finish(true);
     sKeyboardTarget = NULL;
     sKeyboardHeldDirection = 0;
     sKeyboardHeldFrames = 0;
