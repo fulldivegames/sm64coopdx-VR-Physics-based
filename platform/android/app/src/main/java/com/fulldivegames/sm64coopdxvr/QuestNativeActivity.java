@@ -11,6 +11,7 @@ import android.os.Build;
 import android.os.Environment;
 import android.provider.Settings;
 import android.speech.RecognitionListener;
+import android.speech.ModelDownloadListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.util.Log;
@@ -57,6 +58,7 @@ public final class QuestNativeActivity extends NativeActivity {
     private boolean requestedSharedStorageAccess;
     private SpeechRecognizer speechRecognizer;
     private boolean speechListening;
+    private boolean speechModelDownloadRequested;
 
     private static native void nativeOnSpeechRecognitionResult(String text);
     private static native void nativeOnSpeechRecognitionState(boolean listening);
@@ -154,6 +156,9 @@ public final class QuestNativeActivity extends NativeActivity {
                     speechListening = false;
                     nativeOnSpeechRecognitionState(false);
                     Log.w(TAG, "Dictation failed with speech error " + error);
+                    if (error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) {
+                        requestSpeechModelDownload();
+                    }
                 }
                 @Override public void onResults(Bundle results) {
                     speechListening = false;
@@ -168,13 +173,7 @@ public final class QuestNativeActivity extends NativeActivity {
                 @Override public void onEvent(int eventType, Bundle params) { }
             });
         }
-        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE,
-                Locale.getDefault().toLanguageTag());
-        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
-        intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
+        Intent intent = createSpeechRecognitionIntent();
         try {
             speechListening = true;
             nativeOnSpeechRecognitionState(true);
@@ -183,6 +182,76 @@ public final class QuestNativeActivity extends NativeActivity {
             speechListening = false;
             nativeOnSpeechRecognitionState(false);
             Log.e(TAG, "Could not start dictation", exception);
+        }
+    }
+
+    private Intent createSpeechRecognitionIntent() {
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE,
+                Locale.getDefault().toLanguageTag());
+        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
+        intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
+        return intent;
+    }
+
+    private void requestSpeechModelDownload() {
+        if (Build.VERSION.SDK_INT < 33 || speechRecognizer == null) {
+            Toast.makeText(this,
+                    "Quest dictation needs an English speech model that is not installed.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (speechModelDownloadRequested) {
+            Toast.makeText(this,
+                    "Quest is still preparing the English dictation model.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        speechModelDownloadRequested = true;
+        Intent intent = createSpeechRecognitionIntent();
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                speechRecognizer.triggerModelDownload(intent, getMainExecutor(),
+                        new ModelDownloadListener() {
+                            @Override public void onProgress(int completedPercent) { }
+
+                            @Override public void onSuccess() {
+                                speechModelDownloadRequested = false;
+                                Toast.makeText(QuestNativeActivity.this,
+                                        "Dictation is ready. Press Mic again.",
+                                        Toast.LENGTH_LONG).show();
+                            }
+
+                            @Override public void onScheduled() {
+                                Toast.makeText(QuestNativeActivity.this,
+                                        "Quest scheduled the English dictation model download.",
+                                        Toast.LENGTH_LONG).show();
+                            }
+
+                            @Override public void onError(int error) {
+                                speechModelDownloadRequested = false;
+                                Log.w(TAG, "Speech model download failed with error " + error);
+                                Toast.makeText(QuestNativeActivity.this,
+                                        "Quest could not download its dictation model.",
+                                        Toast.LENGTH_LONG).show();
+                            }
+                        });
+            } else {
+                speechRecognizer.triggerModelDownload(intent);
+                Toast.makeText(this,
+                        "Quest requested the English dictation model. Try Mic again shortly.",
+                        Toast.LENGTH_LONG).show();
+            }
+        } catch (RuntimeException exception) {
+            speechModelDownloadRequested = false;
+            Log.e(TAG, "Could not request speech model download", exception);
+            Toast.makeText(this,
+                    "Quest could not request its dictation model.",
+                    Toast.LENGTH_LONG).show();
         }
     }
 
