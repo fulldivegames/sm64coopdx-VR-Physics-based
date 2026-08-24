@@ -17,7 +17,7 @@
 #include "pc/loading.h"
 
 #define VR_UPDATE_API_URL \
-    "https://api.github.com/repos/fulldivegames/sm64coopdx-VR/releases/latest"
+    "https://api.github.com/repos/fulldivegames/sm64coopdx-VR-Physics-based/releases/latest"
 #define VR_UPDATE_RESPONSE_LIMIT (512 * 1024)
 #define VR_UPDATE_VERSION_MAX 32
 
