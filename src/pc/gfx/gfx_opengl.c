@@ -51,7 +51,7 @@
 #if defined(__ANDROID__)
 #define SHADER_BINARY_CACHE_MAGIC 0x534D5652u
 // Increment whenever generated GLSL or the on-disk format changes.
-#define SHADER_BINARY_CACHE_VERSION 6u
+#define SHADER_BINARY_CACHE_VERSION 7u
 #define SHADER_BINARY_CACHE_MAX_BYTES (1024u * 1024u)
 
 struct ShaderBinaryCacheHeader {
@@ -819,19 +819,26 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     append_line(fs_buf, &fs_len, "uniform int uVrColorFilter;");
     append_line(fs_buf, &fs_len, "vec3 applyVrColorFilter(vec3 color, int mode) {");
     append_line(fs_buf, &fs_len, "    float luma = dot(clamp(color, 0.0, 1.0), vec3(0.299, 0.587, 0.114));");
-    append_line(fs_buf, &fs_len, "    float edgeStrength = mode == 2 ? 3.25 : 2.25;");
-    append_line(fs_buf, &fs_len, "    luma = clamp(luma - min(fwidth(luma) * edgeStrength, 0.18), 0.0, 1.0);");
+    append_line(fs_buf, &fs_len, "    // Lift dark midtones so actors remain readable without treating low-resolution texture texels as outlines.");
+    append_line(fs_buf, &fs_len, "    float tone = pow(luma, mode == 2 ? 0.72 : 0.80);");
+    append_line(fs_buf, &fs_len, "    float ramp = clamp(tone * 3.0, 0.0, 3.0);");
     append_line(fs_buf, &fs_len, "    if (mode == 1) {");
-    append_line(fs_buf, &fs_len, "        if (luma < 0.25) return vec3(0.0, 0.0, 0.0);");
-    append_line(fs_buf, &fs_len, "        if (luma < 0.50) return vec3(0.33, 0.0, 0.0);");
-    append_line(fs_buf, &fs_len, "        if (luma < 0.75) return vec3(0.67, 0.0, 0.0);");
-    append_line(fs_buf, &fs_len, "        return vec3(1.0, 0.0, 0.0);");
+    append_line(fs_buf, &fs_len, "        vec3 p0 = vec3(0.0, 0.0, 0.0);");
+    append_line(fs_buf, &fs_len, "        vec3 p1 = vec3(0.33, 0.0, 0.0);");
+    append_line(fs_buf, &fs_len, "        vec3 p2 = vec3(0.67, 0.0, 0.0);");
+    append_line(fs_buf, &fs_len, "        vec3 p3 = vec3(1.0, 0.0, 0.0);");
+    append_line(fs_buf, &fs_len, "        if (ramp < 1.0) return mix(p0, p1, smoothstep(0.0, 1.0, ramp));");
+    append_line(fs_buf, &fs_len, "        if (ramp < 2.0) return mix(p1, p2, smoothstep(1.0, 2.0, ramp));");
+    append_line(fs_buf, &fs_len, "        return mix(p2, p3, smoothstep(2.0, 3.0, ramp));");
     append_line(fs_buf, &fs_len, "    }");
     append_line(fs_buf, &fs_len, "    if (mode == 2) {");
-    append_line(fs_buf, &fs_len, "        if (luma < 0.25) return vec3(0.0588, 0.2196, 0.0588);");
-    append_line(fs_buf, &fs_len, "        if (luma < 0.50) return vec3(0.1882, 0.3843, 0.1882);");
-    append_line(fs_buf, &fs_len, "        if (luma < 0.75) return vec3(0.5451, 0.6745, 0.0588);");
-    append_line(fs_buf, &fs_len, "        return vec3(0.6078, 0.7373, 0.0588);");
+    append_line(fs_buf, &fs_len, "        vec3 p0 = vec3(0.0588, 0.2196, 0.0588);");
+    append_line(fs_buf, &fs_len, "        vec3 p1 = vec3(0.1882, 0.3843, 0.1882);");
+    append_line(fs_buf, &fs_len, "        vec3 p2 = vec3(0.5451, 0.6745, 0.0588);");
+    append_line(fs_buf, &fs_len, "        vec3 p3 = vec3(0.6078, 0.7373, 0.0588);");
+    append_line(fs_buf, &fs_len, "        if (ramp < 1.0) return mix(p0, p1, smoothstep(0.0, 1.0, ramp));");
+    append_line(fs_buf, &fs_len, "        if (ramp < 2.0) return mix(p1, p2, smoothstep(1.0, 2.0, ramp));");
+    append_line(fs_buf, &fs_len, "        return mix(p2, p3, smoothstep(2.0, 3.0, ramp));");
     append_line(fs_buf, &fs_len, "    }");
     append_line(fs_buf, &fs_len, "    return color;");
     append_line(fs_buf, &fs_len, "}");

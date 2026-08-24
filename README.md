@@ -13,7 +13,7 @@
   Native ARM64/OpenXR VR for Meta Quest. No PC is required after installation.
 </p>
 
-> **Current public release: v0.7.7 — Multiplayer Update**
+> **Current public release: v0.7.9 — Voice Chat and Filters Update**
 
 > [!WARNING]
 > This is an active, vibe-coded, yet fairly polished fan project. The standalone edition has been tested on **Meta Quest 3 only**. It has **not been tested on Quest 2 by me**, and neither edition has been tested across every multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur. If you have any performance issues on default settings in the base game, a reset usually fixes things (You should be getting a stable 120 FPS on Quest 3, on most if not all base game maps)
@@ -27,6 +27,12 @@
 This is an unofficial, unauthorized fan build and is not endorsed by the SM64 Co-Op DX or Nintendo teams. **Public VR Lobbies** are intended for this project's Quest standalone and PC VR builds. **Regular Public Lobbies** use the compatible Android public directory; all VR cheats and power-ups/special moves are disabled there. Play regular public lobbies at your own risk and follow the server rules. Private lobbies and direct connections remain available for invited cross-platform sessions.
 
 VR nametags are disabled by default in v0.7.7 because their world-space placement still needs additional work. They can be enabled manually in the multiplayer HUD settings for testing.
+
+### Voice chat
+
+Compatible Quest standalone and PC VR clients include built-in voice chat for Public VR Lobbies and supported private/direct sessions. It also works for flat-screen players using the matching PC build. Quest always uses the headset microphone.
+
+Open **Server Settings > Voice Chat** to enable or disable voice chat, mute your microphone, adjust microphone level, or adjust other-player volume. The **Players** menu supports individual two-way mutes and shows a speaker icon beside players who are actively speaking. The on-screen keyboard's microphone button can also dictate speech into the active text field. This project's voice traffic is not sent in Regular Public Lobbies.
 
 This repository contains the standalone Android/Quest port of [sm64coopdx-VR (Physics-based)](https://github.com/fulldivegames/sm64coopdx-VR-Physics-based), derived from [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx). It runs the game natively on the headset through OpenXR and OpenGL ES while retaining the original project's multiplayer foundation, Lua/mod support where compatible, first- and third-person cameras, tracked hands, and physical VR interactions.
 There are videos on my YouTube channel: https://www.youtube.com/@fulldivegames667 that show off the mod.
@@ -263,7 +269,19 @@ Painting entries use a short white comfort fade. The optional True First Person 
 - Online co-op has not been comprehensively validated across every player count, mod combination, or network condition.
 - Large Lua mods, model packs, ROM hacks, and texture packs may exceed standalone memory/performance budgets or rely on desktop-only behavior.
 
-## v0.7.2 — Boss Combat, Spawn Tools, and Camera Fixes
+When **WiddlePets** is enabled, Server Settings adds a **Pets** button that opens the mod's own `/wpets` pet-selection menu. Pet choice, spawning, and following behavior remain controlled by WiddlePets itself.
+
+## v0.7.9 — Voice Chat and Filters Update
+
+- Added built-in voice chat for compatible Quest and PC VR clients, including Quest headset-mic support, microphone and player-volume controls, and a master voice-chat toggle
+- Added individual two-way player muting, an active-speaker icon in the Players menu, and microphone dictation for the controller-operated keyboard
+- Added the approved **Virtual Boy** and **Game Boy** full-scene filters with improved actor visibility while leaving normal rendering unchanged
+- Added a conditional **Pets** shortcut to Server Settings when WiddlePets is active; it opens the mod's real pet-selection and following menu
+- Hardened Rasengan and Rasen-Shuriken model lookup for ROM hacks such as B3313 without changing their charge, combat, physics, or visual behavior
+
+## Previous Release Notes
+
+### v0.7.2 — Boss Combat, Spawn Tools, and Camera Fixes
 
 - Added **Cheats > Spawn Menu** with Wing Cap, Vanish Cap, Metal Cap, and Fire Flower buttons while retaining the complete scrollable Level Select
 - Expanded Rasengan and Rasen-Shuriken interactions across giant Goombas, Pokeys, breakable boxes, Whomps, King Whomp, and King Bob-omb while preserving protected actors and native boss progression
@@ -275,8 +293,6 @@ Painting entries use a short white comfort fade. The optional True First Person 
 - Raised cork-box Fire Flower odds to 30%, retained 50% supported item-box odds, and kept the smaller pickup presentation
 - Added the 44-color quick palette selector with reliable controller scrolling, direct RGB/hex application, persistent custom presets, and an editable **Fireflower** power-up palette
 - Kept headset/player damage contact synchronized, narrowed physical anchoring to intended actors, and slightly extended the default punch reach without limiting its slider
-
-## Previous Release Notes
 
 ### v0.7.1 — Special Moves and Level Select Update
 

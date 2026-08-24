@@ -29,6 +29,16 @@ static void djui_panel_client_character_select(UNUSED struct DjuiBase* caller) {
     queue_chat_command("/char-select menu");
 }
 
+static void djui_panel_client_widdle_pets(UNUSED struct DjuiBase* caller) {
+    if (!gGameInited) {
+        djui_chat_message_create("Start a game before opening Pets.");
+        return;
+    }
+    game_unpause();
+    djui_panel_shutdown();
+    queue_chat_command("/wpets");
+}
+
 void djui_panel_client_server_settings_create(struct DjuiBase* caller) {
     struct DjuiThreePanel* panel = djui_panel_menu_create(DLANG(HOST_SETTINGS, SETTINGS), false);
     struct DjuiBase* body = djui_three_panel_get_body(panel);
@@ -90,6 +100,9 @@ void djui_panel_client_server_settings_create(struct DjuiBase* caller) {
 
         if (smlua_chat_command_exists("char-select")) {
             djui_button_create(body, "Character Select", DJUI_BUTTON_STYLE_NORMAL, djui_panel_client_character_select);
+        }
+        if (smlua_chat_command_exists("wpets")) {
+            djui_button_create(body, "Pets", DJUI_BUTTON_STYLE_NORMAL, djui_panel_client_widdle_pets);
         }
         djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK, djui_panel_menu_back);
     }

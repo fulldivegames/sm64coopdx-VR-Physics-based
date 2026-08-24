@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "actors/common1.h"
 #include "audio/external.h"
 #include "behavior_data.h"
 #include "characters.h"
@@ -22,6 +23,7 @@
 #include "surface_terrains.h"
 #include "vr_hand_interaction.h"
 
+#include "data/dynos.c.h"
 #include "pc/configfile.h"
 #include "pc/djui/djui.h"
 #include "pc/lua/smlua_hooks.h"
@@ -350,6 +352,33 @@ static Vec3f sVrRasenganRememberedVelocity = { 0.0f, 0.0f, 0.0f };
 static struct Object* sVrRasenShurikenProjectile = NULL;
 static Vec3f sVrRasenShurikenVelocity = { 0.0f, 0.0f, 0.0f };
 static u16 sVrRasenShurikenProjectileFrames = 0;
+
+// ROM hacks can reuse the high fixed model slots assigned to VR effects.
+// Resolve these two built-in geos by their permanent asset instead of by slot
+// so a level pack cannot substitute incompatible geometry and crash on charge.
+static bool vr_special_moves_set_rasengan_model(
+    struct Object* object,
+    bool rasenShuriken
+) {
+    if (object == NULL) {
+        return false;
+    }
+    u32 modelId = 0;
+    const GeoLayout* geo = rasenShuriken
+        ? vr_rasen_shuriken_geo
+        : vr_rasengan_geo;
+    struct GraphNode* graphNode = dynos_model_load_geo(
+        &modelId,
+        MODEL_POOL_PERMANENT,
+        (void*)geo,
+        true
+    );
+    if (graphNode == NULL) {
+        return false;
+    }
+    object->header.gfx.sharedChild = graphNode;
+    return true;
+}
 static u16 sVrRasenShurikenExplosionFrames = 0;
 static struct Object* sVrRasenShurikenHitTargets[
     VR_RASEN_SHURIKEN_TRACKED_TARGET_COUNT
@@ -7739,7 +7768,13 @@ static void vr_special_moves_rasen_shuriken_explode(
         sVrRasenShurikenHitContinuous[i] = false;
     }
     vec3f_set(sVrRasenShurikenVelocity, 0.0f, 0.0f, 0.0f);
-    obj_set_model(sVrRasenShurikenProjectile, MODEL_VR_RASENGAN);
+    if (!vr_special_moves_set_rasengan_model(
+            sVrRasenShurikenProjectile,
+            false
+        )) {
+        vr_special_moves_clear_rasengan();
+        return;
+    }
     obj_scale(
         sVrRasenShurikenProjectile,
         VR_RASEN_SHURIKEN_EXPLOSION_SCALE
@@ -7925,10 +7960,17 @@ static void vr_special_moves_launch_rasen_shuriken(
     }
     sVrRasenShurikenProjectile = spawn_object(
         mario->marioObj,
-        MODEL_VR_RASEN_SHURIKEN,
+        MODEL_NONE,
         bhvStaticObject
     );
     if (sVrRasenShurikenProjectile == NULL) {
+        return;
+    }
+    if (!vr_special_moves_set_rasengan_model(
+            sVrRasenShurikenProjectile,
+            true
+        )) {
+        vr_special_moves_delete_object(&sVrRasenShurikenProjectile);
         return;
     }
     for (u32 axis = 0; axis < 3; axis++) {
@@ -8127,10 +8169,17 @@ static bool vr_special_moves_update_rasengan_hand(
         if (sVrRasenganObject == NULL) {
             sVrRasenganObject = spawn_object(
                 mario->marioObj,
-                MODEL_VR_RASENGAN,
+                MODEL_NONE,
                 bhvStaticObject
             );
             if (sVrRasenganObject != NULL) {
+                if (!vr_special_moves_set_rasengan_model(
+                        sVrRasenganObject,
+                        false
+                    )) {
+                    vr_special_moves_delete_object(&sVrRasenganObject);
+                    return false;
+                }
                 sVrRasenganObject->oInteractType = 0;
                 vr_apply_haptic(
                     VR_CONTROLLER_RIGHT,
@@ -8165,9 +8214,9 @@ static bool vr_special_moves_update_rasengan_hand(
             !sVrRasenShurikenReady) {
             if (sVrRasenShurikenChargeFrames == 0 &&
                 sVrRasenganObject != NULL) {
-                obj_set_model(
+                vr_special_moves_set_rasengan_model(
                     sVrRasenganObject,
-                    MODEL_VR_RASEN_SHURIKEN
+                    true
                 );
             }
             if (sVrRasenShurikenChargeFrames < shurikenReadyFrames) {
@@ -8187,7 +8236,10 @@ static bool vr_special_moves_update_rasengan_hand(
             sVrRasenShurikenChargeFrames > 0) {
             sVrRasenShurikenChargeFrames = 0;
             if (sVrRasenganObject != NULL) {
-                obj_set_model(sVrRasenganObject, MODEL_VR_RASENGAN);
+                vr_special_moves_set_rasengan_model(
+                    sVrRasenganObject,
+                    false
+                );
             }
         }
 
