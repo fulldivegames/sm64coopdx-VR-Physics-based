@@ -11,6 +11,7 @@
 #include "pc/lua/smlua_hooks.h"
 #include "pc/lua/utils/smlua_misc_utils.h"
 #include "pc/pc_main.h"
+#include "djui_panel_voice_chat.h"
 
 static unsigned int sPlayerInteractions = 0;
 static unsigned int sKnockbackIndex = 0;
@@ -32,6 +33,8 @@ void djui_panel_client_server_settings_create(struct DjuiBase* caller) {
     struct DjuiThreePanel* panel = djui_panel_menu_create(DLANG(HOST_SETTINGS, SETTINGS), false);
     struct DjuiBase* body = djui_three_panel_get_body(panel);
     {
+        djui_button_create(body, "Voice Chat", DJUI_BUTTON_STYLE_NORMAL,
+                           djui_panel_voice_chat_create);
         sPlayerInteractions = gServerSettings.playerInteractions;
         char* iChoices[3] = { DLANG(HOST_SETTINGS, NONSOLID), DLANG(HOST_SETTINGS, SOLID), DLANG(HOST_SETTINGS, FRIENDLY_FIRE) };
         struct DjuiSelectionbox* selectionbox1 = djui_selectionbox_create(body, DLANG(HOST_SETTINGS, PLAYER_INTERACTION), iChoices, 3, &sPlayerInteractions, NULL);

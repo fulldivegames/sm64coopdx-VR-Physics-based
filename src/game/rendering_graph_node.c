@@ -4558,7 +4558,7 @@ void patch_mtx_vr_shared(void) {
                         Vec3s localRotation = {
                             (s16)0x8000,
                             0,
-                            (s16)0x0B00
+                            (s16)-0x0B00
                         };
                         Mat4 hammerMatrix;
                         mtxf_rotate_zxy_and_translate(
