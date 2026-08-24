@@ -3484,9 +3484,15 @@ s16 render_course_complete_screen(void) {
 s16 render_menus_and_dialogs(void) {
     s16 mode = 0;
 
-    if (vr_is_active() &&
-        (gMenuMode == 0 || gMenuMode == RENDER_PAUSE_SCREEN)) {
-        create_dl_vr_ui_matrix();
+    if (vr_is_active()) {
+        if (gMenuMode == 0 || gMenuMode == RENDER_PAUSE_SCREEN) {
+            create_dl_vr_ui_matrix();
+        } else {
+            // Dialogs, letters, and course-complete overlays belong with the
+            // HUD placement. HUD opacity/spread are applied elsewhere and do
+            // not affect this matrix.
+            create_dl_vr_hud_matrix();
+        }
     } else {
         create_dl_ortho_matrix();
     }

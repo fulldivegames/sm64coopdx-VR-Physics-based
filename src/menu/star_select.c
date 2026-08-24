@@ -353,7 +353,13 @@ void print_act_selector_strings(void) {
     s16 language = eu_get_language();
 #endif
 
-    create_dl_ortho_matrix();
+    if (vr_is_active()) {
+        // The act selector is an in-game overlay rather than an interactive
+        // VR menu, so only its placement follows the HUD anchor.
+        create_dl_vr_hud_matrix();
+    } else {
+        create_dl_ortho_matrix();
+    }
     if ((gOverrideHideActSelectHud & ACT_SELECT_HUD_SCORE) == 0) {
         // Print the coin highscore.
         gSPDisplayList(gDisplayListHead++, dl_rgba16_text_begin);

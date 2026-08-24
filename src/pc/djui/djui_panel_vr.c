@@ -2088,6 +2088,33 @@ static void djui_panel_vr_display_create(struct DjuiBase* caller) {
     djui_panel_add(caller, panel, NULL);
 }
 
+static void djui_panel_vr_filters_create(struct DjuiBase* caller) {
+    if (configVrColorFilter >= VR_COLOR_FILTER_COUNT) {
+        configVrColorFilter = VR_COLOR_FILTER_NONE;
+    }
+
+    struct DjuiThreePanel* panel =
+        djui_panel_menu_create("Filters", false);
+    struct DjuiBase* body = djui_three_panel_get_body(panel);
+    char* filterChoices[VR_COLOR_FILTER_COUNT] = {
+        "Off",
+        "Virtual Boy",
+        "Game Boy"
+    };
+
+    djui_selectionbox_create(
+        body,
+        "Color Filter",
+        filterChoices,
+        VR_COLOR_FILTER_COUNT,
+        &configVrColorFilter,
+        NULL
+    );
+    djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK,
+        djui_panel_menu_back);
+    djui_panel_add(caller, panel, NULL);
+}
+
 static void djui_panel_vr_special_create(struct DjuiBase* caller) {
     struct DjuiThreePanel* panel =
         djui_panel_menu_create("Special", false);
@@ -2097,6 +2124,8 @@ static void djui_panel_vr_special_create(struct DjuiBase* caller) {
         djui_panel_vr_experimental_create);
     djui_button_create(body, "Special Moves", DJUI_BUTTON_STYLE_NORMAL,
         djui_panel_vr_special_moves_create);
+    djui_button_create(body, "Filters", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_filters_create);
     djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK,
         djui_panel_menu_back);
     djui_panel_add(caller, panel, NULL);

@@ -43,7 +43,7 @@ struct ShaderProgram {
     bool used_textures[2];
     uint8_t num_floats;
     GLint attrib_locations[7];
-    GLint uniform_locations[9];
+    GLint uniform_locations[10];
     uint8_t attrib_sizes[7];
     uint8_t num_attribs;
     bool used_noise;
@@ -140,6 +140,7 @@ static inline void gfx_opengl_set_shader_uniforms(struct ShaderProgram *prg) {
             ? 1
             : configFiltering;
     glUniform1i(prg->uniform_locations[8], activeFiltering);
+    glUniform1i(prg->uniform_locations[9], (int)configVrColorFilter);
 }
 
 static inline void gfx_opengl_set_texture_uniforms(struct ShaderProgram *prg, const int tile) {
@@ -320,7 +321,7 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
 #endif
 
     char vs_buf[8192];
-    char fs_buf[8192];
+    char fs_buf[12288];
     size_t vs_len = 0;
     size_t fs_len = 0;
     size_t num_floats = 4;
@@ -375,6 +376,7 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     // Fragment shader
 #ifdef USE_GLES
     append_line(fs_buf, &fs_len, "#version 100");
+    append_line(fs_buf, &fs_len, "#extension GL_OES_standard_derivatives : enable");
     append_line(fs_buf, &fs_len, "precision mediump float;");
 #else
     append_line(fs_buf, &fs_len, "#version 120");
@@ -493,6 +495,25 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     }
 
     append_line(fs_buf, &fs_len, "uniform int uFilter;");
+    append_line(fs_buf, &fs_len, "uniform int uVrColorFilter;");
+    append_line(fs_buf, &fs_len, "vec3 applyVrColorFilter(vec3 color, int mode) {");
+    append_line(fs_buf, &fs_len, "    float luma = dot(clamp(color, 0.0, 1.0), vec3(0.299, 0.587, 0.114));");
+    append_line(fs_buf, &fs_len, "    float edgeStrength = mode == 2 ? 3.25 : 2.25;");
+    append_line(fs_buf, &fs_len, "    luma = clamp(luma - min(fwidth(luma) * edgeStrength, 0.18), 0.0, 1.0);");
+    append_line(fs_buf, &fs_len, "    if (mode == 1) {");
+    append_line(fs_buf, &fs_len, "        if (luma < 0.25) return vec3(0.0, 0.0, 0.0);");
+    append_line(fs_buf, &fs_len, "        if (luma < 0.50) return vec3(0.33, 0.0, 0.0);");
+    append_line(fs_buf, &fs_len, "        if (luma < 0.75) return vec3(0.67, 0.0, 0.0);");
+    append_line(fs_buf, &fs_len, "        return vec3(1.0, 0.0, 0.0);");
+    append_line(fs_buf, &fs_len, "    }");
+    append_line(fs_buf, &fs_len, "    if (mode == 2) {");
+    append_line(fs_buf, &fs_len, "        if (luma < 0.25) return vec3(0.0588, 0.2196, 0.0588);");
+    append_line(fs_buf, &fs_len, "        if (luma < 0.50) return vec3(0.1882, 0.3843, 0.1882);");
+    append_line(fs_buf, &fs_len, "        if (luma < 0.75) return vec3(0.5451, 0.6745, 0.0588);");
+    append_line(fs_buf, &fs_len, "        return vec3(0.6078, 0.7373, 0.0588);");
+    append_line(fs_buf, &fs_len, "    }");
+    append_line(fs_buf, &fs_len, "    return color;");
+    append_line(fs_buf, &fs_len, "}");
 
     append_line(fs_buf, &fs_len, "void main() {");
 
@@ -598,6 +619,8 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     if (opt_alpha && opt_dither) {
         append_line(fs_buf, &fs_len, "texel.a *= noise;");
     }
+
+    append_line(fs_buf, &fs_len, "if (uVrColorFilter != 0) texel.rgb = applyVrColorFilter(texel.rgb, uVrColorFilter);");
 
     if (opt_alpha) {
         append_line(fs_buf, &fs_len, "gl_FragColor = texel;");
@@ -770,6 +793,7 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     }
 
     prg->uniform_locations[8] = glGetUniformLocation(shader_program, "uFilter");
+    prg->uniform_locations[9] = glGetUniformLocation(shader_program, "uVrColorFilter");
 
     shader_lookup_cache[
         (uint16_t)(prg->hash ^ (prg->hash >> 32)) &
