@@ -17,6 +17,7 @@ static void voice_device_changed(UNUSED struct DjuiBase* caller) {
 void djui_panel_voice_chat_create(struct DjuiBase* caller) {
     struct DjuiThreePanel* panel = djui_panel_menu_create("Voice Chat", false);
     struct DjuiBase* body = djui_three_panel_get_body(panel);
+    djui_checkbox_create(body, "Enable Voice Chat", &configVoiceChatEnabled, NULL);
     djui_checkbox_create(body, "Mute My Microphone", &configVoiceMicMuted, NULL);
     djui_slider_create(body, "My Microphone Level", &configVoiceMicLevel,
                        0, 100, NULL);
