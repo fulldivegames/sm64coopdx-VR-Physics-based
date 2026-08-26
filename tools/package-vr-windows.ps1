@@ -33,7 +33,8 @@ $requiredDirectories = @(
     "dynos",
     "lang",
     "mods",
-    "palettes"
+    "palettes",
+    "sonic_shoes"
 )
 
 foreach ($file in $requiredFiles) {

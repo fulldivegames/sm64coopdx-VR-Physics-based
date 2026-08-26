@@ -225,7 +225,11 @@ static bool audio_sanity_check(struct ModAudio* audio, bool isStream, const char
     return true;
 }
 
-struct ModAudio* audio_load_internal(const char* filename, bool isStream) {
+static struct ModAudio* audio_load_internal_ex(
+    const char* filename,
+    bool isStream,
+    bool directPath
+) {
     if (!sModAudioPool) { smlua_audio_custom_init(); }
 
     // check file type
@@ -245,7 +249,7 @@ struct ModAudio* audio_load_internal(const char* filename, bool isStream) {
     }
 
     const char *filepath = filename;
-    if (!is_mod_fs_file(filename)) {
+    if (!directPath && !is_mod_fs_file(filename)) {
 
         // normalize filename
         char normPath[SYS_MAX_PATH] = { 0 };
@@ -393,6 +397,10 @@ error:
     return NULL;
 }
 
+struct ModAudio* audio_load_internal(const char* filename, bool isStream) {
+    return audio_load_internal_ex(filename, isStream, false);
+}
+
 static f32 get_audio_volume(struct ModAudio* audio) {
     f32 volume = audio->baseVolume;
     if (audio->volChannel == MOD_AUDIO_CHANNEL_MUSIC) {
@@ -407,6 +415,10 @@ static f32 get_audio_volume(struct ModAudio* audio) {
 
 struct ModAudio* audio_stream_load(const char* filename) {
     return audio_load_internal(filename, true);
+}
+
+struct ModAudio* audio_stream_load_path(const char* filename) {
+    return audio_load_internal_ex(filename, true, true);
 }
 
 void audio_stream_destroy(struct ModAudio* audio) {

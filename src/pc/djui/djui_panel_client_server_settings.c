@@ -12,6 +12,7 @@
 #include "pc/lua/utils/smlua_misc_utils.h"
 #include "pc/pc_main.h"
 #include "djui_panel_voice_chat.h"
+#include "djui_panel_widdle_pets.h"
 
 static unsigned int sPlayerInteractions = 0;
 static unsigned int sKnockbackIndex = 0;
@@ -29,14 +30,12 @@ static void djui_panel_client_character_select(UNUSED struct DjuiBase* caller) {
     queue_chat_command("/char-select menu");
 }
 
-static void djui_panel_client_widdle_pets(UNUSED struct DjuiBase* caller) {
+static void djui_panel_client_widdle_pets(struct DjuiBase* caller) {
     if (!gGameInited) {
         djui_chat_message_create("Start a game before opening Pets.");
         return;
     }
-    game_unpause();
-    djui_panel_shutdown();
-    queue_chat_command("/wpets");
+    djui_panel_widdle_pets_create(caller);
 }
 
 void djui_panel_client_server_settings_create(struct DjuiBase* caller) {

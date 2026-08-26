@@ -84,6 +84,7 @@ enum VrBoxReward {
     VR_BOX_REWARD_ORIGINAL,
     VR_BOX_REWARD_FIRE_FLOWER,
     VR_BOX_REWARD_HAMMER_SUIT,
+    VR_BOX_REWARD_SONIC_SHOES,
 };
 enum VrBoxReward vr_special_moves_roll_box_reward(
     struct Object* box,
@@ -91,6 +92,7 @@ enum VrBoxReward vr_special_moves_roll_box_reward(
 );
 bool vr_special_moves_spawn_cheat_fire_flower(void);
 bool vr_special_moves_spawn_cheat_hammer_suit(void);
+bool vr_special_moves_spawn_cheat_sonic_shoes(void);
 enum VrCheatSpawnCap {
     VR_CHEAT_SPAWN_WING_CAP,
     VR_CHEAT_SPAWN_VANISH_CAP,
@@ -101,6 +103,13 @@ bool vr_special_moves_fire_flower_active(void);
 bool vr_special_moves_grant_fire_flower(void);
 bool vr_special_moves_hammer_suit_active(void);
 bool vr_special_moves_grant_hammer_suit(void);
+bool vr_special_moves_sonic_shoes_active(void);
+bool vr_special_moves_grant_sonic_shoes(void);
+Gfx* geo_vr_sonic_shoe(
+    s32 callContext,
+    struct GraphNode* node,
+    void* context
+);
 Gfx* geo_vr_fireball_color(
     s32 callContext,
     struct GraphNode* node,

@@ -1,6 +1,7 @@
 #include "djui.h"
 #include "djui_panel.h"
 #include "djui_panel_menu.h"
+#include "djui_panel_confirm.h"
 #include "djui_panel_join_lobbies.h"
 #include "djui_panel_join_private.h"
 #include "djui_panel_join_direct.h"
@@ -9,8 +10,20 @@
 #include "pc/update_checker.h"
 
 #ifdef COOPNET
-static void djui_panel_join_public_lobbies(struct DjuiBase* caller) {
+static void djui_panel_join_public_lobbies_acknowledged(struct DjuiBase* caller) {
     djui_panel_join_lobbies_create(caller, "", COOPNET_LOBBY_STANDARD_PUBLIC);
+}
+
+static void djui_panel_join_public_lobbies(struct DjuiBase* caller) {
+    djui_panel_confirm_create(
+        caller,
+        "Public Lobby Warning",
+        "This is technically an unauthorized build of SM64 Co-op DX. "
+        "There are movement advantages in our build that could be considered cheating. "
+        "Cheats are disabled, and power-ups are disabled as well in public lobbies. "
+        "Play at your own risk.",
+        djui_panel_join_public_lobbies_acknowledged
+    );
 }
 
 static void djui_panel_join_vr_public_lobbies(struct DjuiBase* caller) {
