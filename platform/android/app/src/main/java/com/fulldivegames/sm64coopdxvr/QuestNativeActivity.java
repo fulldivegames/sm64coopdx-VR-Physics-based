@@ -446,6 +446,8 @@ public final class QuestNativeActivity extends NativeActivity {
             }
             copyMissingAssetDirectory("mods", new File(root, "mods"));
             Log.i(TAG, "Bundled session mods installed.");
+            copyAssetDirectory("sonic_shoes", new File(root, "sonic_shoes"));
+            Log.i(TAG, "Bundled Sonic Shoes music installed.");
         } catch (IOException exception) {
             Log.e(TAG, "Could not install bundled resources.", exception);
         }

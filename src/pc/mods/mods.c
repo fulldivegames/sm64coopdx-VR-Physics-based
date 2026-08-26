@@ -15,6 +15,10 @@
 
 #define MAX_SESSION_CHARS 7
 
+#if defined(__ANDROID__)
+extern void quest_android_pump_startup_events(void);
+#endif
+
 struct Mods gLocalMods = { 0 };
 struct Mods gRemoteMods = { 0 };
 struct Mods gActiveMods = { 0 };
@@ -235,6 +239,9 @@ static void mods_load(struct Mods* mods, char* modsBasePath, UNUSED bool isUserM
     char path[SYS_MAX_PATH] = { 0 };
     u32 processedCount = 0;
     while ((dir = readdir(d)) != NULL) {
+#if defined(__ANDROID__)
+        quest_android_pump_startup_events();
+#endif
 
         // sanity check / fill path[]
         if (!directory_sanity_check(dir, modsBasePath, path)) { continue; }

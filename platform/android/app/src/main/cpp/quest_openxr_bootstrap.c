@@ -114,6 +114,26 @@ static bool openxr_extension_available(const char *name) {
 }
 
 static QuestApp *sActiveQuestApp;
+static bool poll_openxr_events(QuestApp *app);
+
+/* Long first-launch mod and DynOS scans run on android_main because they need
+ * the game renderer's thread.  Android still requires this same thread to
+ * acknowledge NativeActivity focus/input events within five seconds.  Let
+ * those scanners service the native queue without advancing a game frame. */
+void quest_android_pump_startup_events(void) {
+    QuestApp *app = sActiveQuestApp;
+    if (app == NULL || app->android_app == NULL) return;
+
+    int events = 0;
+    struct android_poll_source *source = NULL;
+    while (ALooper_pollOnce(0, NULL, &events, (void **)&source) >= 0) {
+        if (source != NULL) source->process(app->android_app, source);
+        if (app->android_app->destroyRequested) break;
+    }
+    if (app->instance != XR_NULL_HANDLE) {
+        (void)poll_openxr_events(app);
+    }
+}
 
 ANativeActivity *quest_android_get_activity(void) {
     if (sActiveQuestApp == NULL || sActiveQuestApp->android_app == NULL) return NULL;

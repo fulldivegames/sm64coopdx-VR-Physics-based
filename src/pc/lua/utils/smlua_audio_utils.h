@@ -55,6 +55,9 @@ struct ModAudio {
 
 /* |description|Loads an `audio` stream by `filename` (with extension)|descriptionEnd| */
 struct ModAudio* audio_stream_load(const char* filename);
+// Loads a built-in stream from an absolute/native resource path without
+// requiring a Lua mod to be active.
+struct ModAudio* audio_stream_load_path(const char* filename);
 /* |description|Destroys an `audio` stream|descriptionEnd| */
 void audio_stream_destroy(struct ModAudio* audio);
 /* |description|Plays an `audio` stream with `volume`. `restart` sets the elapsed time back to 0.|descriptionEnd| */

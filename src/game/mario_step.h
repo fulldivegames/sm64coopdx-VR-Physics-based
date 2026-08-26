@@ -15,6 +15,12 @@ struct BullyCollisionData {
 };
 
 extern struct Surface gWaterSurfacePseudoFloor;
+struct Surface *mario_get_sonic_water_run_floor(
+    struct MarioState *m,
+    f32 waterLevel,
+    f32 terrainFloorHeight
+);
+bool mario_is_sonic_water_run_floor(struct Surface *floor);
 
 /* |description|Always returns zero. May have been originally used for beta trampolines|descriptionEnd| */
 f32 get_additive_y_vel_for_jumps(void);

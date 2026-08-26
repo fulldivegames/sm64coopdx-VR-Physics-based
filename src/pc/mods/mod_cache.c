@@ -16,6 +16,10 @@
 #define MOD_CACHE_VERSION 7
 #define MD5_BUFFER_SIZE 1024
 
+#if defined(__ANDROID__)
+extern void quest_android_pump_startup_events(void);
+#endif
+
 static struct ModCacheEntry** sModCacheEntries = NULL;
 static size_t sModCacheLength = 0;
 static size_t sModLengthCapacity = 0;
@@ -97,9 +101,16 @@ void mod_cache_md5(const char* inPath, u8* outDataPath) {
 
     // read bytes and md5 them
     size_t readBytes = 0;
+    unsigned int chunksSincePump = 0;
     do {
         readBytes = fread(buffer, sizeof(u8), MD5_BUFFER_SIZE, fp);
         MD5_Update(&ctx, buffer, readBytes);
+#if defined(__ANDROID__)
+        if (++chunksSincePump >= 256) {
+            quest_android_pump_startup_events();
+            chunksSincePump = 0;
+        }
+#endif
     } while (readBytes >= MD5_BUFFER_SIZE);
 
     // close file pointer

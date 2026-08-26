@@ -71,6 +71,20 @@ void djui_chat_message_create_from(u8 globalIndex, const char* message) {
 
 void djui_chat_message_create(const char* message) {
     if (gDjuiChatBox == NULL || gDjuiChatBox->chatFlow == NULL) { return; }
+
+    // WiddlePets announces itself through chat when the mod loads. Extend that
+    // same notice so VR players know where the native, controller-friendly pet
+    // selector lives without replacing or suppressing the mod's own wording.
+    char widdlePetsMessage[MAX_CHAT_MSG_LENGTH] = { 0 };
+    if (message != NULL &&
+        (strstr(message, "WiddlePets") != NULL ||
+         strstr(message, "Widdle Pets") != NULL) &&
+        strstr(message, "Server Settings") == NULL) {
+        snprintf(widdlePetsMessage, sizeof(widdlePetsMessage),
+            "%s\nPets menu: Server Settings > Pets.", message);
+        message = widdlePetsMessage;
+    }
+
     struct DjuiChatMessage* chatMessage = calloc(1, sizeof(struct DjuiChatMessage));
     struct DjuiBase* base = &chatMessage->base;
     djui_base_init(&gDjuiChatBox->chatFlow->base, base, djui_chat_message_render, djui_chat_message_destroy);

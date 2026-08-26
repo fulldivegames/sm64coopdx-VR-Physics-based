@@ -14,6 +14,9 @@ tasks.register("syncSm64ResourceAssets", Sync) {
     from("../../../mods") {
         into("mods")
     }
+    from("../../../sonic_shoes") {
+        into("sonic_shoes")
+    }
     into(generatedResourceAssets)
 }
 
@@ -26,8 +29,8 @@ android {
         applicationId "com.fulldivegames.sm64coopdxvr"
         minSdk 26
         targetSdk 32
-        versionCode 31
-        versionName "0.7.9"
+        versionCode 32
+        versionName "0.8.0"
 
         ndk {
             abiFilters "arm64-v8a"

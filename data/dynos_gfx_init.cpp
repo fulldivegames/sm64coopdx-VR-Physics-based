@@ -7,9 +7,14 @@ extern "C" {
 
 #if defined(__ANDROID__)
 extern "C" const char *quest_android_shared_dynos_pack_path(void);
+extern "C" void quest_android_pump_startup_events(void);
+#define DYNOS_PUMP_STARTUP_EVENTS() quest_android_pump_startup_events()
+#else
+#define DYNOS_PUMP_STARTUP_EVENTS() ((void)0)
 #endif
 
 void DynOS_Gfx_GenerateModPacks(char* modPath) {
+    DYNOS_PUMP_STARTUP_EVENTS();
     const char *displayName = modPath;
     for (const char *token = modPath; *token != '\0'; token++) {
         if ((*token == *PATH_SEPARATOR ||
@@ -61,6 +66,7 @@ void DynOS_Gfx_GeneratePacks(const char* directory) {
     struct dirent *dir = NULL;
     u32 pathCount = 0;
     while ((dir = readdir(modsDir)) != NULL) {
+        DYNOS_PUMP_STARTUP_EVENTS();
         if (SysPath(dir->d_name) == "." ||
             SysPath(dir->d_name) == "..") continue;
         pathCount++;
@@ -97,6 +103,7 @@ static void ScanPacksFolder(
     if (_DynosPacksDir) {
         struct dirent *_DynosPacksEnt = NULL;
         while ((_DynosPacksEnt = readdir(_DynosPacksDir)) != NULL) {
+            DYNOS_PUMP_STARTUP_EVENTS();
 
             // Skip . and ..
             if (SysPath(_DynosPacksEnt->d_name) == ".") continue;

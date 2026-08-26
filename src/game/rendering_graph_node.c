@@ -4351,9 +4351,10 @@ static void patch_mtx_perspective(
         gOverrideFar
     );
 
-    // "infinite" draw distance
-    if (vr_is_active() ||
-        (gOverrideFar == 0 && configDrawDistance == 6)) {
+    // Honor the existing draw-distance setting in VR as well. Infinite keeps
+    // the previous VR result exactly; shorter user-selected distances let
+    // large mod maps avoid submitting geometry beyond the map far plane.
+    if (gOverrideFar == 0 && configDrawDistance == 6) {
         far = max(far, MAX_FAR_PLANE_DIST);
     }
 
@@ -5614,9 +5615,9 @@ static void geo_process_perspective(struct GraphNodePerspective *node) {
     f32 near = get_first_person_enabled() ? 1.f : replace_value_if_not_zero(MIN(node->near, gProjectionMaxNearValue), gOverrideNear);
     f32 far = replace_value_if_not_zero(node->far, gOverrideFar);
 
-    // "infinite" draw distance
-    if (vr_is_active() ||
-        (gOverrideFar == 0 && configDrawDistance == 6)) {
+    // Keep VR infinite only when Infinite is actually selected. This mirrors
+    // the per-eye projection path above and leaves the default unchanged.
+    if (gOverrideFar == 0 && configDrawDistance == 6) {
         far = max(far, MAX_FAR_PLANE_DIST);
     }
 
@@ -7034,7 +7035,12 @@ static s32 obj_is_in_view(struct GraphNodeObject *node, Mat4 matrix) {
         const f32 x = matrix[3][0];
         const f32 y = matrix[3][1];
         const f32 z = matrix[3][2];
-        const f32 safeDistance = 60000.0f;
+        // Angular culling remains deliberately disabled for the shared stereo
+        // scene, but a finite draw-distance selection can still reject safely
+        // distant objects. Infinite preserves the prior 60k safety range.
+        const f32 safeDistance = configDrawDistance == 6
+            ? 60000.0f
+            : 20000.0f;
         const f32 distanceSquared = x * x + y * y + z * z;
         const f32 maximumDistance = safeDistance + cullingRadius;
 

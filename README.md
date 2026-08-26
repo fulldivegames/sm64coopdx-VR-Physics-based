@@ -13,7 +13,7 @@
   Native ARM64/OpenXR VR for Meta Quest. No PC is required after installation.
 </p>
 
-> **Current public release: v0.7.9 — Voice Chat and Filters Update**
+> **Current public release: v0.8.0 — Sonic Shoes Update**
 
 > [!WARNING]
 > This is an active, vibe-coded, yet fairly polished fan project. The standalone edition has been tested on **Meta Quest 3 only**. It has **not been tested on Quest 2 by me**, and neither edition has been tested across every multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur. If you have any performance issues on default settings in the base game, a reset usually fixes things (You should be getting a stable 120 FPS on Quest 3, on most if not all base game maps)
@@ -271,15 +271,24 @@ Painting entries use a short white comfort fade. The optional True First Person 
 
 When **WiddlePets** is enabled, Server Settings adds a **Pets** button that opens the mod's own `/wpets` pet-selection menu. Pet choice, spawning, and following behavior remain controlled by WiddlePets itself.
 
-## v0.7.9 — Voice Chat and Filters Update
+## v0.8.0 — Sonic Shoes Update
+
+- Added **Sonic Shoes** as a timed spawnable power-up with matching pickup gravity, Spawn Menu access, balanced box-pool integration, Green Hill Zone music, and a close-tracking sparkle trail
+- Added a 0–300 Sonic speed slider with a 3× baseline at zero; the multiplier consistently covers running, acceleration, turning, slopes, dives, and dive recovery
+- Added high-speed water running while Sonic Shoes are active; water behaves as a temporary surface above the threshold and safely returns Mario to swimming after slowing, bonking, or losing the power-up
+- Added the compatible **WiddlePets** selection menu and its in-game location reminder without changing the mod's pet behavior
+- Added reliable hammer knockback against Bully-type enemies and 1.5× knockback for special-move explosions
+- Kept the performance pass conservative: reduced avoidable loading/runtime work without lowering normal visual quality or changing established gameplay behavior
+
+## Previous Release Notes
+
+### v0.7.9 — Voice Chat and Filters Update
 
 - Added built-in voice chat for compatible Quest and PC VR clients, including Quest headset-mic support, microphone and player-volume controls, and a master voice-chat toggle
 - Added individual two-way player muting, an active-speaker icon in the Players menu, and microphone dictation for the controller-operated keyboard
 - Added the approved **Virtual Boy** and **Game Boy** full-scene filters with improved actor visibility while leaving normal rendering unchanged
 - Added a conditional **Pets** shortcut to Server Settings when WiddlePets is active; it opens the mod's real pet-selection and following menu
 - Hardened Rasengan and Rasen-Shuriken model lookup for ROM hacks such as B3313 without changing their charge, combat, physics, or visual behavior
-
-## Previous Release Notes
 
 ### v0.7.2 — Boss Combat, Spawn Tools, and Camera Fixes
 

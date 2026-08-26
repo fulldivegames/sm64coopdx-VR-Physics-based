@@ -8,6 +8,10 @@
 #include "pc/controller/controller_api.h"
 #include "pc/controller/controller_sdl.h"
 
+#ifndef __ANDROID__
+#include <SDL2/SDL.h>
+#endif
+
 void djui_panel_controls_value_change(UNUSED struct DjuiBase* caller) {
     controller_reconfigure();
 }

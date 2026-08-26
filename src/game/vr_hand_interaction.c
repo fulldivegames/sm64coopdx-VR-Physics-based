@@ -12,6 +12,7 @@
 #include "hardcoded.h"
 #include "interaction.h"
 #include "mario.h"
+#include "mario_step.h"
 #include "object_constants.h"
 #include "object_fields.h"
 #include "object_helpers.h"
@@ -26,11 +27,13 @@
 #include "data/dynos.c.h"
 #include "pc/configfile.h"
 #include "pc/djui/djui.h"
+#include "pc/lua/utils/smlua_audio_utils.h"
 #include "pc/lua/smlua_hooks.h"
 #include "pc/network/network.h"
 #include "pc/network/network_player.h"
 #include "pc/network/coopnet/coopnet.h"
 #include "pc/network/packets/packet.h"
+#include "pc/platform.h"
 #include "pc/vr/vr.h"
 
 #ifdef DEBUG
@@ -111,8 +114,17 @@
 #define VR_HAMMER_LAUNCH_ARC_BIAS 12.0f
 #define VR_HAMMER_CONTACT_PADDING 32.0f
 #define VR_HAMMER_MELEE_RADIUS 30.0f
+#define VR_HAMMER_BULLY_KNOCKBACK 45.0f
+#define VR_EXPLOSION_BULLY_KNOCKBACK \
+    (VR_HAMMER_BULLY_KNOCKBACK * 1.5f)
 #define VR_HAMMER_PICKUP_GRAVITY 0.65f
 #define VR_HAMMER_PICKUP_FALL_SPEED 7.0f
+#define VR_SONIC_SHOES_DURATION_FRAMES 1800U
+#define VR_SONIC_SHOES_PICKUP_GRAVITY 0.65f
+#define VR_SONIC_SHOES_PICKUP_FALL_SPEED 7.0f
+#define VR_SONIC_SHOES_TRAIL_STEP 38.0f
+#define VR_SONIC_SHOES_TRAIL_SAMPLES_PER_FOOT 3U
+#define VR_SONIC_SHOES_MUSIC_FADE_FRAMES 30U
 #define VR_RASENGAN_IMPACT_GROW_FRAMES 10U
 #define VR_RASENGAN_IMPACT_MAX_FRAMES 90U
 // Two rotated, double-sided shells contribute four translucent surfaces.
@@ -336,6 +348,19 @@ static Vec3f sVrHammerProjectileVelocity[VR_HAMMER_PROJECTILE_COUNT] = {
 static u16 sVrHammerProjectileLifetime[VR_HAMMER_PROJECTILE_COUNT] = {
     0
 };
+static bool sVrSonicShoesPowered = false;
+static u16 sVrSonicShoesTimer = 0;
+static s16 sVrSonicShoesLevel = -1;
+static s16 sVrSonicShoesArea = -1;
+static struct Object* sVrSonicShoesPickupObject = NULL;
+static f32 sVrSonicShoesPickupVelocityY = 0.0f;
+static bool sVrSonicShoesPickupLanded = false;
+static u16 sVrSonicShoesPickupAge = 0;
+static struct ModAudio* sVrSonicShoesMusic = NULL;
+static bool sVrSonicShoesMusicLowered = false;
+static u16 sVrSonicShoesMusicFadeTimer = 0;
+static Vec3f sVrSonicShoesPreviousBoot[2] = { { 0 }, { 0 } };
+static bool sVrSonicShoesTrailValid = false;
 static struct Object* sVrRasenganObject = NULL;
 static struct Object* sVrRasenganTarget = NULL;
 static u16 sVrRasenganChargeFrames = 0;
@@ -2101,6 +2126,8 @@ void vr_hand_interaction_update_roomscale_body(
     vec3f_copy(resolvedPosition, mario->pos);
     struct Surface* resolvedFloor = mario->floor;
     f32 resolvedFloorHeight = mario->floorHeight;
+    const bool sonicWaterSurface =
+        mario_is_sonic_water_run_floor(mario->floor);
     const bool grounded =
         (mario->action & (ACT_FLAG_AIR | ACT_FLAG_SWIMMING)) == 0;
 
@@ -2126,12 +2153,24 @@ void vr_hand_interaction_update_roomscale_body(
         );
 
         struct Surface* floor = NULL;
-        const f32 floorHeight = find_floor(
+        f32 floorHeight = find_floor(
             candidate[0],
             candidate[1] + 100.0f,
             candidate[2],
             &floor
         );
+        if (sonicWaterSurface) {
+            const f32 waterHeight = find_water_level(
+                candidate[0], candidate[2]
+            );
+            if (waterHeight > floorHeight) {
+                // Room-scale movement normally resolves against terrain. While
+                // Sonic water-running, retain the temporary water plane instead
+                // of snapping the first-person body down to the lake floor.
+                floor = mario->floor;
+                floorHeight = waterHeight;
+            }
+        }
         struct Surface* ceiling = NULL;
         const f32 ceilingHeight = find_ceil(
             candidate[0],
@@ -5305,6 +5344,37 @@ static void vr_special_moves_reset_hammer_suit(void) {
     }
 }
 
+static void vr_special_moves_reset_sonic_shoes(void) {
+    sVrSonicShoesPowered = false;
+    sVrSonicShoesTimer = 0;
+    sVrSonicShoesLevel = -1;
+    sVrSonicShoesArea = -1;
+    sVrSonicShoesTrailValid = false;
+    if (sVrSonicShoesMusic != NULL && sVrSonicShoesMusicFadeTimer == 0) {
+        sVrSonicShoesMusicFadeTimer = VR_SONIC_SHOES_MUSIC_FADE_FRAMES;
+    }
+}
+
+static void vr_special_moves_update_sonic_shoes_music_fade(void) {
+    if (sVrSonicShoesMusicFadeTimer == 0 || sVrSonicShoesMusic == NULL) {
+        return;
+    }
+
+    sVrSonicShoesMusicFadeTimer--;
+    audio_stream_set_volume(
+        sVrSonicShoesMusic,
+        (f32)sVrSonicShoesMusicFadeTimer / (f32)VR_SONIC_SHOES_MUSIC_FADE_FRAMES
+    );
+    if (sVrSonicShoesMusicFadeTimer == 0) {
+        audio_stream_stop(sVrSonicShoesMusic);
+        audio_stream_set_volume(sVrSonicShoesMusic, 1.0f);
+        if (sVrSonicShoesMusicLowered) {
+            seq_player_unlower_volume(SEQ_PLAYER_LEVEL, 15);
+            sVrSonicShoesMusicLowered = false;
+        }
+    }
+}
+
 static u32 vr_special_moves_allocate_hammer_projectile(void) {
     u32 oldestSlot = 0;
     u16 oldestLifetime = 0;
@@ -5420,6 +5490,7 @@ bool vr_special_moves_grant_fire_flower(void) {
         return false;
     }
     vr_special_moves_reset_hammer_suit();
+    vr_special_moves_reset_sonic_shoes();
     sVrFireFlowerPowered = true;
     sVrFireFlowerTimer = VR_FIRE_FLOWER_DURATION_FRAMES;
     sVrFireFlowerMusicTimer = VR_FIRE_FLOWER_DURATION_FRAMES;
@@ -5804,6 +5875,38 @@ static bool vr_special_moves_spawn_hammer_pickup(
     return true;
 }
 
+static bool vr_special_moves_spawn_sonic_shoes_pickup(
+    struct Object* parent,
+    f32 x,
+    f32 y,
+    f32 z,
+    f32 velocityY
+) {
+    if (parent == NULL || (sVrSonicShoesPickupObject != NULL &&
+        (sVrSonicShoesPickupObject->activeFlags & ACTIVE_FLAG_ACTIVE) != 0)) {
+        return false;
+    }
+
+    sVrSonicShoesPickupObject = spawn_object(
+        parent,
+        MODEL_VR_SONIC_SHOES,
+        bhvStaticObject
+    );
+    if (sVrSonicShoesPickupObject == NULL) {
+        return false;
+    }
+    sVrSonicShoesPickupObject->oPosX = x;
+    sVrSonicShoesPickupObject->oPosY = y;
+    sVrSonicShoesPickupObject->oPosZ = z;
+    sVrSonicShoesPickupObject->oInteractType = 0;
+    obj_scale(sVrSonicShoesPickupObject, 0.85f);
+    obj_update_gfx_pos_and_angle(sVrSonicShoesPickupObject);
+    sVrSonicShoesPickupVelocityY = velocityY;
+    sVrSonicShoesPickupLanded = false;
+    sVrSonicShoesPickupAge = 0;
+    return true;
+}
+
 enum VrBoxReward vr_special_moves_roll_box_reward(
     struct Object* box,
     struct MarioState* owner
@@ -5822,13 +5925,16 @@ enum VrBoxReward vr_special_moves_roll_box_reward(
         return sVrRolledBoxReward;
     }
 
-    enum VrBoxReward choices[3] = { VR_BOX_REWARD_ORIGINAL };
+    enum VrBoxReward choices[4] = { VR_BOX_REWARD_ORIGINAL };
     u32 choiceCount = 1;
     if (configVrSpecialFireFlower) {
         choices[choiceCount++] = VR_BOX_REWARD_FIRE_FLOWER;
     }
     if (configVrSpecialHammerSuit) {
         choices[choiceCount++] = VR_BOX_REWARD_HAMMER_SUIT;
+    }
+    if (configVrSpecialSonicShoes) {
+        choices[choiceCount++] = VR_BOX_REWARD_SONIC_SHOES;
     }
     const enum VrBoxReward choice = choices[random_u16() % choiceCount];
     bool spawned = false;
@@ -5842,6 +5948,14 @@ enum VrBoxReward vr_special_moves_roll_box_reward(
         );
     } else if (choice == VR_BOX_REWARD_HAMMER_SUIT) {
         spawned = vr_special_moves_spawn_hammer_pickup(
+            owner->marioObj,
+            box->oPosX,
+            box->oPosY + 65.0f,
+            box->oPosZ,
+            20.0f
+        );
+    } else if (choice == VR_BOX_REWARD_SONIC_SHOES) {
+        spawned = vr_special_moves_spawn_sonic_shoes_pickup(
             owner->marioObj,
             box->oPosX,
             box->oPosY + 65.0f,
@@ -6091,6 +6205,7 @@ bool vr_special_moves_grant_hammer_suit(void) {
         return false;
     }
     vr_special_moves_reset_power();
+    vr_special_moves_reset_sonic_shoes();
     sVrHammerSuitPowered = true;
     sVrHammerSuitTimer = VR_HAMMER_SUIT_DURATION_FRAMES;
     sVrHammerSuitMusicTimer = VR_HAMMER_SUIT_DURATION_FRAMES;
@@ -6277,6 +6392,319 @@ static void vr_special_moves_update_hammer_suit_pickup(
     }
 }
 
+bool vr_special_moves_sonic_shoes_active(void) {
+    return configVrSpecialSonicShoes && sVrSonicShoesPowered &&
+        vr_special_moves_online_allowed();
+}
+
+f32 vr_special_moves_sonic_speed_scale(void) {
+    if (!vr_special_moves_sonic_shoes_active()) {
+        return 1.0f;
+    }
+    const unsigned int setting = clamp(
+        configVrSonicShoesSpeed,
+        VR_SONIC_SHOES_SPEED_MIN,
+        VR_SONIC_SHOES_SPEED_MAX
+    );
+    // Preserve the original powered baseline at the new zero point:
+    // 0 = 3x, 100 = 9x, and 300 = 21x.
+    return 3.0f + (f32)setting * 0.06f;
+}
+
+bool vr_special_moves_grant_sonic_shoes(void) {
+    if (!configVrSpecialSonicShoes || !vr_is_active() ||
+        !vr_special_moves_online_allowed() ||
+        gMarioStates[0].marioObj == NULL) {
+        return false;
+    }
+
+    vr_special_moves_reset_power();
+    vr_special_moves_reset_hammer_suit();
+    vr_special_moves_reset_sonic_shoes();
+    sVrSonicShoesMusicFadeTimer = 0;
+    sVrSonicShoesPowered = true;
+    sVrSonicShoesTimer = VR_SONIC_SHOES_DURATION_FRAMES;
+    sVrSonicShoesLevel = gCurrLevelNum;
+    sVrSonicShoesArea = gCurrAreaIndex;
+
+    char musicPath[SYS_MAX_PATH];
+    snprintf(
+        musicPath,
+        sizeof(musicPath),
+        "%s/sonic_shoes/green_hill_zone.mp3",
+        sys_resource_path()
+    );
+    if (sVrSonicShoesMusic == NULL) {
+        sVrSonicShoesMusic = audio_stream_load_path(musicPath);
+    }
+    if (sVrSonicShoesMusic != NULL) {
+        audio_stream_set_volume(sVrSonicShoesMusic, 1.0f);
+        stop_cap_music();
+        seq_player_lower_volume(SEQ_PLAYER_LEVEL, 15, 0);
+        sVrSonicShoesMusicLowered = true;
+        audio_stream_set_looping(sVrSonicShoesMusic, false);
+        audio_stream_play(sVrSonicShoesMusic, true, 1.0f);
+    }
+    return true;
+}
+
+bool vr_special_moves_spawn_cheat_sonic_shoes(void) {
+    struct MarioState* mario = &gMarioStates[0];
+    if (!vr_special_moves_online_allowed() ||
+        !configVrSpecialSonicShoes || mario->marioObj == NULL) {
+        return false;
+    }
+    vr_special_moves_delete_object(&sVrSonicShoesPickupObject);
+    return vr_special_moves_spawn_sonic_shoes_pickup(
+        mario->marioObj,
+        mario->pos[0],
+        mario->pos[1] + 480.0f,
+        mario->pos[2],
+        0.0f
+    );
+}
+
+Gfx* geo_vr_sonic_shoe(
+    s32 callContext,
+    struct GraphNode* node,
+    UNUSED void* context
+) {
+    if (callContext != GEO_CONTEXT_RENDER ||
+        !vr_special_moves_sonic_shoes_active()) {
+        return NULL;
+    }
+    const struct GraphNodeGenerated* generated =
+        (const struct GraphNodeGenerated*)node;
+    return (Gfx*)(generated->parameter == 0 ?
+        vr_sonic_shoe_left_dl : vr_sonic_shoe_right_dl);
+}
+
+Gfx* geo_switch_vr_sonic_foot(
+    s32 callContext,
+    struct GraphNode* node,
+    UNUSED void* context
+) {
+    if (callContext == GEO_CONTEXT_RENDER) {
+        struct GraphNodeSwitchCase* switchCase =
+            (struct GraphNodeSwitchCase*)node;
+        // The powered shoe replaces the vanilla boot at the same animated
+        // foot joint. This guarantees that no boot vertices can protrude at
+        // the heel or outside edge while preserving every foot animation.
+        switchCase->selectedCase =
+            vr_special_moves_sonic_shoes_active() ? 1 : 0;
+    }
+    return NULL;
+}
+
+static void vr_special_moves_update_sonic_shoes_pickup(
+    struct MarioState* mario
+) {
+    struct Object* pickup = sVrSonicShoesPickupObject;
+    if (pickup == NULL || mario == NULL || mario->marioObj == NULL) {
+        return;
+    }
+    if ((pickup->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
+        sVrSonicShoesPickupObject = NULL;
+        sVrSonicShoesPickupAge = 0;
+        return;
+    }
+    if (sVrSonicShoesPickupAge < 0xFFFFU) {
+        sVrSonicShoesPickupAge++;
+    }
+
+    if (sVrSonicShoesPickupLanded) {
+        struct Surface* support = NULL;
+        const f32 supportHeight = find_floor(
+            pickup->oPosX, pickup->oPosY + 80.0f,
+            pickup->oPosZ, &support
+        );
+        if (support == NULL ||
+            fabsf(pickup->oPosY - supportHeight) > 2.0f) {
+            sVrSonicShoesPickupLanded = false;
+            sVrSonicShoesPickupVelocityY = 0.0f;
+        } else {
+            pickup->oPosY = supportHeight;
+        }
+    }
+    if (!sVrSonicShoesPickupLanded) {
+        pickup->oPosY += sVrSonicShoesPickupVelocityY;
+        sVrSonicShoesPickupVelocityY = fmaxf(
+            sVrSonicShoesPickupVelocityY -
+                VR_SONIC_SHOES_PICKUP_GRAVITY,
+            -VR_SONIC_SHOES_PICKUP_FALL_SPEED
+        );
+        struct Surface* floor = NULL;
+        const f32 floorHeight = find_floor(
+            pickup->oPosX, pickup->oPosY + 80.0f,
+            pickup->oPosZ, &floor
+        );
+        if (sVrSonicShoesPickupVelocityY <= 0.0f && floor != NULL &&
+            pickup->oPosY <= floorHeight) {
+            pickup->oPosY = floorHeight;
+            sVrSonicShoesPickupVelocityY = 0.0f;
+            sVrSonicShoesPickupLanded = true;
+        }
+    }
+    pickup->oFaceAngleYaw += 0x300;
+    obj_update_gfx_pos_and_angle(pickup);
+    if (sVrSonicShoesPickupAge < VR_FIRE_FLOWER_PICKUP_GRACE_FRAMES) {
+        return;
+    }
+
+    const f32 px = pickup->oPosX;
+    const f32 py = pickup->oPosY + 24.0f;
+    const f32 pz = pickup->oPosZ;
+    const f32 bodyDx = px - mario->marioObj->oPosX;
+    const f32 bodyDy = py - (mario->marioObj->oPosY + 45.0f);
+    const f32 bodyDz = pz - mario->marioObj->oPosZ;
+    bool collected = bodyDx * bodyDx + bodyDy * bodyDy +
+        bodyDz * bodyDz <=
+        VR_FIRE_FLOWER_PICKUP_RADIUS * VR_FIRE_FLOWER_PICKUP_RADIUS;
+    u32 collectingHand = VR_CONTROLLER_COUNT;
+    Vec3f headsetPosition;
+    if (!collected && vr_get_stabilized_headset_world_position(
+            headsetPosition, false
+        )) {
+        const f32 dx = px - headsetPosition[0];
+        const f32 dy = py - headsetPosition[1];
+        const f32 dz = pz - headsetPosition[2];
+        collected = dx * dx + dy * dy + dz * dz <=
+            VR_FIRE_FLOWER_HEAD_PICKUP_RADIUS *
+                VR_FIRE_FLOWER_HEAD_PICKUP_RADIUS;
+    }
+    for (u32 hand = 0;
+         !collected && hand < VR_CONTROLLER_COUNT;
+         hand++) {
+        struct VrControllerState state = { 0 };
+        Vec3f handPosition;
+        Vec3f handVelocity;
+        if (!vr_get_controller_state(hand, &state) ||
+            !vr_get_controller_world_fist_raw_from_state(
+                hand, &state, handPosition, handVelocity
+            )) {
+            continue;
+        }
+        const f32 dx = px - handPosition[0];
+        const f32 dy = py - handPosition[1];
+        const f32 dz = pz - handPosition[2];
+        if (dx * dx + dy * dy + dz * dz <=
+            VR_FIRE_FLOWER_HAND_PICKUP_RADIUS *
+                VR_FIRE_FLOWER_HAND_PICKUP_RADIUS) {
+            collected = true;
+            collectingHand = hand;
+        }
+    }
+    if (collected && vr_special_moves_grant_sonic_shoes()) {
+        if (collectingHand < VR_CONTROLLER_COUNT) {
+            vr_apply_haptic(collectingHand, 0.45f, 0.10f, -1.0f);
+        } else {
+            vr_apply_haptic(VR_CONTROLLER_LEFT, 0.30f, 0.08f, -1.0f);
+            vr_apply_haptic(VR_CONTROLLER_RIGHT, 0.30f, 0.08f, -1.0f);
+        }
+        vr_special_moves_delete_object(&sVrSonicShoesPickupObject);
+        sVrSonicShoesPickupAge = 0;
+    }
+}
+
+static void vr_special_moves_spawn_sonic_trail_sparkle(
+    struct Object* parent,
+    const Vec3f position,
+    const Vec3f previousPosition
+) {
+    struct Object* sparkle = spawn_object(
+        parent, MODEL_SPARKLES_ANIMATION, bhvSparkle
+    );
+    if (sparkle == NULL) {
+        return;
+    }
+    sparkle->oPosX = position[0];
+    sparkle->oPosY = position[1];
+    sparkle->oPosZ = position[2];
+    obj_scale(sparkle, 0.32f);
+    obj_update_gfx_pos_and_angle(sparkle);
+    sparkle->header.gfx.prevPos[0] = previousPosition[0];
+    sparkle->header.gfx.prevPos[1] = previousPosition[1];
+    sparkle->header.gfx.prevPos[2] = previousPosition[2];
+}
+
+static void vr_special_moves_update_sonic_shoes_trail(
+    struct MarioState* mario
+) {
+    if (!vr_special_moves_sonic_shoes_active() || mario == NULL ||
+        mario->marioObj == NULL) {
+        sVrSonicShoesTrailValid = false;
+        return;
+    }
+
+    const s16 yaw = mario->marioObj->header.gfx.angle[1];
+    const f32 lateralX = coss(yaw) * 19.0f;
+    const f32 lateralZ = -sins(yaw) * 19.0f;
+    Vec3f currentBoot[2];
+    for (u32 foot = 0; foot < 2; foot++) {
+        const f32 side = foot == 0 ? 1.0f : -1.0f;
+        currentBoot[foot][0] = mario->marioObj->header.gfx.pos[0] +
+            lateralX * side + sins(yaw) * 8.0f;
+        currentBoot[foot][1] = mario->marioObj->header.gfx.pos[1] +
+            14.0f + sins((s16)(gGlobalTimer * 0x1800 + foot * 0x8000)) * 5.0f;
+        currentBoot[foot][2] = mario->marioObj->header.gfx.pos[2] +
+            lateralZ * side + coss(yaw) * 8.0f;
+
+        if (!sVrSonicShoesTrailValid) {
+            vec3f_copy(sVrSonicShoesPreviousBoot[foot], currentBoot[foot]);
+        }
+        const f32 dx = currentBoot[foot][0] -
+            sVrSonicShoesPreviousBoot[foot][0];
+        const f32 dy = currentBoot[foot][1] -
+            sVrSonicShoesPreviousBoot[foot][1];
+        const f32 dz = currentBoot[foot][2] -
+            sVrSonicShoesPreviousBoot[foot][2];
+        const f32 distance = sqrtf(dx * dx + dy * dy + dz * dz);
+        u32 samples = (u32)ceilf(distance / VR_SONIC_SHOES_TRAIL_STEP);
+        if (samples < 1U) {
+            samples = 1U;
+        } else if (samples > VR_SONIC_SHOES_TRAIL_SAMPLES_PER_FOOT) {
+            samples = VR_SONIC_SHOES_TRAIL_SAMPLES_PER_FOOT;
+        }
+        Vec3f lastPosition;
+        vec3f_copy(lastPosition, sVrSonicShoesPreviousBoot[foot]);
+        for (u32 sample = 1; sample <= samples; sample++) {
+            const f32 t = (f32)sample / (f32)samples;
+            Vec3f position;
+            for (u32 axis = 0; axis < 3; axis++) {
+                position[axis] = sVrSonicShoesPreviousBoot[foot][axis] +
+                    (currentBoot[foot][axis] -
+                     sVrSonicShoesPreviousBoot[foot][axis]) * t;
+            }
+            vr_special_moves_spawn_sonic_trail_sparkle(
+                mario->marioObj, position, lastPosition
+            );
+            vec3f_copy(lastPosition, position);
+        }
+        vec3f_copy(sVrSonicShoesPreviousBoot[foot], currentBoot[foot]);
+    }
+
+    // Keep extra sparkles close to Mario's body instead of leaving the
+    // entire effect at ankle height. Two phase-offset points form a light,
+    // continuously moving halo without creating a costly particle burst.
+    for (u32 sparkleIndex = 0; sparkleIndex < 2; sparkleIndex++) {
+        const s16 phase = (s16)(
+            gGlobalTimer * 0x1000 + sparkleIndex * 0x8000
+        );
+        Vec3f torsoPosition = {
+            mario->marioObj->header.gfx.pos[0] + sins(phase) * 34.0f,
+            mario->marioObj->header.gfx.pos[1] +
+                48.0f + (f32)sparkleIndex * 38.0f,
+            mario->marioObj->header.gfx.pos[2] + coss(phase) * 34.0f,
+        };
+        vr_special_moves_spawn_sonic_trail_sparkle(
+            mario->marioObj,
+            torsoPosition,
+            torsoPosition
+        );
+    }
+    sVrSonicShoesTrailValid = true;
+}
+
 static void vr_special_moves_update_hammer_suit_shell(
     struct MarioState* mario
 ) {
@@ -6374,6 +6802,31 @@ static void vr_special_moves_get_enemy_contact_bounds(
         fmaxf(target->hitboxHeight, target->hurtboxHeight),
         40.0f
     );
+}
+
+static void vr_special_moves_apply_bully_knockback(
+    struct Object* target,
+    f32 sourceX,
+    f32 sourceZ,
+    f32 strength
+) {
+    if (target == NULL ||
+        (target->oInteractType & INTERACT_BULLY) == 0) {
+        return;
+    }
+
+    const s16 awayYaw = atan2s(
+        target->oPosZ - sourceZ,
+        target->oPosX - sourceX
+    );
+    target->oMoveAngleYaw = awayYaw;
+    target->oFaceAngleYaw = awayYaw;
+    target->oForwardVel = fmaxf(target->oForwardVel, strength);
+    target->oBullyKBTimerAndMinionKOCounter = 0;
+    target->oAction = BULLY_ACT_KNOCKBACK;
+    target->oFlags &= ~0x8;
+    target->oInteractStatus |=
+        INT_STATUS_INTERACTED | INT_STATUS_WAS_ATTACKED | ATTACK_PUNCH;
 }
 
 static void vr_special_moves_release_mario_from_grabber(
@@ -6572,6 +7025,12 @@ static bool vr_special_moves_projectile_hits_enemy(
             }
 
             if (hammerImpact) {
+                vr_special_moves_apply_bully_knockback(
+                    target,
+                    projectile->oPosX,
+                    projectile->oPosZ,
+                    VR_HAMMER_BULLY_KNOCKBACK
+                );
                 vr_special_moves_apply_rasen_shuriken_damage(
                     mario,
                     projectile,
@@ -6594,6 +7053,14 @@ static bool vr_special_moves_projectile_hits_enemy(
             }
 
             if (!rearTarget) {
+                if (explosiveImpact) {
+                    vr_special_moves_apply_bully_knockback(
+                        target,
+                        projectile->oPosX,
+                        projectile->oPosZ,
+                        VR_EXPLOSION_BULLY_KNOCKBACK
+                    );
+                }
                 mario->interactObj = target;
                 attack_object(
                     mario,
@@ -6772,6 +7239,12 @@ static bool vr_special_moves_hammer_melee_contact(
         if (breakable) {
             vr_special_moves_roll_box_reward(contact, mario);
         }
+        vr_special_moves_apply_bully_knockback(
+            contact,
+            hammerHead[0],
+            hammerHead[2],
+            VR_HAMMER_BULLY_KNOCKBACK
+        );
         attack_object(
             mario,
             contact,
@@ -7726,6 +8199,12 @@ static void vr_special_moves_rasen_shuriken_damage_area(
                 sVrRasenShurikenHitLastFrame[hitSlot] = explosionFrame;
                 sVrRasenShurikenHitContinuous[hitSlot] =
                     explosionFrame == 1U;
+                vr_special_moves_apply_bully_knockback(
+                    damageTarget,
+                    explosion->oPosX,
+                    explosion->oPosZ,
+                    VR_EXPLOSION_BULLY_KNOCKBACK
+                );
                 vr_special_moves_apply_rasen_shuriken_damage(
                     mario,
                     explosion,
@@ -8755,6 +9234,8 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         return;
     }
 
+    vr_special_moves_update_sonic_shoes_music_fade();
+
     for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
         if (sVrPhysicalPlayerHitCooldown[hand] > 0) {
             sVrPhysicalPlayerHitCooldown[hand]--;
@@ -8769,6 +9250,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
     if (!vr_special_moves_online_allowed()) {
         vr_special_moves_reset_power();
         vr_special_moves_reset_hammer_suit();
+        vr_special_moves_reset_sonic_shoes();
         vr_special_moves_clear_rasengan();
         vr_special_moves_clear_rasen_shuriken_projectile();
         for (u32 i = 0; i < VR_FIRE_FLOWER_PICKUP_COUNT; i++) {
@@ -8781,6 +9263,10 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         sVrHammerSuitPickupVelocityY = 0.0f;
         sVrHammerSuitPickupLanded = false;
         sVrHammerSuitPickupAge = 0;
+        vr_special_moves_delete_object(&sVrSonicShoesPickupObject);
+        sVrSonicShoesPickupVelocityY = 0.0f;
+        sVrSonicShoesPickupLanded = false;
+        sVrSonicShoesPickupAge = 0;
     }
 
     if (!configVrSpecialRasengan || !vr_is_active() ||
@@ -8802,6 +9288,13 @@ void vr_hand_interaction_update(struct MarioState* mario) {
           sVrHammerSuitArea != gCurrAreaIndex))) {
         vr_special_moves_reset_hammer_suit();
     }
+    if (!configVrSpecialSonicShoes || !vr_is_active() ||
+        !vr_special_moves_online_allowed() ||
+        (sVrSonicShoesPowered &&
+         (sVrSonicShoesLevel != gCurrLevelNum ||
+          sVrSonicShoesArea != gCurrAreaIndex))) {
+        vr_special_moves_reset_sonic_shoes();
+    }
     vr_special_moves_update_fire_flower_music(mario);
     vr_special_moves_update_hammer_suit_music(mario);
     if (sVrFireFlowerPowered &&
@@ -8813,20 +9306,27 @@ void vr_hand_interaction_update(struct MarioState* mario) {
     }
     vr_special_moves_update_pickups(mario);
     vr_special_moves_update_hammer_suit_pickup(mario);
+    vr_special_moves_update_sonic_shoes_pickup(mario);
     vr_special_moves_update_hammer_suit_shell(mario);
+    vr_special_moves_update_sonic_shoes_trail(mario);
     vr_special_moves_update_projectiles(mario);
     vr_special_moves_update_hammer_projectiles(mario);
     vr_special_moves_update_rasen_shuriken_projectile(mario);
     if ((!configVrSpecialRasengan ||
          !vr_special_moves_online_allowed() ||
          vr_special_moves_fire_flower_active() ||
-         vr_special_moves_hammer_suit_active()) &&
+         vr_special_moves_hammer_suit_active() ||
+         vr_special_moves_sonic_shoes_active()) &&
         sVrRasenganObject != NULL) {
         vr_special_moves_clear_rasengan();
     }
     if (sVrHammerSuitPowered && sVrHammerSuitTimer > 0 &&
         --sVrHammerSuitTimer == 0) {
         vr_special_moves_reset_hammer_suit();
+    }
+    if (sVrSonicShoesPowered && sVrSonicShoesTimer > 0 &&
+        --sVrSonicShoesTimer == 0) {
+        vr_special_moves_reset_sonic_shoes();
     }
     vr_special_moves_update_rasengan_impact(mario);
     vr_special_moves_try_quick_fireball(mario);

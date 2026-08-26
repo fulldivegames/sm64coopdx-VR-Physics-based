@@ -1,5 +1,14 @@
 #include "dynos.cpp.h"
 
+#if defined(__ANDROID__)
+extern "C" void quest_android_pump_startup_events(void);
+#define DYNOS_PUMP_STARTUP(counter) do { \
+    if (((counter)++ & 0x3FFFu) == 0) quest_android_pump_startup_events(); \
+} while (0)
+#else
+#define DYNOS_PUMP_STARTUP(counter) ((void)(counter))
+#endif
+
 enum {
     COMMENT_NONE = 0,
     COMMENT_START,       // first slash
@@ -52,7 +61,9 @@ char *DynOS_Read_Buffer(FILE* aFile, GfxData* aGfxData) {
     char _Previous = 0;
     char _Current = 0;
     s32 _CommentType = 0;
+    u32 _PumpCounter = 0;
     while ((_Current = *pOrigFileBuffer++)) {
+        DYNOS_PUMP_STARTUP(_PumpCounter);
         if (_CommentType == COMMENT_NONE) {
             if (_Current == '/') {
                 _CommentType = COMMENT_START;
@@ -157,7 +168,9 @@ void DynOS_Read_Source(GfxData *aGfxData, const SysPath &aFilename) {
     char *pDataStart = NULL;
     bool _DataIgnore = false; // Needed to ignore the '#include "file.h"' strings
     String _Buffer = "";
+    u32 _ScanPumpCounter = 0;
     for (char *c = _FileBuffer; *c != 0; ++c) {
+        DYNOS_PUMP_STARTUP(_ScanPumpCounter);
 
         // Scanning data type
         if (_DataType == DATA_TYPE_NONE) {

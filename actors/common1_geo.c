@@ -22,6 +22,7 @@
 #include "mushroom_1up/geo.inc.c"
 #include "fire_flower/geo.inc.c"
 #include "hammer_suit/geo.inc.c"
+#include "sonic_shoes/geo.inc.c"
 #include "star/geo.inc.c"
 #include "dirt/geo.inc.c"
 #include "transparent_star/geo.inc.c"

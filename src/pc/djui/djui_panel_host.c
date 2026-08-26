@@ -7,12 +7,16 @@
 #include "djui_panel_host_save.h"
 #include "djui_panel_host_message.h"
 #include "djui_panel_voice_chat.h"
+#include "djui_panel_widdle_pets.h"
 #include "djui_panel_rules.h"
 #include "game/save_file.h"
 #include "pc/network/network.h"
 #include "pc/network/coopnet/coopnet.h"
 #include "pc/utils/misc.h"
 #include "pc/configfile.h"
+#include "pc/chat_commands.h"
+#include "pc/lua/smlua_hooks.h"
+#include "pc/pc_main.h"
 #include "pc/update_checker.h"
 
 static struct DjuiRect* sRectPort = NULL;
@@ -26,6 +30,14 @@ static struct DjuiSelectionbox* sSelectionboxLobbyPrivacy = NULL;
 static struct DjuiRect* sRectPublicChannel = NULL;
 static struct DjuiSelectionbox* sPublicChannelSelection = NULL;
 static unsigned int sPublicChannel = 0;
+
+static void djui_panel_host_widdle_pets(UNUSED struct DjuiBase* caller) {
+    if (!gGameInited) {
+        djui_chat_message_create("Start a game before opening Pets.");
+        return;
+    }
+    djui_panel_widdle_pets_create(caller);
+}
 
 static void djui_panel_host_update_coopnet_fields(void) {
     const bool coopNet = (configNetworkSystem == NS_COOPNET);
@@ -292,6 +304,10 @@ void djui_panel_host_create(struct DjuiBase* caller) {
 
         djui_button_create(body, "Voice Chat", DJUI_BUTTON_STYLE_NORMAL,
                            djui_panel_voice_chat_create);
+        if (smlua_chat_command_exists("wpets")) {
+            djui_button_create(body, "Pets", DJUI_BUTTON_STYLE_NORMAL,
+                               djui_panel_host_widdle_pets);
+        }
         djui_button_create(body, DLANG(HOST, SETTINGS), DJUI_BUTTON_STYLE_NORMAL, djui_panel_host_settings_create);
         djui_button_create(body, DLANG(HOST, MODS), DJUI_BUTTON_STYLE_NORMAL, djui_panel_host_mods_create);
         struct DjuiRect* rect3 = djui_rect_container_create(body, 64);

@@ -133,6 +133,11 @@ static void djui_panel_vr_spawn_hammer_suit(struct DjuiBase* caller) {
     vr_special_moves_spawn_cheat_hammer_suit();
 }
 
+static void djui_panel_vr_spawn_sonic_shoes(struct DjuiBase* caller) {
+    (void)caller;
+    vr_special_moves_spawn_cheat_sonic_shoes();
+}
+
 static void djui_panel_vr_spawn_wing_cap(UNUSED struct DjuiBase* caller) {
     vr_special_moves_spawn_cheat_cap(VR_CHEAT_SPAWN_WING_CAP);
 }
@@ -160,6 +165,8 @@ static void djui_panel_vr_spawn_menu_create(struct DjuiBase* caller) {
         djui_panel_vr_spawn_fire_flower);
     djui_button_create(body, "Hammer (Hammer Suit)", DJUI_BUTTON_STYLE_NORMAL,
         djui_panel_vr_spawn_hammer_suit);
+    djui_button_create(body, "Sonic Shoes", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_spawn_sonic_shoes);
     djui_button_create(
         body,
         DLANG(MENU, BACK),
@@ -333,6 +340,8 @@ static void djui_panel_vr_special_moves_defaults(
     configVrSpecialFireFlower = true;
     configVrSpecialFireFlowerMusic = true;
     configVrSpecialHammerSuit = true;
+    configVrSpecialSonicShoes = true;
+    configVrSonicShoesSpeed = VR_SONIC_SHOES_SPEED_DEFAULT;
     configVrSpecialRasengan = true;
     configVrSpecialRasenganGripTrigger = false;
     configVrRasenShurikenOverheadCharge = true;
@@ -1627,6 +1636,25 @@ static void djui_panel_vr_special_moves_create(
         );
         djui_checkbox_create(
             body,
+            "Sonic Shoes",
+            &configVrSpecialSonicShoes,
+            NULL
+        );
+        configVrSonicShoesSpeed = djui_panel_vr_clamp_uint(
+            configVrSonicShoesSpeed,
+            VR_SONIC_SHOES_SPEED_MIN,
+            VR_SONIC_SHOES_SPEED_MAX
+        );
+        djui_slider_create(
+            body,
+            "Sonic Shoes Speed",
+            &configVrSonicShoesSpeed,
+            VR_SONIC_SHOES_SPEED_MIN,
+            VR_SONIC_SHOES_SPEED_MAX,
+            NULL
+        );
+        djui_checkbox_create(
+            body,
             "Rasengan / Rasen-Shuriken",
             &configVrSpecialRasengan,
             NULL
@@ -1995,6 +2023,16 @@ static void djui_panel_vr_tutorial_hammer_suit(
     );
 }
 
+static void djui_panel_vr_tutorial_sonic_shoes(
+    struct DjuiBase* caller
+) {
+    djui_panel_vr_tutorial_page(
+        caller,
+        "Sonic Shoes",
+        "Collect the Sonic Shoes from eligible item boxes or the Spawn Menu. For 60 seconds Mario wears the powered shoes, Green Hill Zone plays, and stars trail closely around his boots and legs."
+    );
+}
+
 static void djui_panel_vr_tutorial_rasengan(
     struct DjuiBase* caller
 ) {
@@ -2026,6 +2064,8 @@ static void djui_panel_vr_tutorial_moves(
         djui_panel_vr_tutorial_fire_flower);
     djui_button_create(body, "Hammer Suit", DJUI_BUTTON_STYLE_NORMAL,
         djui_panel_vr_tutorial_hammer_suit);
+    djui_button_create(body, "Sonic Shoes", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_tutorial_sonic_shoes);
     djui_button_create(body, "Rasengan", DJUI_BUTTON_STYLE_NORMAL,
         djui_panel_vr_tutorial_rasengan);
     djui_button_create(body, "Rasen-Shuriken", DJUI_BUTTON_STYLE_NORMAL,

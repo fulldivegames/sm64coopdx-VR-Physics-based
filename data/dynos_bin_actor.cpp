@@ -1,5 +1,9 @@
 #include "dynos.cpp.h"
 
+#if defined(__ANDROID__)
+extern "C" void quest_android_pump_startup_events(void);
+#endif
+
 // Free data pointers, but keep nodes and tokens intact
 // Delete nodes generated from GfxDynCmds
 template <typename T>
@@ -256,6 +260,9 @@ void DynOS_Actor_GeneratePack(const SysPath &aPackFolder) {
     if (aPackDir) {
         struct dirent *_PackEnt = NULL;
         while ((_PackEnt = readdir(aPackDir)) != NULL) {
+#if defined(__ANDROID__)
+            quest_android_pump_startup_events();
+#endif
 
             // Skip . and ..
             if (SysPath(_PackEnt->d_name) == ".") continue;

@@ -12,6 +12,7 @@
 #include "pc/lua/utils/smlua_misc_utils.h"
 #include "pc/pc_main.h"
 #include "djui_panel_voice_chat.h"
+#include "djui_panel_widdle_pets.h"
 
 static unsigned int sPlayerInteractions = 0;
 static unsigned int sKnockbackIndex = 0;
@@ -29,14 +30,12 @@ static void djui_panel_client_character_select(UNUSED struct DjuiBase* caller) {
     queue_chat_command("/char-select menu");
 }
 
-static void djui_panel_client_widdle_pets(UNUSED struct DjuiBase* caller) {
+static void djui_panel_client_widdle_pets(struct DjuiBase* caller) {
     if (!gGameInited) {
         djui_chat_message_create("Start a game before opening Pets.");
         return;
     }
-    game_unpause();
-    djui_panel_shutdown();
-    queue_chat_command("/wpets");
+    djui_panel_widdle_pets_create(caller);
 }
 
 void djui_panel_client_server_settings_create(struct DjuiBase* caller) {
@@ -45,6 +44,10 @@ void djui_panel_client_server_settings_create(struct DjuiBase* caller) {
     {
         djui_button_create(body, "Voice Chat", DJUI_BUTTON_STYLE_NORMAL,
                            djui_panel_voice_chat_create);
+        if (smlua_chat_command_exists("wpets")) {
+            djui_button_create(body, "Pets", DJUI_BUTTON_STYLE_NORMAL,
+                               djui_panel_client_widdle_pets);
+        }
         sPlayerInteractions = gServerSettings.playerInteractions;
         char* iChoices[3] = { DLANG(HOST_SETTINGS, NONSOLID), DLANG(HOST_SETTINGS, SOLID), DLANG(HOST_SETTINGS, FRIENDLY_FIRE) };
         struct DjuiSelectionbox* selectionbox1 = djui_selectionbox_create(body, DLANG(HOST_SETTINGS, PLAYER_INTERACTION), iChoices, 3, &sPlayerInteractions, NULL);
@@ -100,9 +103,6 @@ void djui_panel_client_server_settings_create(struct DjuiBase* caller) {
 
         if (smlua_chat_command_exists("char-select")) {
             djui_button_create(body, "Character Select", DJUI_BUTTON_STYLE_NORMAL, djui_panel_client_character_select);
-        }
-        if (smlua_chat_command_exists("wpets")) {
-            djui_button_create(body, "Pets", DJUI_BUTTON_STYLE_NORMAL, djui_panel_client_widdle_pets);
         }
         djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK, djui_panel_menu_back);
     }
