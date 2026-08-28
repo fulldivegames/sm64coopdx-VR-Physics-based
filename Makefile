@@ -947,6 +947,17 @@ ifeq ($(UPDATER),1)
   endif
 endif
 
+# The upstream Windows updater targets the stock SM64 Co-Op DX repository.
+# Build the VR-specific launcher from source so packaged updates follow this
+# fork and select the newest available Windows ZIP asset.
+ifeq ($(UPDATER),1)
+ifeq ($(WINDOWS_BUILD),1)
+$(UPDATER_EXEC): ./updater/win64/coopdx_vr_updater.c
+	@$(PRINT) "$(GREEN)Linking VR updater: $(BLUE)$@ $(NO_COL)\n"
+	$(V)$(CC) -Os -s -mwindows -static -o $@ $<
+endif
+endif
+
 IS_DEV_OR_DEBUG := $(or $(filter 1,$(DEVELOPMENT)),$(filter 1,$(DEBUG)),0)
 ifeq ($(IS_DEV_OR_DEBUG),0)
   CFLAGS += -fno-ident -fno-common -ffile-prefix-map="$(PWD)"=. -D__DATE__="\"\"" -D__TIME__="\"\"" -Wno-builtin-macro-redefined
@@ -1159,7 +1170,7 @@ $(BUILD_DIR)/$(DISCORD_SDK_LIBS):
 $(BUILD_DIR)/$(COOPNET_LIBS):
 	@$(CP) -f $(COOPNET_LIBS) $(BUILD_DIR)
 
-$(BUILD_DIR)/$(UPDATER_EXEC):
+$(BUILD_DIR)/$(UPDATER_EXEC): $(UPDATER_EXEC)
 	@$(CP) -f $(UPDATER_EXEC) $(BUILD_DIR)
 
 $(BUILD_DIR)/$(LANG_DIR):

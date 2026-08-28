@@ -851,6 +851,9 @@ int main(int argc, char *argv[]) {
         debug_context_reset();
         CTX_BEGIN(CTX_TOTAL);
         gWindowApi->main_loop(produce_one_frame);
+        if (vr_update_should_exit()) {
+            game_exit();
+        }
 #ifdef DISCORD_SDK
         discord_update();
 #endif

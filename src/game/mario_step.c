@@ -8,6 +8,7 @@
 #include "game_init.h"
 #include "interaction.h"
 #include "mario_step.h"
+#include "vr_hand_interaction.h"
 #include "pc/lua/smlua.h"
 #include "game/hardcoded.h"
 
@@ -31,6 +32,174 @@ struct Surface gWaterSurfacePseudoFloor = {
     .modifiedTimestamp = 0,
     .object = NULL
 };
+
+// Sonic Shoes use the water plane as a temporary, flat floor while Mario is
+// running at the power-up's default top speed. Keep this separate from the
+// shell pseudo-floor so water running does not inherit shell slipperiness.
+static struct Surface sSonicWaterSurfacePseudoFloor = {
+    .type = SURFACE_DEFAULT,
+    .flags = 0,
+    .room = 0,
+    .force = 0,
+    .lowerY = 0,
+    .upperY = 0,
+    .vertex1 = { 0, 0, 0 },
+    .vertex2 = { 0, 0, 0 },
+    .vertex3 = { 0, 0, 0 },
+    .prevVertex1 = { 0, 0, 0 },
+    .prevVertex2 = { 0, 0, 0 },
+    .prevVertex3 = { 0, 0, 0 },
+    .normal = { 0.0f, 1.0f, 0.0f },
+    .originOffset = 0.0f,
+    .modifiedTimestamp = 0,
+    .object = NULL
+};
+
+#define VR_SONIC_WATER_RUN_ENTRY_SPEED 70.0f
+#define VR_SONIC_WATER_RUN_EXIT_SPEED  35.0f
+
+#define VR_SONIC_SAND_RUN_ENTRY_SPEED 70.0f
+#define VR_SONIC_SAND_RUN_EXIT_SPEED  35.0f
+
+static bool sSonicWaterRunning = false;
+static f32 sSonicWaterRunCruiseSpeed = 0.0f;
+static bool sSonicQuicksandRunning = false;
+
+bool mario_is_sonic_water_run_floor(struct Surface *floor) {
+    return floor == &sSonicWaterSurfacePseudoFloor;
+}
+
+bool mario_sonic_shoes_can_run_on_quicksand(struct MarioState *m) {
+    if (m == NULL || m->playerIndex != 0 || !vr_special_moves_sonic_shoes_active() ||
+        m->floor == NULL || !SURFACE_IS_QUICKSAND(m->floor->type)) {
+        sSonicQuicksandRunning = false;
+        return false;
+    }
+
+    const f32 horizontalSpeed = sqrtf(m->vel[0] * m->vel[0] + m->vel[2] * m->vel[2]);
+    if (!(horizontalSpeed > 0.01f)) {
+        sSonicQuicksandRunning = false;
+        return false;
+    }
+
+    const f32 effectiveSpeed = MIN(horizontalSpeed, fabsf(m->forwardVel));
+    if (sSonicQuicksandRunning) {
+        if (effectiveSpeed < VR_SONIC_SAND_RUN_EXIT_SPEED && m->intendedMag < 24.0f) {
+            sSonicQuicksandRunning = false;
+        }
+    } else if (effectiveSpeed >= VR_SONIC_SAND_RUN_ENTRY_SPEED) {
+        sSonicQuicksandRunning = true;
+    }
+    return sSonicQuicksandRunning;
+}
+
+static void mario_sustain_sonic_water_run_speed(struct MarioState *m) {
+    if (!sSonicWaterRunning || m == NULL || m->intendedMag < 24.0f) {
+        return;
+    }
+
+    const f32 horizontalSpeed = sqrtf(
+        m->vel[0] * m->vel[0] + m->vel[2] * m->vel[2]
+    );
+    if (!isfinite(horizontalSpeed) || horizontalSpeed <= 0.01f) {
+        return;
+    }
+
+    sSonicWaterRunCruiseSpeed = MAX(sSonicWaterRunCruiseSpeed, horizontalSpeed);
+    if (horizontalSpeed < sSonicWaterRunCruiseSpeed) {
+        const f32 scale = sSonicWaterRunCruiseSpeed / horizontalSpeed;
+        m->vel[0] *= scale;
+        m->vel[2] *= scale;
+        m->slideVelX *= scale;
+        m->slideVelZ *= scale;
+    }
+
+    const f32 direction = (m->forwardVel < 0.0f) ? -1.0f : 1.0f;
+    m->forwardVel = direction * MAX(fabsf(m->forwardVel), sSonicWaterRunCruiseSpeed);
+}
+
+static bool mario_sonic_water_run_bonked(struct MarioState *m) {
+    switch (m->action) {
+        case ACT_HARD_BACKWARD_GROUND_KB:
+        case ACT_HARD_FORWARD_GROUND_KB:
+        case ACT_BACKWARD_GROUND_KB:
+        case ACT_FORWARD_GROUND_KB:
+        case ACT_SOFT_BACKWARD_GROUND_KB:
+        case ACT_SOFT_FORWARD_GROUND_KB:
+        case ACT_GROUND_BONK:
+        case ACT_BACKWARD_AIR_KB:
+        case ACT_FORWARD_AIR_KB:
+        case ACT_HARD_FORWARD_AIR_KB:
+        case ACT_HARD_BACKWARD_AIR_KB:
+        case ACT_SOFT_BONK:
+            return true;
+    }
+    return false;
+}
+
+struct Surface *mario_get_sonic_water_run_floor(
+    struct MarioState *m,
+    f32 waterLevel,
+    f32 terrainFloorHeight
+) {
+    if (m == NULL || m->playerIndex != 0 ||
+        !vr_special_moves_sonic_shoes_active() ||
+        terrainFloorHeight >= waterLevel ||
+        !(m->action & (ACT_FLAG_MOVING | ACT_FLAG_AIR)) ||
+        mario_sonic_water_run_bonked(m)) {
+        sSonicWaterRunning = false;
+        sSonicWaterRunCruiseSpeed = 0.0f;
+        return NULL;
+    }
+
+    const f32 horizontalSpeed = sqrtf(
+        m->vel[0] * m->vel[0] + m->vel[2] * m->vel[2]
+    );
+    if (!isfinite(horizontalSpeed)) {
+        sSonicWaterRunning = false;
+        sSonicWaterRunCruiseSpeed = 0.0f;
+        return NULL;
+    }
+
+    // Both values must still describe real movement. Some transitions retain
+    // an old horizontal vector after forwardVel has already decelerated; using
+    // that stale vector alone allowed Mario to creep across water indefinitely.
+    const f32 effectiveSpeed = MIN(horizontalSpeed, fabsf(m->forwardVel));
+
+    if (sSonicWaterRunning) {
+        // A water-entry action transition can briefly lower forwardVel before
+        // the surface step restores it. Do not drop the water floor during
+        // that single-frame dip while the player is still holding full input.
+        if (effectiveSpeed < VR_SONIC_WATER_RUN_EXIT_SPEED &&
+            m->intendedMag < 24.0f) {
+            sSonicWaterRunning = false;
+            sSonicWaterRunCruiseSpeed = 0.0f;
+            return NULL;
+        }
+    } else {
+        if (effectiveSpeed < VR_SONIC_WATER_RUN_ENTRY_SPEED) {
+            return NULL;
+        }
+        sSonicWaterRunning = true;
+        sSonicWaterRunCruiseSpeed = MAX(horizontalSpeed, VR_SONIC_WATER_RUN_ENTRY_SPEED);
+    }
+
+    sSonicWaterSurfacePseudoFloor.originOffset = waterLevel;
+    return &sSonicWaterSurfacePseudoFloor;
+}
+
+static void mario_stand_upright_on_sonic_water(struct MarioState *m) {
+    m->faceAngle[0] = 0;
+    m->faceAngle[2] = 0;
+    m->angleVel[0] = 0;
+    m->angleVel[2] = 0;
+    if (m->marioObj != NULL) {
+        m->marioObj->header.gfx.angle[0] = 0;
+        m->marioObj->header.gfx.angle[2] = 0;
+        m->marioObj->oMoveAnglePitch = 0;
+        m->marioObj->oMoveAngleRoll = 0;
+    }
+}
 
 /**
  * Always returns zero. This may have been intended
@@ -123,6 +292,13 @@ void mario_bonk_reflection(struct MarioState *m, u8 negateSpeed) {
 
 u32 mario_update_quicksand(struct MarioState *m, f32 sinkingSpeed) {
     if (!m) { return 0; }
+    // Sonic Shoes treat quicksand as solid terrain, including the deep and
+    // instant variants. Clearing prior depth also prevents carrying a sink
+    // state into another quicksand action after collecting the power-up.
+    if (mario_sonic_shoes_can_run_on_quicksand(m)) {
+        m->quicksandDepth = 0.0f;
+        return FALSE;
+    }
     extern bool gDjuiInMainMenu;
     if (m->action & ACT_FLAG_RIDING_SHELL || gDjuiInMainMenu) {
         m->quicksandDepth = 0.0f;
@@ -320,6 +496,18 @@ static s32 perform_ground_quarter_step(struct MarioState *m, Vec3f nextPos) {
 
     mario_update_wall(m, &upperWcd);
 
+    struct Surface *sonicWaterFloor = mario_get_sonic_water_run_floor(
+        m,
+        waterLevel,
+        floorHeight
+    );
+    if (sonicWaterFloor != NULL) {
+        floorHeight = waterLevel;
+        floor = sonicWaterFloor;
+        mario_sustain_sonic_water_run_speed(m);
+        mario_stand_upright_on_sonic_water(m);
+    }
+
     if (floor == NULL) {
         if (gServerSettings.bouncyLevelBounds != BOUNCY_LEVEL_BOUNDS_OFF) {
             m->faceAngle[1] += 0x8000;
@@ -329,7 +517,8 @@ static s32 perform_ground_quarter_step(struct MarioState *m, Vec3f nextPos) {
         return GROUND_STEP_HIT_WALL_STOP_QSTEPS;
     }
 
-    if ((m->action & ACT_FLAG_RIDING_SHELL) && floorHeight < waterLevel) {
+    if (sonicWaterFloor == NULL &&
+        (m->action & ACT_FLAG_RIDING_SHELL) && floorHeight < waterLevel) {
         bool allowForceAction = true;
         smlua_call_event_hooks(HOOK_ALLOW_FORCE_WATER_ACTION, m, false, &allowForceAction);
         if (allowForceAction) {
@@ -503,6 +692,20 @@ s32 perform_air_quarter_step(struct MarioState *m, Vec3f intendedPos, u32 stepAr
     //! The water pseudo floor is not referenced when your intended qstep is
     // out of bounds, so it won't detect you as landing.
 
+    struct Surface *sonicWaterFloor = mario_get_sonic_water_run_floor(
+        m,
+        waterLevel,
+        floorHeight
+    );
+    if (sonicWaterFloor != NULL) {
+        floorHeight = waterLevel;
+        floor = sonicWaterFloor;
+        if (nextPos[1] <= waterLevel) {
+            mario_sustain_sonic_water_run_speed(m);
+            mario_stand_upright_on_sonic_water(m);
+        }
+    }
+
     if (floor == NULL) {
         if (nextPos[1] <= m->floorHeight) {
             m->pos[1] = m->floorHeight;
@@ -518,7 +721,8 @@ s32 perform_air_quarter_step(struct MarioState *m, Vec3f intendedPos, u32 stepAr
         return AIR_STEP_HIT_WALL;
     }
 
-    if ((m->action & ACT_FLAG_RIDING_SHELL) && floorHeight < waterLevel) {
+    if (sonicWaterFloor == NULL &&
+        (m->action & ACT_FLAG_RIDING_SHELL) && floorHeight < waterLevel) {
         bool allowForceAction = true;
         smlua_call_event_hooks(HOOK_ALLOW_FORCE_WATER_ACTION, m, false, &allowForceAction);
         if (allowForceAction) {

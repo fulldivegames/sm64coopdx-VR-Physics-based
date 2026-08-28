@@ -13,6 +13,8 @@
 
 #include "update_checker.h"
 #include "pc/djui/djui.h"
+#include "pc/platform.h"
+#include "pc/pc_main.h"
 #include "pc/network/version.h"
 #include "pc/loading.h"
 
@@ -30,6 +32,10 @@ struct Version {
 static char sVersionUpdateTextBuffer[256] = { 0 };
 static char sRemoteVersionStr[VR_UPDATE_VERSION_MAX] = { 0 };
 static enum VrUpdateStatus sVrUpdateStatus = VR_UPDATE_NOT_CHECKED;
+static DWORD sVrUpdateExitTick = 0;
+// Test builds show the installer even when GitHub's latest release matches.
+// Release builds set this to 0 and only show a newer remote version.
+#define VR_UPDATE_TEST_FORCE_AVAILABLE 0
 
 bool gUpdateMessage = false;
 
@@ -322,6 +328,42 @@ static bool get_version_remote(void) {
 }
 #endif
 
+#if defined(_WIN32)
+bool vr_update_install_latest(void) {
+    if (sRemoteVersionStr[0] == '\0') return false;
+    char tempPath[SYS_MAX_PATH] = { 0 };
+    if (GetTempPathA(sizeof(tempPath), tempPath) == 0) return false;
+    char scriptPath[SYS_MAX_PATH] = { 0 };
+    const DWORD nonce = GetTickCount();
+    snprintf(scriptPath, sizeof(scriptPath), "%ssm64vr-update-%lu.ps1", tempPath, (unsigned long)nonce);
+    FILE* script = fopen(scriptPath, "wb");
+    if (script == NULL) return false;
+    fprintf(script,
+        "$ErrorActionPreference='Stop'; Start-Sleep -Seconds 2; $headers=@{Accept='application/vnd.github+json';'User-Agent'='SM64-Co-Op-DX-VR'}; $release=Invoke-RestMethod -Headers $headers -Uri 'https://api.github.com/repos/fulldivegames/sm64coopdx-VR-Physics-based/releases?per_page=20' | Where-Object { -not $_.draft -and -not $_.prerelease } | ForEach-Object { $asset=$_.assets | Where-Object { $_.name -match '(?i)windows.*\\.zip$' } | Select-Object -First 1; if ($null -ne $asset) { [pscustomobject]@{Tag=$_.tag_name;Url=$asset.browser_download_url} } } | Select-Object -First 1; if ($null -eq $release) { throw 'No Windows VR release asset is currently available.' }; Start-Sleep -Seconds 2; $zip='%ssm64vr-update-%lu.zip'; $stage='%ssm64vr-stage-%lu'; Invoke-WebRequest -UseBasicParsing -Uri $release.Url -OutFile $zip; Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force; $payload=Get-ChildItem -LiteralPath $stage -Directory | Select-Object -First 1; if ($null -eq $payload) { $payload=Get-Item -LiteralPath $stage }; Get-ChildItem -LiteralPath $payload.FullName -Force | Copy-Item -Destination '%s' -Recurse -Force; Start-Process -FilePath '%s';",
+        tempPath, (unsigned long)nonce, tempPath, (unsigned long)nonce,
+        sys_exe_path_dir(), sys_exe_path_file());
+    fclose(script);
+    STARTUPINFOA si = { 0 };
+    PROCESS_INFORMATION pi = { 0 };
+    si.cb = sizeof(si);
+    char command[SYS_MAX_PATH + 64] = { 0 };
+    snprintf(command, sizeof(command), "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"%s\"", scriptPath);
+    if (!CreateProcessA(NULL, command, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) return false;
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    // Give the menu one rendered frame to show that the installer is starting.
+    sVrUpdateExitTick = GetTickCount() + 350;
+    return true;
+}
+
+bool vr_update_should_exit(void) {
+    return sVrUpdateExitTick != 0 && (LONG)(GetTickCount() - sVrUpdateExitTick) >= 0;
+}
+#else
+bool vr_update_install_latest(void) { return false; }
+bool vr_update_should_exit(void) { return false; }
+#endif
+
 void check_for_updates(void) {
     LOADING_SCREEN_MUTEX(
         loading_screen_set_segment_text("Checking For VR Updates")
@@ -346,7 +388,7 @@ void check_for_updates(void) {
         return;
     }
 
-    if (is_version_newer(client, remote)) {
+    if (is_version_newer(client, remote) || VR_UPDATE_TEST_FORCE_AVAILABLE) {
         sVrUpdateStatus = VR_UPDATE_AVAILABLE;
         gUpdateMessage = true;
         snprintf(

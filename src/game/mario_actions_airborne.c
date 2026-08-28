@@ -295,23 +295,33 @@ void update_air_without_turn(struct MarioState *m) {
     f32 intendedMag;
 
     if (!check_horizontal_wind(m)) {
-        dragThreshold = m->action == ACT_LONG_JUMP ? 48.0f : 32.0f;
-        m->forwardVel = approach_f32(m->forwardVel, 0.0f, 0.35f, 0.35f);
+        const bool sonicDive =
+            m->action == ACT_DIVE || m->action == ACT_FORWARD_ROLLOUT;
+        const f32 sonicScale = sonicDive
+            ? vr_special_moves_sonic_speed_scale()
+            : 1.0f;
+        dragThreshold = (m->action == ACT_LONG_JUMP ? 48.0f : 32.0f) * sonicScale;
+        m->forwardVel = approach_f32(
+            m->forwardVel,
+            0.0f,
+            0.35f * sonicScale,
+            0.35f * sonicScale
+        );
 
         if (m->input & INPUT_NONZERO_ANALOG) {
             intendedDYaw = m->intendedYaw - m->faceAngle[1];
             intendedMag = m->intendedMag / 32.0f;
 
-            m->forwardVel += intendedMag * coss(intendedDYaw) * 1.5f;
-            sidewaysSpeed = intendedMag * sins(intendedDYaw) * 10.0f;
+            m->forwardVel += intendedMag * coss(intendedDYaw) * 1.5f * sonicScale;
+            sidewaysSpeed = intendedMag * sins(intendedDYaw) * 10.0f * sonicScale;
         }
 
         //! Uncapped air speed. Net positive when moving forward.
         if (m->forwardVel > dragThreshold) {
-            m->forwardVel -= 1.0f;
+            m->forwardVel -= 1.0f * sonicScale;
         }
-        if (m->forwardVel < -16.0f) {
-            m->forwardVel += 2.0f;
+        if (m->forwardVel < -16.0f * sonicScale) {
+            m->forwardVel += 2.0f * sonicScale;
         }
 
         m->slideVelX = m->forwardVel * sins(m->faceAngle[1]);

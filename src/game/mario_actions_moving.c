@@ -19,6 +19,7 @@
 #include "pc/network/coopnet/coopnet.h"
 #include "pc/lua/smlua.h"
 #include "pc/vr/vr.h"
+#include "vr_hand_interaction.h"
 
 struct LandingAction {
     s16 numFrames;
@@ -120,7 +121,11 @@ static void vr_set_direction_locked_ground_velocity(
     f32 speed,
     s16 travelYaw
 ) {
-    speed = clamp(fabsf(speed), 0.0f, 48.0f);
+    speed = clamp(
+        fabsf(speed),
+        0.0f,
+        48.0f * vr_special_moves_sonic_speed_scale()
+    );
     m->faceAngle[1] = vr_get_first_person_view_yaw();
     m->forwardVel = speed;
     m->slideYaw = travelYaw;
@@ -148,10 +153,6 @@ static bool vr_get_horizontal_motion(
         return false;
     }
 
-    // SM64's atan2s convention receives Z first and X second when converting
-    // a horizontal movement vector back into yaw. Reversing these arguments
-    // makes the inferred travel direction roughly a quarter-turn wrong and
-    // causes the steering code to fight its own velocity every gameplay tick.
     *travelYaw = *speed > 0.01f
         ? atan2s(m->vel[2], m->vel[0])
         : m->intendedYaw;
@@ -185,16 +186,27 @@ s32 begin_walking_action(struct MarioState *m, f32 forwardVel, u32 action, u32 a
 #define VR_LOCOMOTION_GROUND_SPEED_LIMIT 48.0f
 
 static f32 vr_running_speed_scale(void) {
-    if (!vr_is_active()) {
-        return 1.0f;
-    }
-    return (f32)clamp(
-        ns_coopnet_vr_gameplay_allowed()
-            ? configVrRunningSpeed
-            : VR_RUNNING_SPEED_DEFAULT,
-        VR_RUNNING_SPEED_MIN,
-        VR_RUNNING_SPEED_MAX
-    ) / 100.0f;
+    const f32 configuredScale = vr_is_active()
+        ? (f32)clamp(
+            ns_coopnet_vr_gameplay_allowed()
+                ? configVrRunningSpeed
+                : VR_RUNNING_SPEED_DEFAULT,
+            VR_RUNNING_SPEED_MIN,
+            VR_RUNNING_SPEED_MAX
+        ) / 100.0f
+        : 1.0f;
+    return configuredScale * vr_special_moves_sonic_speed_scale();
+}
+
+static f32 vr_sonic_acceleration_scale(void) {
+    return vr_special_moves_sonic_speed_scale();
+}
+
+static s32 vr_sonic_turn_step(s32 baseStep) {
+    return MIN(
+        (s32)((f32)baseStep * vr_special_moves_sonic_speed_scale()),
+        0x7FFF
+    );
 }
 
 static f32 vr_backpedal_target_speed(struct MarioState* m) {
@@ -207,7 +219,11 @@ static f32 vr_backpedal_target_speed(struct MarioState* m) {
         maximumSpeed *= 0.7f;
     }
 
-    f32 targetSpeed = MIN(m->intendedMag, maximumSpeed);
+    maximumSpeed *= vr_special_moves_sonic_speed_scale();
+    f32 targetSpeed = MIN(
+        m->intendedMag * vr_special_moves_sonic_speed_scale(),
+        maximumSpeed
+    );
     if (m->quicksandDepth > 10.0f) {
         targetSpeed *= 6.25f / m->quicksandDepth;
     }
@@ -249,8 +265,15 @@ static s32 update_vr_assisted_side_flip_skid(struct MarioState* m) {
         speed = 0.0f;
         travelYaw = m->intendedYaw;
     }
-    speed = fminf(speed, VR_ASSISTED_SIDE_FLIP_SKID_MAX_SPEED);
-    speed = fmaxf(0.0f, speed - VR_ASSISTED_SIDE_FLIP_SKID_DECEL);
+    const f32 sonicScale = vr_sonic_acceleration_scale();
+    speed = fminf(
+        speed,
+        VR_ASSISTED_SIDE_FLIP_SKID_MAX_SPEED * sonicScale
+    );
+    speed = fmaxf(
+        0.0f,
+        speed - VR_ASSISTED_SIDE_FLIP_SKID_DECEL * sonicScale
+    );
     vr_set_direction_locked_ground_velocity(m, speed, travelYaw);
 
     play_sound(
@@ -285,9 +308,6 @@ static s32 finish_vr_lateral_side_flip_skid(struct MarioState* m) {
         travelYaw = m->intendedYaw;
     }
     vr_finish_first_person_lateral_skid();
-    // Keep the skid's remaining momentum and let ordinary walking steer it
-    // toward the held stick. Snapping directly to intendedYaw here made the
-    // release pull Mario in a direction that the player never traversed.
     vr_set_direction_locked_ground_velocity(
         m,
         speed,
@@ -313,10 +333,11 @@ static s32 update_vr_lateral_side_flip_skid(struct MarioState* m) {
     if (!isfinite(speed)) {
         speed = 0.0f;
     }
+    const f32 sonicScale = vr_sonic_acceleration_scale();
     speed = clamp(
-        speed - VR_LATERAL_SIDE_FLIP_SKID_DECEL,
+        speed - VR_LATERAL_SIDE_FLIP_SKID_DECEL * sonicScale,
         0.0f,
-        VR_LOCOMOTION_GROUND_SPEED_LIMIT
+        VR_LOCOMOTION_GROUND_SPEED_LIMIT * sonicScale
     );
 
     const f32 oldSpeed = sqrtf(
@@ -491,9 +512,13 @@ void update_sliding_angle(struct MarioState *m, f32 accel, f32 lossFactor) {
 
     //! Speed is capped a frame late (butt slide HSG)
     m->forwardVel = sqrtf(m->slideVelX * m->slideVelX + m->slideVelZ * m->slideVelZ);
-    if (m->forwardVel > 100.0f) {
-        m->slideVelX = m->slideVelX * 100.0f / m->forwardVel;
-        m->slideVelZ = m->slideVelZ * 100.0f / m->forwardVel;
+    const f32 maximumSlideSpeed = 100.0f *
+        (m->action == ACT_DIVE_SLIDE
+            ? vr_special_moves_sonic_speed_scale()
+            : 1.0f);
+    if (m->forwardVel > maximumSlideSpeed) {
+        m->slideVelX = m->slideVelX * maximumSlideSpeed / m->forwardVel;
+        m->slideVelZ = m->slideVelZ * maximumSlideSpeed / m->forwardVel;
     }
 
     if (newFacingDYaw < -0x4000 || newFacingDYaw > 0x4000) {
@@ -754,7 +779,9 @@ Caps speed at a certain value and may reduce it slightly on steep slopes
 |descriptionEnd| */
 static void update_vr_backpedal_speed(struct MarioState* m) {
     const f32 targetSpeed = vr_backpedal_target_speed(m);
-    const f32 speedStep = m->forwardVel > 0.0f ? 2.5f : 1.4f;
+    const f32 sonicScale = vr_sonic_acceleration_scale();
+    const f32 speedStep =
+        (m->forwardVel > 0.0f ? 2.5f : 1.4f) * sonicScale;
     m->forwardVel = approach_f32(
         m->forwardVel,
         -targetSpeed,
@@ -766,8 +793,8 @@ static void update_vr_backpedal_speed(struct MarioState* m) {
     m->faceAngle[1] = bodyYaw - approach_s32(
         (s16)(bodyYaw - m->faceAngle[1]),
         0,
-        0x800,
-        0x800
+        vr_sonic_turn_step(0x800),
+        vr_sonic_turn_step(0x800)
     );
     apply_slope_accel(m);
 }
@@ -798,6 +825,7 @@ static void update_vr_direction_locked_walking_speed(
     struct MarioState* m
 ) {
     const f32 runningScale = vr_running_speed_scale();
+    const f32 sonicScale = vr_sonic_acceleration_scale();
     f32 maxTargetSpeed =
         m->floor != NULL && m->floor->type == SURFACE_SLOW
             ? 24.0f * runningScale
@@ -820,9 +848,9 @@ static void update_vr_direction_locked_walking_speed(
     }
     speed = MAX(speed, fabsf(m->forwardVel));
     if (speed <= targetSpeed) {
-        speed += 1.1f - speed / 43.0f;
+        speed += (1.1f - speed / (43.0f * sonicScale)) * sonicScale;
     } else if (m->floor != NULL && m->floor->normal.y >= 0.95f) {
-        speed -= 1.0f;
+        speed -= 1.0f * sonicScale;
     }
     const f32 groundSpeedLimit =
         VR_LOCOMOTION_GROUND_SPEED_LIMIT * runningScale;
@@ -843,8 +871,8 @@ static void update_vr_direction_locked_walking_speed(
     const s16 travelYaw = m->intendedYaw - approach_s32(
         (s16)(m->intendedYaw - previousTravelYaw),
         0,
-        0x800,
-        0x800
+        vr_sonic_turn_step(0x800),
+        vr_sonic_turn_step(0x800)
     );
     // Reuse native slope, moving-sand, and wind behavior in the requested
     // travel direction, then restore the independently locked body direction.
@@ -890,6 +918,7 @@ void update_walking_speed(struct MarioState *m) {
     f32 targetSpeed;
 
     const f32 runningScale = vr_running_speed_scale();
+    const f32 sonicScale = vr_sonic_acceleration_scale();
     if (m->floor != NULL && m->floor->type == SURFACE_SLOW) {
         maxTargetSpeed = 24.0f * runningScale;
     } else {
@@ -903,18 +932,26 @@ void update_walking_speed(struct MarioState *m) {
     }
 
     if (m->forwardVel <= 0.0f) {
-        m->forwardVel += 1.1f;
+        m->forwardVel += 1.1f * sonicScale;
     } else if (m->forwardVel <= targetSpeed) {
-        m->forwardVel += 1.1f - m->forwardVel / 43.0f;
+        m->forwardVel +=
+            (1.1f - m->forwardVel / (43.0f * sonicScale)) *
+            sonicScale;
     } else if (m->floor != NULL && m->floor->normal.y >= 0.95f) {
-        m->forwardVel -= 1.0f;
+        m->forwardVel -= 1.0f * sonicScale;
     }
 
     if (m->forwardVel > 48.0f * runningScale) {
         m->forwardVel = 48.0f * runningScale;
     }
 
-    m->faceAngle[1] = m->intendedYaw - approach_s32((s16)(m->intendedYaw - m->faceAngle[1]), 0, 0x800, 0x800);
+    const s32 turnStep = vr_sonic_turn_step(0x800);
+    m->faceAngle[1] = m->intendedYaw - approach_s32(
+        (s16)(m->intendedYaw - m->faceAngle[1]),
+        0,
+        turnStep,
+        turnStep
+    );
     apply_slope_accel(m);
 }
 
@@ -924,6 +961,9 @@ Returns true if conditions to slide are met.
 |descriptionEnd| */
 s32 should_begin_sliding(struct MarioState *m) {
     if (!m) { return FALSE; }
+    if (vr_special_moves_sonic_shoes_prevent_slope_slide(m)) {
+        return FALSE;
+    }
     if (m->input & INPUT_ABOVE_SLIDE) {
         s32 slideLevel = (m->area->terrainType & TERRAIN_MASK) == TERRAIN_SLIDE;
         s32 movingBackward =
@@ -1091,9 +1131,18 @@ void anim_and_audio_for_walk(struct MarioState *m) {
         }
     }
 
-    marioObj->oMarioWalkingPitch =
-        (s16) approach_s32(marioObj->oMarioWalkingPitch, targetPitch, 0x800, 0x800);
-    marioObj->header.gfx.angle[0] = marioObj->oMarioWalkingPitch;
+    if (mario_is_sonic_water_run_floor(m->floor)) {
+        // High Sonic Shoes velocity can otherwise accumulate the running lean
+        // into a complete forward roll. The water plane is a floor, so keep the
+        // visual model upright without changing Mario's movement direction.
+        marioObj->oMarioWalkingPitch = 0;
+        marioObj->header.gfx.angle[0] = 0;
+        marioObj->header.gfx.angle[2] = 0;
+    } else {
+        marioObj->oMarioWalkingPitch =
+            (s16) approach_s32(marioObj->oMarioWalkingPitch, targetPitch, 0x800, 0x800);
+        marioObj->header.gfx.angle[0] = marioObj->oMarioWalkingPitch;
+    }
 }
 
 /* |description|
@@ -1385,8 +1434,6 @@ s32 act_walking(struct MarioState *m) {
 
     check_ledge_climb_down(m);
     if (vr_first_person_movement_overhaul_active(m)) {
-        // Wall and ledge presentation code may temporarily change faceAngle.
-        // It must never become the locomotion heading in Movement Overhaul.
         m->faceAngle[1] = vr_get_first_person_view_yaw();
     }
     tilt_body_walking(m, startYaw);

@@ -117,9 +117,6 @@ static void vr_update_twirl_tornado_effect(struct MarioState *m) {
         sVrTwirlTornado->oIntangibleTimer = -1;
     }
 
-    // The Tweester mesh is much taller than a player at scale 1.0. Scale it
-    // from the selected character's model-derived head height so the shell is
-    // approximately 75% of that character's full model height.
     const unsigned int character =
         (m->character != NULL && m->character->type < CT_MAX)
             ? m->character->type
@@ -391,12 +388,12 @@ static void vr_clamp_first_person_horizontal_vector(
     const f32 speedSquared =
         *velocityX * *velocityX +
         *velocityZ * *velocityZ;
-    const f32 speedLimitSquared =
-        VR_FIRST_PERSON_GROUND_SPEED_LIMIT *
-        VR_FIRST_PERSON_GROUND_SPEED_LIMIT;
+    const f32 speedLimit = VR_FIRST_PERSON_GROUND_SPEED_LIMIT *
+        vr_special_moves_sonic_speed_scale();
+    const f32 speedLimitSquared = speedLimit * speedLimit;
     if (speedSquared > speedLimitSquared) {
         const f32 scale =
-            VR_FIRST_PERSON_GROUND_SPEED_LIMIT /
+            speedLimit /
             sqrtf(speedSquared);
         *velocityX *= scale;
         *velocityZ *= scale;
@@ -419,6 +416,8 @@ static void vr_stabilize_first_person_skid_speed(
         !isfinite(m->slideVelX) ||
         !isfinite(m->slideVelZ);
 
+    const f32 speedLimit = VR_FIRST_PERSON_GROUND_SPEED_LIMIT *
+        vr_special_moves_sonic_speed_scale();
     if (vr_first_person_movement_overhaul_active(m)) {
         // Movement Overhaul deliberately separates Mario's body yaw from his
         // world-space travel vector. Never repair that valid separation by
@@ -441,8 +440,8 @@ static void vr_stabilize_first_person_skid_speed(
         } else {
             m->forwardVel = clamp(
                 m->forwardVel,
-                -VR_FIRST_PERSON_GROUND_SPEED_LIMIT,
-                VR_FIRST_PERSON_GROUND_SPEED_LIMIT
+                -speedLimit,
+                speedLimit
             );
         }
         return;
@@ -455,8 +454,8 @@ static void vr_stabilize_first_person_skid_speed(
     } else {
         m->forwardVel = clamp(
             previousSpeed,
-            -VR_FIRST_PERSON_GROUND_SPEED_LIMIT,
-            VR_FIRST_PERSON_GROUND_SPEED_LIMIT
+            -speedLimit,
+            speedLimit
         );
     }
 
@@ -506,10 +505,12 @@ static void vr_stabilize_first_person_skid_speed(
 static void vr_update_first_person_backpedal_state(
     struct MarioState* m
 ) {
+    // These are gameplay-tick windows, not rendered-frame windows. Using
+    // gGlobalTimer made the same nominal window several times shorter on a
+    // 90/120 Hz headset than at the engine's 30 Hz simulation rate.
     if (sVrBackpedalGraceTicks > 0) {
         sVrBackpedalGraceTicks--;
     }
-
     if (!vr_first_person_locomotion_available(m) ||
         m->controller->stickMag <= 0.0f) {
         sVrBackpedalRequested = false;
@@ -528,7 +529,6 @@ static void vr_update_first_person_backpedal_state(
     const f32 forwardAxis =
         m->controller->stickY /
         m->controller->stickMag;
-
     // Classify the stick by normalized direction rather than a fixed raw-Y
     // value. Partial diagonal deflections now register as reliably as a fully
     // tilted stick, while separate enter/exit angles still reject axis noise.
@@ -546,9 +546,6 @@ static void vr_update_first_person_backpedal_state(
         sVrBackpedalRequested &&
         m->action == ACT_WALKING &&
         m->forwardVel >= VR_FIRST_PERSON_SIDE_FLIP_MIN_SPEED) {
-        // Keep the release movement and native skid, but bound the side-flip
-        // opportunity. A held backward direction must transition into the
-        // established reverse jog instead of sustaining the skid for seconds.
         sVrBackpedalGraceActive = true;
         sVrAssistedSkidActive = false;
         sVrBackpedalGraceTicks =
@@ -639,6 +636,9 @@ bool vr_first_person_backpedal_active(struct MarioState* m) {
         return false;
     }
 
+    // Side-flip eligibility and the visible skid are separate states. Once the
+    // bounded skid explicitly finishes, reverse movement starts immediately
+    // even though the jump window can remain open.
     return !(sVrBackpedalGraceActive &&
         ((m->action == ACT_WALKING &&
           m->forwardVel >= VR_FIRST_PERSON_SIDE_FLIP_MIN_SPEED) ||
@@ -1814,8 +1814,12 @@ static u32 set_mario_action_airborne(struct MarioState *m, u32 action, u32 actio
             break;
 
         case ACT_DIVE:
-            if ((fowardVel = m->forwardVel + 15.0f) > 48.0f) {
-                fowardVel = 48.0f;
+            {
+                const f32 sonicScale = vr_special_moves_sonic_speed_scale();
+                const f32 maximumDiveSpeed = 48.0f * sonicScale;
+                if ((fowardVel = m->forwardVel + 15.0f * sonicScale) > maximumDiveSpeed) {
+                    fowardVel = maximumDiveSpeed;
+                }
             }
             mario_set_forward_vel(m, fowardVel);
             break;
@@ -2463,6 +2467,28 @@ void update_mario_geometry_inputs(struct MarioState *m) {
     m->ceilHeight = vec3f_mario_ceil(&m->pos[0], m->floorHeight, &m->ceil);
     gasLevel = find_poison_gas_level(m->pos[0], m->pos[2]);
     m->waterLevel = find_water_level(m->pos[0], m->pos[2]);
+
+    struct Surface *sonicWaterFloor = mario_get_sonic_water_run_floor(
+        m,
+        m->waterLevel,
+        m->floorHeight
+    );
+    if (sonicWaterFloor != NULL && (m->action & ACT_FLAG_MOVING)) {
+        m->floor = sonicWaterFloor;
+        m->floorHeight = m->waterLevel;
+        m->pos[1] = MAX(m->pos[1], (f32)m->waterLevel);
+        m->vel[1] = 0.0f;
+        m->faceAngle[0] = 0;
+        m->faceAngle[2] = 0;
+        m->angleVel[0] = 0;
+        m->angleVel[2] = 0;
+        if (m->marioObj != NULL) {
+            m->marioObj->header.gfx.angle[0] = 0;
+            m->marioObj->header.gfx.angle[2] = 0;
+            m->marioObj->oMoveAnglePitch = 0;
+            m->marioObj->oMoveAngleRoll = 0;
+        }
+    }
 
     if (m->action == ACT_DEBUG_FREE_MOVE) { return; }
 

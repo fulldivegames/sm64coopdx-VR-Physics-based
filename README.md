@@ -14,7 +14,7 @@
 </p>
 
 > [!IMPORTANT]
-> The current public release is **v0.8.0 — Sonic Shoes Update**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur.
+> The current public release is **v0.8.2 — Updater and Release Notes Update**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur.
 
 SM64 Co-Op DX VR currently targets 64-bit Windows, OpenGL, and OpenXR. It keeps the original game's flat-screen mode and multiplayer foundation while adding native stereoscopic rendering, 6DoF tracking, VR-aware cameras, remappable motion-controller input, physical interactions, comfort options, and extensive calibration settings.
 
@@ -82,19 +82,20 @@ Restart the game, then enable the pack from the DynOS menu. Install one mod or p
 
 ### Updating an existing installation
 
-1. Download and extract the new release into a new folder.
-2. Launch the new executable normally. Your validated ROM and normal user configuration should remain available through the game's user-data folder.
-3. Recheck **Settings > VR** because new releases may add settings or change defaults.
-4. Keep the previous extracted folder until the new version has been tested with your headset and saves.
+1. Fully close the game.
+2. Run **Co-op DX VR Updater.exe** from the current game folder.
+3. The updater checks the latest PCVR GitHub release with a Windows ZIP, installs it, and launches the updated game. Its console closes after the game starts.
+4. Recheck **Settings > VR** because new releases may add settings or change defaults.
+5. Keep the previous folder until the new version has been tested with your headset and saves.
 
-The lower-left corner of the main menu shows the installed VR version and checks GitHub for a newer release. If an update is available, the menu provides a link to this repository's release page. The game does not silently download or install updates.
+The updater preserves the validated ROM and normal user configuration stored in the game's user-data folder. If the updater cannot find a Windows asset or reports an error, keep the current installation and retry later.
 
 ## Install mods on Windows
 
 The Windows release keeps the normal SM64 Co-Op DX mod layout inside the extracted game folder:
 
 ```text
-SM64-Co-Op-DX-VR-Windows-v0.7.2/
+SM64-Co-Op-DX-VR-Windows-v0.8.2/
 ├── mods/
 ├── dynos/
 │   └── packs/
@@ -309,6 +310,12 @@ v0.6.27 expands compatibility around mod discovery, Lua HUD/menu presentation, c
 Compatibility is not universal. Mods that replace camera, player action, input, HUD, rendering, collision, or character geometry can conflict with VR behavior. Install one at a time when troubleshooting and report the exact mod name/version, headset/runtime, and reproduction steps. A mod working in normal SM64 Co-Op DX does not guarantee that every first-person physical interaction will behave correctly.
 
 When **WiddlePets** is enabled, Server Settings adds a **Pets** button that opens the mod's own `/wpets` pet-selection menu. Pet choice, spawning, and following behavior remain controlled by WiddlePets itself.
+
+## v0.8.2 — Updater and Release Notes Update
+
+- Added the PCVR updater executable, which finds the newest PCVR GitHub release with a Windows ZIP, installs it, relaunches the game, and closes its console after launch
+- Added title-screen Release Notes pages sourced from the PCVR repository
+- Fixed the updater's false failure report after a successful install
 
 ## v0.8.0 — Sonic Shoes Update
 

@@ -341,6 +341,7 @@ static void djui_panel_vr_special_moves_defaults(
     configVrSpecialFireFlowerMusic = true;
     configVrSpecialHammerSuit = true;
     configVrSpecialSonicShoes = true;
+    configVrSonicShoesSpeed = VR_SONIC_SHOES_SPEED_DEFAULT;
     configVrSpecialRasengan = true;
     configVrSpecialRasenganGripTrigger = false;
     configVrRasenShurikenOverheadCharge = true;
@@ -1637,6 +1638,19 @@ static void djui_panel_vr_special_moves_create(
             body,
             "Sonic Shoes",
             &configVrSpecialSonicShoes,
+            NULL
+        );
+        configVrSonicShoesSpeed = djui_panel_vr_clamp_uint(
+            configVrSonicShoesSpeed,
+            VR_SONIC_SHOES_SPEED_MIN,
+            VR_SONIC_SHOES_SPEED_MAX
+        );
+        djui_slider_create(
+            body,
+            "Sonic Shoes Speed",
+            &configVrSonicShoesSpeed,
+            VR_SONIC_SHOES_SPEED_MIN,
+            VR_SONIC_SHOES_SPEED_MAX,
             NULL
         );
         djui_checkbox_create(

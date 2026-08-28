@@ -18,6 +18,8 @@ extern bool gUpdateMessage;
 
 enum VrUpdateStatus vr_update_get_status(void);
 const char* vr_update_get_latest_version(void);
+bool vr_update_install_latest(void);
+bool vr_update_should_exit(void);
 void show_update_popup(void);
 void check_for_updates(void);
 

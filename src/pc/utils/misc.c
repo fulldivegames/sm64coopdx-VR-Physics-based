@@ -734,7 +734,7 @@ const char *strstr_lowercased(const char *haystack, const char *needle) {
 
 static char *get_update_path(void) {
 #ifdef _WIN32
-    char updateExecFilename[] = "coopdx_updater.exe";
+    char updateExecFilename[] = "Co-op DX VR Updater.exe";
 #else
     char updateExecFilename[] = "coopdx_updater";
 #endif
@@ -760,7 +760,7 @@ void update_game(void) {
 
     char commandBuf[SYS_MAX_PATH];
     // this can truncate, but under normal use, SYS_MAX_PATH should not ever be filled up
-    snprintf(commandBuf, sizeof(commandBuf), "%s --game-update", updateExecFilePath);
+    snprintf(commandBuf, sizeof(commandBuf), "\"%s\" --game-update", updateExecFilePath);
 
     if (CreateProcessA(NULL, commandBuf, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
         CloseHandle(pi.hProcess);
@@ -771,7 +771,7 @@ void update_game(void) {
     fclose(stdin);
     fclose(stdout);
     fclose(stderr);
-    execl(updateExecFilePath, "coopdx_updater", "--game-update", NULL);
+    execl(updateExecFilePath, "Co-op DX VR Updater", "--game-update", NULL);
     exit(1);
 #endif
 }

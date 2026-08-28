@@ -68,7 +68,14 @@
 #define VR_RUNNING_SPEED_MIN      100U
 #define VR_RUNNING_SPEED_MAX      200U
 #define VR_RUNNING_SPEED_DEFAULT  100U
+#define VR_SONIC_SHOES_SPEED_MIN      0U
+#define VR_SONIC_SHOES_SPEED_MAX    300U
+#define VR_SONIC_SHOES_SPEED_DEFAULT  0U
+#ifdef __ANDROID__
+#define VR_RENDER_SCALE_MIN        10U
+#else
 #define VR_RENDER_SCALE_MIN        25U
+#endif
 #define VR_RENDER_SCALE_MAX       100U
 
 typedef struct {
@@ -171,10 +178,13 @@ extern unsigned int configVrMovementCalibration;
 extern unsigned int configVrFacingSource;
 extern unsigned int configVrFov;
 extern unsigned int configVrBrightness;
+extern unsigned int configVrSaturation;
+extern unsigned int configVrContrast;
 extern unsigned int configVrRenderScale;
 extern bool         configVrShowFps;
 extern bool         configVrFlameOptimizations;
 extern bool         configVrUltraPerformanceMode;
+extern unsigned int configVrQuestRefreshRate;
 extern bool         configVrDisableFog;
 extern bool         configVrDesktopMirror;
 extern unsigned int configVrDesktopMirrorFps;
@@ -209,6 +219,7 @@ extern bool         configVrSpecialFireFlower;
 extern bool         configVrSpecialFireFlowerMusic;
 extern bool         configVrSpecialHammerSuit;
 extern bool         configVrSpecialSonicShoes;
+extern unsigned int configVrSonicShoesSpeed;
 extern bool         configVrSpecialRasengan;
 extern bool         configVrSpecialRasenganGripTrigger;
 extern bool         configVrRasenShurikenOverheadCharge;
@@ -395,6 +406,10 @@ extern char         configCoopNetIp[MAX_CONFIG_STRING];
 extern unsigned int configCoopNetPort;
 extern char         configPassword[MAX_CONFIG_STRING];
 extern char         configDestId[MAX_CONFIG_STRING];
+#ifdef __ANDROID__
+// 0 = public Android lobby, 1 = password-protected private/cross-play lobby.
+extern unsigned int configCoopNetLobbyPrivacy;
+#endif
 // DJUI settings
 extern unsigned int configDjuiTheme;
 extern bool         configDjuiThemeCenter;

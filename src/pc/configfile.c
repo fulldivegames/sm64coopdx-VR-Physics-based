@@ -99,16 +99,24 @@ static unsigned int sConfigVrCameraHeightVersion  = 9;
 unsigned int configVrMovementCalibration          = 50;
 unsigned int configVrFacingSource                 = VR_FACING_SOURCE_HEADSET;
 unsigned int configVrFov                          = 100;
-unsigned int configVrBrightness                   = 100;
+unsigned int configVrBrightness                   = 80;
+unsigned int configVrSaturation                   = 112;
+unsigned int configVrContrast                     = 115;
+#ifdef __ANDROID__
+unsigned int configVrRenderScale                  = 80;
+#else
 unsigned int configVrRenderScale                  = 100;
+#endif
 bool         configVrShowFps                      = false;
 bool         configVrFlameOptimizations           = true;
 bool         configVrUltraPerformanceMode         = false;
+unsigned int configVrQuestRefreshRate              = 2;
 bool         configVrSpecialMovesEnabled           = true;
 bool         configVrSpecialFireFlower             = true;
 bool         configVrSpecialFireFlowerMusic        = true;
 bool         configVrSpecialHammerSuit              = true;
 bool         configVrSpecialSonicShoes              = true;
+unsigned int configVrSonicShoesSpeed                = VR_SONIC_SHOES_SPEED_DEFAULT;
 bool         configVrSpecialRasengan               = true;
 bool         configVrSpecialRasenganGripTrigger    = false;
 bool         configVrRasenShurikenOverheadCharge   = true;
@@ -411,7 +419,9 @@ char         configCoopNetIp[MAX_CONFIG_STRING]   = DEFAULT_COOPNET_IP;
 unsigned int configCoopNetPort                    = DEFAULT_COOPNET_PORT;
 char         configPassword[MAX_CONFIG_STRING]    = "";
 char         configDestId[MAX_CONFIG_STRING]      = "0";
-#ifndef __ANDROID__
+#ifdef __ANDROID__
+unsigned int configCoopNetLobbyPrivacy            = 0;
+#else
 static unsigned int sConfigCoopNetPcIdentityVersion = 0;
 #endif
 // DJUI settings
@@ -461,15 +471,19 @@ static const struct ConfigOption options[] = {
     {.name = "vr_facing_source",               .type = CONFIG_TYPE_UINT, .uintValue = &configVrFacingSource},
     {.name = "vr_fov",                         .type = CONFIG_TYPE_UINT, .uintValue = &configVrFov},
     {.name = "vr_brightness",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrBrightness},
+    {.name = "vr_saturation",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrSaturation},
+    {.name = "vr_contrast",                    .type = CONFIG_TYPE_UINT, .uintValue = &configVrContrast},
     {.name = "vr_render_scale",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrRenderScale},
     {.name = "vr_show_fps",                    .type = CONFIG_TYPE_BOOL, .boolValue = &configVrShowFps},
     {.name = "vr_flame_optimizations",          .type = CONFIG_TYPE_BOOL, .boolValue = &configVrFlameOptimizations},
     {.name = "vr_ultra_performance_mode",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrUltraPerformanceMode},
+    {.name = "vr_quest_refresh_rate",           .type = CONFIG_TYPE_UINT, .uintValue = &configVrQuestRefreshRate},
     {.name = "vr_special_moves_enabled",        .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialMovesEnabled},
     {.name = "vr_special_fire_flower",          .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialFireFlower},
     {.name = "vr_special_fire_flower_music",    .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialFireFlowerMusic},
     {.name = "vr_special_hammer_suit",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialHammerSuit},
     {.name = "vr_special_sonic_shoes",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialSonicShoes},
+    {.name = "vr_sonic_shoes_speed_v3",          .type = CONFIG_TYPE_UINT, .uintValue = &configVrSonicShoesSpeed},
     {.name = "vr_special_rasengan",             .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialRasengan},
     {.name = "vr_special_rasengan_grip_trigger",.type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialRasenganGripTrigger},
     {.name = "vr_rasen_shuriken_overhead_charge",.type = CONFIG_TYPE_BOOL, .boolValue = &configVrRasenShurikenOverheadCharge},
@@ -705,7 +719,9 @@ static const struct ConfigOption options[] = {
     {.name = "coopnet_port",                   .type = CONFIG_TYPE_UINT,   .uintValue   = &configCoopNetPort},
     {.name = "coopnet_password",               .type = CONFIG_TYPE_STRING, .stringValue = (char*)&configPassword, .maxStringLength = MAX_CONFIG_STRING},
     {.name = "coopnet_dest",                   .type = CONFIG_TYPE_STRING, .stringValue = (char*)&configDestId, .maxStringLength = MAX_CONFIG_STRING},
-#ifndef __ANDROID__
+#ifdef __ANDROID__
+    {.name = "coopnet_lobby_privacy",          .type = CONFIG_TYPE_UINT, .uintValue = &configCoopNetLobbyPrivacy},
+#else
     {.name = "coopnet_pc_identity_version",    .type = CONFIG_TYPE_UINT,   .uintValue = &sConfigCoopNetPcIdentityVersion},
 #endif
     // DJUI settings

@@ -2,11 +2,32 @@
 param(
     [string]$BuildDirectory = "build/us_pc",
     [string]$OutputDirectory = "dist",
-    [string]$Version = "dev"
+    [string]$Version = "dev",
+    [switch]$FetchLatestReleaseNotes
 )
 
 $ErrorActionPreference = "Stop"
 
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$releaseNotesPath = Join-Path $repoRoot "release_notes.txt"
+
+# Release notes are authored for the release being packaged. Avoid replacing
+# them with the previous GitHub release body; fetch only when explicitly
+# requested or when a local notes file has not been prepared yet.
+if ($FetchLatestReleaseNotes -or -not (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf)) {
+    try {
+        $headers = @{ Accept = "application/vnd.github+json"; "User-Agent" = "SM64-Co-Op-DX-VR-Builder" }
+        $latestRelease = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/fulldivegames/sm64coopdx-VR-Physics-based/releases/latest"
+        if (-not [string]::IsNullOrWhiteSpace($latestRelease.body)) {
+            [IO.File]::WriteAllText($releaseNotesPath, $latestRelease.body.Trim() + [Environment]::NewLine,
+                (New-Object Text.UTF8Encoding($false)))
+        }
+    } catch {
+        if (-not (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf)) {
+            throw "Could not fetch release notes and no packaged release_notes.txt exists."
+        }
+    }
+}
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $buildPath = [System.IO.Path]::GetFullPath((Join-Path $repoRoot $BuildDirectory))
 $outputPath = [System.IO.Path]::GetFullPath((Join-Path $repoRoot $OutputDirectory))
@@ -17,6 +38,7 @@ $zipPath = Join-Path $outputPath "$packageName.zip"
 
 $requiredFiles = @(
     "sm64coopdx.exe",
+    "coopdx_updater.exe",
     "discord_game_sdk.dll",
     "libopenxr_loader.dll",
     "libgcc_s_seh-1.dll",
@@ -28,6 +50,8 @@ $requiredFiles = @(
     "gcc-COPYING3",
     "libwinpthread-COPYING"
 )
+
+if (-not (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf)) { throw "Missing release notes file: $releaseNotesPath" }
 
 $requiredDirectories = @(
     "dynos",
@@ -61,12 +85,14 @@ if (Test-Path -LiteralPath $zipPath) {
 New-Item -ItemType Directory -Path $stagePath | Out-Null
 
 Copy-Item -LiteralPath (Join-Path $buildPath "sm64coopdx.exe") -Destination (Join-Path $stagePath "SM64-Co-Op-DX-VR.exe")
+Copy-Item -LiteralPath (Join-Path $buildPath "coopdx_updater.exe") -Destination (Join-Path $stagePath "Co-op DX VR Updater.exe")
 Copy-Item -LiteralPath (Join-Path $buildPath "discord_game_sdk.dll") -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $buildPath "libopenxr_loader.dll") -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $buildPath "libgcc_s_seh-1.dll") -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $buildPath "libstdc++-6.dll") -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $buildPath "libwinpthread-1.dll") -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $repoRoot "docs/PLAYER-GUIDE.txt") -Destination (Join-Path $stagePath "README.txt")
+Copy-Item -LiteralPath $releaseNotesPath -Destination (Join-Path $stagePath "release_notes.txt")
 
 $licensesPath = Join-Path $stagePath "licenses"
 New-Item -ItemType Directory -Path $licensesPath | Out-Null
@@ -102,4 +128,4 @@ if ($romFiles.Count -ne 0) {
 Compress-Archive -LiteralPath $stagePath -DestinationPath $zipPath -CompressionLevel Optimal
 
 Write-Host "Created player package: $zipPath"
-Write-Host "The package contains no ROM, updater, map, debug database, or backup executable."
+Write-Host "The package contains no ROM, map, debug database, or backup executable."
