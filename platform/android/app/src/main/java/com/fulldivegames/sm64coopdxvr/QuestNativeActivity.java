@@ -1,6 +1,7 @@
 package com.fulldivegames.sm64coopdxvr;
 
 import android.app.NativeActivity;
+import android.app.AlertDialog;
 import android.Manifest;
 import android.content.ComponentName;
 import android.content.Intent;
@@ -11,6 +12,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
 import android.os.Environment;
+import android.os.Handler;
 import android.provider.Settings;
 import android.speech.RecognitionListener;
 import android.speech.ModelDownloadListener;
@@ -49,6 +51,7 @@ public final class QuestNativeActivity extends NativeActivity {
     private static final String TAG = "SM64CoopDXVR";
     private static final int OPEN_ROM_REQUEST = 6401;
     private static final int MICROPHONE_PERMISSION_REQUEST = 6402;
+    private static final int INSTALL_PERMISSION_REQUEST = 6403;
     private static final String ROM_NAME = "baserom.us.z64";
     private static final String SHARED_MOD_DIRECTORY = "/sdcard/SM64VR/mods";
     private static final String SHARED_DYNOS_PACK_DIRECTORY =
@@ -59,7 +62,20 @@ public final class QuestNativeActivity extends NativeActivity {
             "/sdcard/SM64VR/shader-cache";
     private static final String SHADER_WARMUP_PENDING_FILE =
             "first-boot-after-rom.pending";
-    private boolean requestedSharedStorageAccess;
+    private boolean storageAccessPromptActive;
+    private boolean storageAccessPromptCompleted;
+    private boolean microphonePermissionPending;
+    private boolean romPickerRequested;
+    private boolean romPickerLaunchPending;
+    private boolean romPickerAwaitingResult;
+    private boolean romPickerFallbackScheduled;
+    private boolean romPickerFallbackDialogVisible;
+    private boolean standaloneUpdateCheckStarted;
+    private boolean firstLaunchSetupComplete;
+    private volatile String pendingStandaloneUpdateUrl;
+    private volatile boolean standaloneInstallPermissionPromptActive;
+    private volatile boolean standaloneUpdateInProgress;
+    private boolean standalonePermissionRetryScheduled;
     private SpeechRecognizer speechRecognizer;
     private boolean speechListening;
     private boolean speechModelDownloadRequested;
@@ -77,48 +93,152 @@ public final class QuestNativeActivity extends NativeActivity {
         installBundledResources();
         normalizeCustomPaletteNames();
         super.onCreate(savedInstanceState);
-        if (Build.VERSION.SDK_INT >= 23 &&
-                checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
-                    PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(
-                    new String[] { Manifest.permission.RECORD_AUDIO },
-                    MICROPHONE_PERMISSION_REQUEST);
-        }
-        prepareSharedContentDirectories();
-        checkForStandaloneUpdate();
-        File rom = new File(getExternalFilesDir(null), ROM_NAME);
-        if (!rom.isFile() && savedInstanceState == null) {
-            openRomPicker();
-        }
+        advanceFirstLaunchSetup();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        if (Build.VERSION.SDK_INT < 30 || Environment.isExternalStorageManager()) {
-            createSharedDirectory(SHARED_MOD_DIRECTORY, "mod");
-            createSharedDirectory(SHARED_DYNOS_PACK_DIRECTORY, "DynOS pack");
-            createSharedDirectory(SHARED_PALETTE_DIRECTORY, "palette");
-            createSharedDirectory(SHARED_SHADER_CACHE_DIRECTORY, "shader cache");
-            return;
+        if (storageAccessPromptActive) {
+            storageAccessPromptActive = false;
+            storageAccessPromptCompleted = true;
         }
-        if (!requestedSharedStorageAccess) {
-            requestedSharedStorageAccess = true;
-            requestSharedStorageAccess();
+        resumePendingStandaloneInstall();
+        if (microphonePermissionPending) return;
+        advanceFirstLaunchSetup();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == MICROPHONE_PERMISSION_REQUEST) {
+            microphonePermissionPending = false;
+            advanceFirstLaunchSetup();
         }
     }
-public void downloadLatestStandaloneUpdateFromNative() {
+
+    private void advanceFirstLaunchSetup() {
+        if (firstLaunchSetupComplete) return;
+        // The ROM is the required input for the native host. Ask for it before
+        // microphone/storage permissions so first-run setup is deterministic.
+        File firstRunRom = new File(getExternalFilesDir(null), ROM_NAME);
+        if (!firstRunRom.isFile()) {
+            if (!romPickerRequested) {
+                romPickerRequested = true;
+                romPickerLaunchPending = true;
+                new Handler(getMainLooper()).postDelayed(
+                        this::launchPendingRomPicker, 250);
+            }
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 23 &&
+                checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+                    PackageManager.PERMISSION_GRANTED) {
+            if (!microphonePermissionPending) {
+                microphonePermissionPending = true;
+                requestPermissions(new String[] { Manifest.permission.RECORD_AUDIO },
+                        MICROPHONE_PERMISSION_REQUEST);
+            }
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 30 &&
+                !Environment.isExternalStorageManager() &&
+                !storageAccessPromptCompleted) {
+            if (!storageAccessPromptActive) {
+                storageAccessPromptActive = true;
+                requestSharedStorageAccess();
+            }
+            return;
+        }
+        prepareSharedContentDirectories();
+        if (!standaloneUpdateCheckStarted) {
+            standaloneUpdateCheckStarted = true;
+            checkForStandaloneUpdate();
+        }
+        File rom = new File(getExternalFilesDir(null), ROM_NAME);
+        if (!rom.isFile()) {
+            if (!romPickerRequested) {
+                romPickerRequested = true;
+                romPickerLaunchPending = true;
+                // Let the permission/settings activity finish handing focus
+                // back to the game before opening the document picker. Quest
+                // can drop an activity launched in that same frame.
+                new Handler(getMainLooper()).postDelayed(
+                        this::launchPendingRomPicker, 250);
+            }
+            // Never mark first-launch setup complete while the ROM is absent.
+            // A later permission/settings resume must still be able to retry.
+            return;
+        }
+        firstLaunchSetupComplete = true;
+    }
+
+    private void launchPendingRomPicker() {
+        if (!romPickerLaunchPending || isFinishing()) return;
+        romPickerLaunchPending = false;
+        romPickerAwaitingResult = true;
+        try {
+            openRomPicker();
+            scheduleRomPickerFallback();
+        } catch (RuntimeException exception) {
+            romPickerAwaitingResult = false;
+            romPickerRequested = false;
+            Log.e(TAG, "Could not open the ROM picker.", exception);
+            showRomPickerFallback();
+        }
+    }
+
+    private void scheduleRomPickerFallback() {
+        if (romPickerFallbackScheduled) return;
+        romPickerFallbackScheduled = true;
+        new Handler(getMainLooper()).postDelayed(() -> {
+            romPickerFallbackScheduled = false;
+            if (romPickerAwaitingResult && !isFinishing() && hasWindowFocus()) {
+                showRomPickerFallback();
+            }
+        }, 1500);
+    }
+
+    private void showRomPickerFallback() {
+        if (isFinishing() || romPickerFallbackDialogVisible) return;
+        romPickerFallbackDialogVisible = true;
+        new AlertDialog.Builder(this)
+                .setTitle("ROM required")
+                .setMessage("Select your supported US Super Mario 64 ROM to continue.")
+                .setCancelable(false)
+                .setPositiveButton("Select ROM", (dialog, which) -> {
+                    romPickerFallbackDialogVisible = false;
+                    romPickerRequested = true;
+                    romPickerAwaitingResult = true;
+                    try {
+                        openRomPicker();
+                        scheduleRomPickerFallback();
+                    } catch (RuntimeException exception) {
+                        romPickerAwaitingResult = false;
+                        romPickerRequested = false;
+                        Log.e(TAG, "Could not open the ROM picker.", exception);
+                        showUpdateToast("Could not open the ROM picker. Try again.");
+                    }
+                })
+                .show();
+    }
+
+    public void downloadLatestStandaloneUpdateFromNative() {
+        if (standaloneUpdateInProgress) return;
+        standaloneUpdateInProgress = true;
         Thread updater = new Thread(() -> {
             try {
                 String assetUrl = findLatestStandaloneApk();
                 if (assetUrl == null) {
                     showUpdateToast("No Quest APK was found in the latest release.");
+                    standaloneUpdateInProgress = false;
                     return;
                 }
                 installApkFromUrl(assetUrl);
             } catch (Exception exception) {
                 Log.e(TAG, "Standalone update download failed", exception);
                 showUpdateToast("Update download failed. Check your connection and try again.");
+                standaloneUpdateInProgress = false;
             }
         }, "SM64VR-StandaloneUpdater");
         updater.setDaemon(true);
@@ -169,11 +289,23 @@ public void downloadLatestStandaloneUpdateFromNative() {
 
     private void installApkFromUrl(String assetUrl) throws Exception {
         if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+            pendingStandaloneUpdateUrl = assetUrl;
+            standaloneInstallPermissionPromptActive = true;
             Intent settings = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                     Uri.parse("package:" + getPackageName()));
-            settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(settings);
-            showUpdateToast("Allow installs for SM64 Co-Op DX VR, then select Update again.");
+            // Keep this as an activity-for-result launch. Quest sometimes
+            // resumes NativeActivity without delivering a normal onResume
+            // edge when the install-source screen is opened as a new task.
+            runOnUiThread(() -> {
+                try {
+                    startActivityForResult(settings, INSTALL_PERMISSION_REQUEST);
+                } catch (RuntimeException exception) {
+                    Log.e(TAG, "Could not open install permission settings.", exception);
+                    showUpdateToast("Open Android settings and allow installs for SM64 Co-Op DX VR.");
+                }
+            });
+            showUpdateToast("Allow installs for SM64 Co-Op DX VR. The update will resume automatically.");
+            standaloneUpdateInProgress = false;
             return;
         }
         PackageInstaller installer = getPackageManager().getPackageInstaller();
@@ -210,6 +342,43 @@ public void downloadLatestStandaloneUpdateFromNative() {
             showUpdateToast("Download complete. Android will ask to confirm the update.");
             session.commit(pending.getIntentSender());
         }
+        standaloneUpdateInProgress = false;
+    }
+
+    private void resumePendingStandaloneInstall() {
+        if (!standaloneInstallPermissionPromptActive || pendingStandaloneUpdateUrl == null) {
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+            // Quest may report the permission a moment after the settings
+            // activity hands focus back. Retry once after the settings return;
+            // a later onResume will retry again if the player grants it then.
+            if (!standalonePermissionRetryScheduled) {
+                standalonePermissionRetryScheduled = true;
+                new Handler(getMainLooper()).postDelayed(() -> {
+                    standalonePermissionRetryScheduled = false;
+                    resumePendingStandaloneInstall();
+                }, 300);
+            }
+            return;
+        }
+        String assetUrl = pendingStandaloneUpdateUrl;
+        pendingStandaloneUpdateUrl = null;
+        standaloneInstallPermissionPromptActive = false;
+        standalonePermissionRetryScheduled = false;
+        if (standaloneUpdateInProgress) return;
+        standaloneUpdateInProgress = true;
+        Thread updater = new Thread(() -> {
+            try {
+                installApkFromUrl(assetUrl);
+            } catch (Exception exception) {
+                Log.e(TAG, "Resumed standalone update failed", exception);
+                showUpdateToast("Update download failed. Check your connection and try again.");
+                standaloneUpdateInProgress = false;
+            }
+        }, "SM64VR-StandaloneUpdaterResume");
+        updater.setDaemon(true);
+        updater.start();
     }
 
     private void showUpdateToast(String message) {
@@ -642,11 +811,38 @@ public void downloadLatestStandaloneUpdateFromNative() {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != OPEN_ROM_REQUEST || resultCode != RESULT_OK
-                || data == null || data.getData() == null) {
+        if (requestCode == INSTALL_PERMISSION_REQUEST) {
+            // The permission setting is committed before this result is
+            // delivered, so resume the cached APK install immediately.
+            resumePendingStandaloneInstall();
             return;
         }
-        importRom(data.getData());
+        if (requestCode != OPEN_ROM_REQUEST) {
+            return;
+        }
+        romPickerAwaitingResult = false;
+        romPickerRequested = false;
+        if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+            importRom(data.getData());
+        } else {
+            showRomPickerFallback();
+        }
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            // Fallback for Quest builds that do not deliver an activity result
+            // from the install-source settings screen.
+            new Handler(getMainLooper()).postDelayed(
+                    this::resumePendingStandaloneInstall, 100);
+            if (!firstLaunchSetupComplete && !romPickerAwaitingResult &&
+                    !romPickerFallbackDialogVisible) {
+                new Handler(getMainLooper()).postDelayed(
+                        this::advanceFirstLaunchSetup, 100);
+            }
+        }
     }
 
     private void importRom(Uri uri) {
@@ -686,7 +882,12 @@ public void downloadLatestStandaloneUpdateFromNative() {
             // first-run picker returns after that check, so recreate the
             // activity to let the native host validate and boot the newly
             // imported ROM without requiring the player to quit manually.
-            recreate();
+            Intent launch = getPackageManager().getLaunchIntentForPackage(getPackageName());
+            if (launch != null) {
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                startActivity(launch);
+            }
+            finish();
         } catch (Exception exception) {
             temporary.delete();
             reportImportError("Could not validate the selected ROM.", exception);

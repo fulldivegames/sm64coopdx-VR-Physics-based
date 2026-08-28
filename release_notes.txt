@@ -1,3 +1,8 @@
+## v0.8.3 — Quest First-Run and Updater Fix
+
+- ROM selection now appears first on a fresh install, before microphone and storage permissions.
+- Importing a valid ROM launches the game automatically instead of leaving the player at the launcher.
+- Kept the selectable main-menu updater button and latest Quest APK lookup; bumped the package to v0.8.3.
 ## v0.8.2 — Standalone Updater Hotfix
 
 - Restored the selectable Quest title-screen update button at the top of the main menu.

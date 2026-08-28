@@ -13,7 +13,7 @@
   Native ARM64/OpenXR VR for Meta Quest. No PC is required after installation.
 </p>
 
-> **Current public release: v0.8.2 — Updater and Release Notes Update**
+> **Current public release: v0.8.3 — Quest First-Run and Updater Fix**
 
 > [!WARNING]
 > This is an active, vibe-coded, yet fairly polished fan project. The standalone edition has been tested on **Meta Quest 3 only**. It has **not been tested on Quest 2 by me**, and neither edition has been tested across every multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur. If you have any performance issues on default settings in the base game, a reset usually fixes things (You should be getting a stable 120 FPS on Quest 3, on most if not all base game maps)
@@ -52,7 +52,7 @@ The release is a single APK. Players do not need Git, Android Studio, Gradle, AD
 ### Install the APK
 
 1. Open this repository's [latest release](https://github.com/fulldivegames/sm64coopdx-VR-Standalone-Physics-based/releases/latest).
-2. Download `SM64-Co-Op-DX-VR-Quest-v0.8.2.apk` under **Assets**.
+2. Download `SM64-Co-Op-DX-VR-Quest-v0.8.3.apk` under **Assets**.
 3. Connect the Quest to your computer and allow the USB debugging prompt inside the headset.
 4. Open SideQuest and confirm that the headset indicator is connected.
 5. Click **Install APK file from folder** in SideQuest, choose the downloaded APK, and wait for the install-success message.
@@ -80,7 +80,7 @@ The standalone build loads compatible SM64 Co-Op DX mods from this easy-to-acces
 /sdcard/SM64VR/mods/
 ```
 
-1. Install or update to v0.8.2 and launch it once. Android opens the **Allow access to manage all files** page; enable access for **SM64 Co-Op DX VR Standalone**. This permission is used for the shared mod, DynOS, palette, and shader-cache folders.
+1. Install or update to v0.8.3 and launch it once. Android opens the **Allow access to manage all files** page; enable access for **SM64 Co-Op DX VR Standalone**. This permission is used for the shared mod, DynOS, palette, and shader-cache folders.
 2. Close and reopen the game once after granting access. The game creates `/sdcard/SM64VR/mods/` automatically.
 3. Download a mod compatible with SM64 Co-Op DX. The official community browser is [mods.sm64coopdx.com](https://mods.sm64coopdx.com/mods/).
 4. Extract the archive. Copy the **extracted mod folder**, not the `.zip`, into `SM64VR/mods` with SideQuest's file manager. The mod files must be directly inside their own folder rather than inside an extra duplicate folder.
@@ -273,6 +273,12 @@ Painting entries use a short white comfort fade. The optional True First Person 
 - Large Lua mods, model packs, ROM hacks, and texture packs may exceed standalone memory/performance budgets or rely on desktop-only behavior.
 
 When **WiddlePets** is enabled, Server Settings adds a **Pets** button that opens the mod's own `/wpets` pet-selection menu. Pet choice, spawning, and following behavior remain controlled by WiddlePets itself.
+
+## v0.8.3 — Quest First-Run and Updater Fix
+
+- ROM selection now appears first on a fresh install, before microphone and storage permissions.
+- Importing a valid ROM launches the game automatically instead of leaving the player at the launcher.
+- Kept the selectable main-menu updater button and latest Quest APK lookup; bumped the package to v0.8.3.
 
 ## v0.8.2 — Updater and Release Notes Update
 
