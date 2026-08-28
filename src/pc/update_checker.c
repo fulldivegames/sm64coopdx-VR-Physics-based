@@ -331,27 +331,27 @@ static bool get_version_remote(void) {
 #if defined(_WIN32)
 bool vr_update_install_latest(void) {
     if (sRemoteVersionStr[0] == '\0') return false;
-    char tempPath[SYS_MAX_PATH] = { 0 };
-    if (GetTempPathA(sizeof(tempPath), tempPath) == 0) return false;
-    char scriptPath[SYS_MAX_PATH] = { 0 };
-    const DWORD nonce = GetTickCount();
-    snprintf(scriptPath, sizeof(scriptPath), "%ssm64vr-update-%lu.ps1", tempPath, (unsigned long)nonce);
-    FILE* script = fopen(scriptPath, "wb");
-    if (script == NULL) return false;
-    fprintf(script,
-        "$ErrorActionPreference='Stop'; Start-Sleep -Seconds 2; $headers=@{Accept='application/vnd.github+json';'User-Agent'='SM64-Co-Op-DX-VR'}; $release=Invoke-RestMethod -Headers $headers -Uri 'https://api.github.com/repos/fulldivegames/sm64coopdx-VR-Physics-based/releases?per_page=20' | Where-Object { -not $_.draft -and -not $_.prerelease } | ForEach-Object { $asset=$_.assets | Where-Object { $_.name -match '(?i)windows.*\\.zip$' } | Select-Object -First 1; if ($null -ne $asset) { [pscustomobject]@{Tag=$_.tag_name;Url=$asset.browser_download_url} } } | Select-Object -First 1; if ($null -eq $release) { throw 'No Windows VR release asset is currently available.' }; Start-Sleep -Seconds 2; $zip='%ssm64vr-update-%lu.zip'; $stage='%ssm64vr-stage-%lu'; Invoke-WebRequest -UseBasicParsing -Uri $release.Url -OutFile $zip; Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force; $payload=Get-ChildItem -LiteralPath $stage -Directory | Select-Object -First 1; if ($null -eq $payload) { $payload=Get-Item -LiteralPath $stage }; Get-ChildItem -LiteralPath $payload.FullName -Force | Copy-Item -Destination '%s' -Recurse -Force; Start-Process -FilePath '%s';",
-        tempPath, (unsigned long)nonce, tempPath, (unsigned long)nonce,
-        sys_exe_path_dir(), sys_exe_path_file());
-    fclose(script);
+    const char* exeDir = sys_exe_path_dir();
+    if (exeDir == NULL || exeDir[0] == '\0') return false;
+    char updaterPath[SYS_MAX_PATH] = { 0 };
+    if (snprintf(updaterPath, sizeof(updaterPath), "%s\\Co-op DX VR Updater.exe", exeDir) < 0) {
+        return false;
+    }
+    if (GetFileAttributesA(updaterPath) == INVALID_FILE_ATTRIBUTES) {
+        printf("[VR] Bundled updater not found: %s\n", updaterPath);
+        return false;
+    }
     STARTUPINFOA si = { 0 };
     PROCESS_INFORMATION pi = { 0 };
     si.cb = sizeof(si);
-    char command[SYS_MAX_PATH + 64] = { 0 };
-    snprintf(command, sizeof(command), "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"%s\"", scriptPath);
-    if (!CreateProcessA(NULL, command, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) return false;
+    char command[SYS_MAX_PATH + 4] = { 0 };
+    snprintf(command, sizeof(command), "\"%s\"", updaterPath);
+    if (!CreateProcessA(updaterPath, command, NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, exeDir, &si, &pi)) {
+        printf("[VR] Could not launch updater (error %lu).\n", (unsigned long)GetLastError());
+        return false;
+    }
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
-    // Give the menu one rendered frame to show that the installer is starting.
     sVrUpdateExitTick = GetTickCount() + 350;
     return true;
 }

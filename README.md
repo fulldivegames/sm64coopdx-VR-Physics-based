@@ -14,7 +14,7 @@
 </p>
 
 > [!IMPORTANT]
-> The current public release is **v0.8.2 — Updater and Release Notes Update**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur.
+> The current public release is **v0.8.3 — Multiplayer Updater and Release Notes Fix**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur.
 
 SM64 Co-Op DX VR currently targets 64-bit Windows, OpenGL, and OpenXR. It keeps the original game's flat-screen mode and multiplayer foundation while adding native stereoscopic rendering, 6DoF tracking, VR-aware cameras, remappable motion-controller input, physical interactions, comfort options, and extensive calibration settings.
 
@@ -95,7 +95,7 @@ The updater preserves the validated ROM and normal user configuration stored in 
 The Windows release keeps the normal SM64 Co-Op DX mod layout inside the extracted game folder:
 
 ```text
-SM64-Co-Op-DX-VR-Windows-v0.8.2/
+SM64-Co-Op-DX-VR-Windows-v0.8.3/
 ├── mods/
 ├── dynos/
 │   └── packs/
@@ -310,6 +310,12 @@ v0.6.27 expands compatibility around mod discovery, Lua HUD/menu presentation, c
 Compatibility is not universal. Mods that replace camera, player action, input, HUD, rendering, collision, or character geometry can conflict with VR behavior. Install one at a time when troubleshooting and report the exact mod name/version, headset/runtime, and reproduction steps. A mod working in normal SM64 Co-Op DX does not guarantee that every first-person physical interaction will behave correctly.
 
 When **WiddlePets** is enabled, Server Settings adds a **Pets** button that opens the mod's own `/wpets` pet-selection menu. Pet choice, spawning, and following behavior remain controlled by WiddlePets itself.
+
+## v0.8.3 — Multiplayer Updater and Release Notes Fix
+
+- Promoted the tested PCVR updater to the normal main-menu flow, directly above Host, with the bundled updater retained as a fallback.
+- Kept latest-release lookup restricted to this VR fork's Windows ZIP asset.
+- Bumped the tested PCVR package and release metadata to v0.8.3.
 
 ## v0.8.2 — Updater and Release Notes Update
 

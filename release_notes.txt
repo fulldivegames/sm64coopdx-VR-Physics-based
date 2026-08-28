@@ -1,3 +1,8 @@
+## v0.8.3 — Multiplayer Updater and Release Notes Fix
+
+- Promoted the tested PCVR updater to the normal main-menu flow, directly above Host, with the bundled updater retained as a fallback.
+- Kept latest-release lookup restricted to this VR fork's Windows ZIP asset.
+- Bumped the tested PCVR package and release metadata to v0.8.3.
 ## v0.8.2 — Updater and Release Notes Update
 
 - Added the PCVR updater executable, which finds the newest PCVR GitHub release with a Windows ZIP, installs it, relaunches the game, and closes its console after launch.
