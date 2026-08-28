@@ -58,11 +58,39 @@ static struct Surface sSonicWaterSurfacePseudoFloor = {
 #define VR_SONIC_WATER_RUN_ENTRY_SPEED 70.0f
 #define VR_SONIC_WATER_RUN_EXIT_SPEED  35.0f
 
+#define VR_SONIC_SAND_RUN_ENTRY_SPEED 70.0f
+#define VR_SONIC_SAND_RUN_EXIT_SPEED  35.0f
+
 static bool sSonicWaterRunning = false;
 static f32 sSonicWaterRunCruiseSpeed = 0.0f;
+static bool sSonicQuicksandRunning = false;
 
 bool mario_is_sonic_water_run_floor(struct Surface *floor) {
     return floor == &sSonicWaterSurfacePseudoFloor;
+}
+
+bool mario_sonic_shoes_can_run_on_quicksand(struct MarioState *m) {
+    if (m == NULL || m->playerIndex != 0 || !vr_special_moves_sonic_shoes_active() ||
+        m->floor == NULL || !SURFACE_IS_QUICKSAND(m->floor->type)) {
+        sSonicQuicksandRunning = false;
+        return false;
+    }
+
+    const f32 horizontalSpeed = sqrtf(m->vel[0] * m->vel[0] + m->vel[2] * m->vel[2]);
+    if (!(horizontalSpeed > 0.01f)) {
+        sSonicQuicksandRunning = false;
+        return false;
+    }
+
+    const f32 effectiveSpeed = MIN(horizontalSpeed, fabsf(m->forwardVel));
+    if (sSonicQuicksandRunning) {
+        if (effectiveSpeed < VR_SONIC_SAND_RUN_EXIT_SPEED && m->intendedMag < 24.0f) {
+            sSonicQuicksandRunning = false;
+        }
+    } else if (effectiveSpeed >= VR_SONIC_SAND_RUN_ENTRY_SPEED) {
+        sSonicQuicksandRunning = true;
+    }
+    return sSonicQuicksandRunning;
 }
 
 static void mario_sustain_sonic_water_run_speed(struct MarioState *m) {
@@ -264,6 +292,13 @@ void mario_bonk_reflection(struct MarioState *m, u8 negateSpeed) {
 
 u32 mario_update_quicksand(struct MarioState *m, f32 sinkingSpeed) {
     if (!m) { return 0; }
+    // Sonic Shoes treat quicksand as solid terrain, including the deep and
+    // instant variants. Clearing prior depth also prevents carrying a sink
+    // state into another quicksand action after collecting the power-up.
+    if (mario_sonic_shoes_can_run_on_quicksand(m)) {
+        m->quicksandDepth = 0.0f;
+        return FALSE;
+    }
     extern bool gDjuiInMainMenu;
     if (m->action & ACT_FLAG_RIDING_SHELL || gDjuiInMainMenu) {
         m->quicksandDepth = 0.0f;

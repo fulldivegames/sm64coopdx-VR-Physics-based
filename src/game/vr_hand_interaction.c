@@ -5369,7 +5369,7 @@ static void vr_special_moves_update_sonic_shoes_music_fade(void) {
         audio_stream_stop(sVrSonicShoesMusic);
         audio_stream_set_volume(sVrSonicShoesMusic, 1.0f);
         if (sVrSonicShoesMusicLowered) {
-            seq_player_unlower_volume(SEQ_PLAYER_LEVEL, 15);
+            set_sequence_player_volume(SEQ_PLAYER_LEVEL, 1.0f);
             sVrSonicShoesMusicLowered = false;
         }
     }
@@ -6397,6 +6397,12 @@ bool vr_special_moves_sonic_shoes_active(void) {
         vr_special_moves_online_allowed();
 }
 
+bool vr_special_moves_sonic_shoes_prevent_slope_slide(struct MarioState *m) {
+    // Half of the Shoes' default 3x top speed (3 * 32) is 48.
+    return m != NULL && m->playerIndex == 0 &&
+        vr_special_moves_sonic_shoes_active() && fabsf(m->forwardVel) >= 48.0f;
+}
+
 f32 vr_special_moves_sonic_speed_scale(void) {
     if (!vr_special_moves_sonic_shoes_active()) {
         return 1.0f;
@@ -6440,7 +6446,7 @@ bool vr_special_moves_grant_sonic_shoes(void) {
     if (sVrSonicShoesMusic != NULL) {
         audio_stream_set_volume(sVrSonicShoesMusic, 1.0f);
         stop_cap_music();
-        seq_player_lower_volume(SEQ_PLAYER_LEVEL, 15, 0);
+        set_sequence_player_volume(SEQ_PLAYER_LEVEL, 0.0f);
         sVrSonicShoesMusicLowered = true;
         audio_stream_set_looping(sVrSonicShoesMusic, false);
         audio_stream_play(sVrSonicShoesMusic, true, 1.0f);
@@ -9235,6 +9241,11 @@ void vr_hand_interaction_update(struct MarioState* mario) {
     }
 
     vr_special_moves_update_sonic_shoes_music_fade();
+    if (sVrSonicShoesPowered && sVrSonicShoesMusicLowered) {
+        // Modded level tracks can refresh their gain after activation. Keep
+        // the stage player muted until the Shoes theme has faded out.
+        set_sequence_player_volume(SEQ_PLAYER_LEVEL, 0.0f);
+    }
 
     for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
         if (sVrPhysicalPlayerHitCooldown[hand] > 0) {

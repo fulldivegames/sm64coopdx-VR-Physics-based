@@ -119,6 +119,7 @@ add_library(
     ${SM64_ROOT}/src/pc/cliopts.c
     ${SM64_ROOT}/src/pc/chat_commands.c
     ${SM64_ROOT}/src/pc/configfile.c
+    ${SM64_ROOT}/src/pc/release_notes.c
     ${SM64_ROOT}/src/pc/dialog_table.c
     ${SM64_ROOT}/src/pc/debug_context.c
     ${SM64_ROOT}/src/pc/ini.c

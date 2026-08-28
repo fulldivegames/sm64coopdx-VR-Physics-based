@@ -5,6 +5,8 @@ import android.Manifest;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.pm.PackageInstaller;
+import android.app.PendingIntent;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
@@ -22,6 +24,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
@@ -31,6 +34,7 @@ import java.util.Comparator;
 import java.util.Locale;
 
 import org.json.JSONArray;
+import org.json.JSONObject;
 
 
 public final class QuestNativeActivity extends NativeActivity {
@@ -103,6 +107,115 @@ public final class QuestNativeActivity extends NativeActivity {
             requestSharedStorageAccess();
         }
     }
+public void downloadLatestStandaloneUpdateFromNative() {
+        Thread updater = new Thread(() -> {
+            try {
+                String assetUrl = findLatestStandaloneApk();
+                if (assetUrl == null) {
+                    showUpdateToast("No Quest APK was found in the latest release.");
+                    return;
+                }
+                installApkFromUrl(assetUrl);
+            } catch (Exception exception) {
+                Log.e(TAG, "Standalone update download failed", exception);
+                showUpdateToast("Update download failed. Check your connection and try again.");
+            }
+        }, "SM64VR-StandaloneUpdater");
+        updater.setDaemon(true);
+        updater.start();
+    }
+
+    private String findLatestStandaloneApk() throws Exception {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(RELEASES_API).openConnection();
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(5000);
+            connection.setRequestProperty("Accept", "application/vnd.github+json");
+            connection.setRequestProperty("User-Agent", "SM64-Co-Op-DX-VR-Standalone");
+            if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
+                throw new IOException("GitHub returned " + connection.getResponseCode());
+            }
+            StringBuilder json = new StringBuilder();
+            byte[] buffer = new byte[8192];
+            try (InputStream input = connection.getInputStream()) {
+                int count;
+                while ((count = input.read(buffer)) >= 0 && json.length() < 524288) {
+                    if (count > 0) json.append(new String(buffer, 0, count, "UTF-8"));
+                }
+            }
+            JSONArray releases = new JSONArray(json.toString());
+            for (int releaseIndex = 0; releaseIndex < releases.length(); ++releaseIndex) {
+                JSONObject release = releases.getJSONObject(releaseIndex);
+                if (release.optBoolean("draft", false) || release.optBoolean("prerelease", false)) continue;
+                JSONArray assets = release.optJSONArray("assets");
+                if (assets == null) continue;
+                String fallback = null;
+                for (int assetIndex = 0; assetIndex < assets.length(); ++assetIndex) {
+                    JSONObject asset = assets.getJSONObject(assetIndex);
+                    String name = asset.optString("name", "").toLowerCase(Locale.ROOT);
+                    String url = asset.optString("browser_download_url", "");
+                    if (!name.endsWith(".apk") || url.isEmpty()) continue;
+                    if (name.contains("quest") || name.contains("standalone") || name.contains("android")) return url;
+                    if (fallback == null) fallback = url;
+                }
+                if (fallback != null) return fallback;
+            }
+            return null;
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private void installApkFromUrl(String assetUrl) throws Exception {
+        if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+            Intent settings = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:" + getPackageName()));
+            settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(settings);
+            showUpdateToast("Allow installs for SM64 Co-Op DX VR, then select Update again.");
+            return;
+        }
+        PackageInstaller installer = getPackageManager().getPackageInstaller();
+        PackageInstaller.SessionParams parameters = new PackageInstaller.SessionParams(
+                PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+        parameters.setAppPackageName(getPackageName());
+        int sessionId = installer.createSession(parameters);
+        try (PackageInstaller.Session session = installer.openSession(sessionId)) {
+            HttpURLConnection connection = (HttpURLConnection) new URL(assetUrl).openConnection();
+            connection.setConnectTimeout(10000);
+            connection.setReadTimeout(30000);
+            connection.setInstanceFollowRedirects(true);
+            connection.setRequestProperty("User-Agent", "SM64-Co-Op-DX-VR-Standalone");
+            if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
+                connection.disconnect();
+                throw new IOException("APK download returned " + connection.getResponseCode());
+            }
+            long size = connection.getContentLengthLong();
+            try (InputStream input = connection.getInputStream();
+                 OutputStream output = session.openWrite("update.apk", 0, size)) {
+                byte[] buffer = new byte[64 * 1024];
+                int count;
+                while ((count = input.read(buffer)) >= 0) {
+                    if (count > 0) output.write(buffer, 0, count);
+                }
+                session.fsync(output);
+            } finally {
+                connection.disconnect();
+            }
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= 31) flags |= PendingIntent.FLAG_MUTABLE;
+            PendingIntent pending = PendingIntent.getBroadcast(this, sessionId,
+                    new Intent(this, UpdateInstallReceiver.class), flags);
+            showUpdateToast("Download complete. Android will ask to confirm the update.");
+            session.commit(pending.getIntentSender());
+        }
+    }
+
+    private void showUpdateToast(String message) {
+        runOnUiThread(() -> Toast.makeText(this, message, Toast.LENGTH_LONG).show());
+    }
+
 
     public void startSpeechRecognitionFromNative() {
         runOnUiThread(this::toggleSpeechRecognition);
@@ -433,6 +546,8 @@ public final class QuestNativeActivity extends NativeActivity {
         try {
             copyAssetDirectory("lang", new File(root, "lang"));
             Log.i(TAG, "Bundled language resources installed.");
+            copyAssetFile("release_notes.txt", new File(root, "release_notes.txt"));
+            Log.i(TAG, "Release notes installed.");
             copyMissingAssetDirectory("palettes", new File(root, "palettes"));
             Log.i(TAG, "Bundled character palettes installed.");
             // Remove obsolete synchronized/session manifests. Native Fire

@@ -104,6 +104,7 @@ bool vr_special_moves_grant_fire_flower(void);
 bool vr_special_moves_hammer_suit_active(void);
 bool vr_special_moves_grant_hammer_suit(void);
 bool vr_special_moves_sonic_shoes_active(void);
+bool vr_special_moves_sonic_shoes_prevent_slope_slide(struct MarioState *m);
 bool vr_special_moves_grant_sonic_shoes(void);
 f32 vr_special_moves_sonic_speed_scale(void);
 Gfx* geo_vr_sonic_shoe(

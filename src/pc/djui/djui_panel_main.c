@@ -10,6 +10,7 @@
 #include "pc/controller/controller_sdl.h"
 #include "pc/pc_main.h"
 #include "pc/network/version.h"
+#include "pc/release_notes.h"
 #include "pc/update_checker.h"
 #include "pc/utils/misc.h"
 
@@ -28,10 +29,39 @@ static void djui_panel_main_quit(struct DjuiBase* caller) {
                               djui_panel_main_quit_yes);
 }
 
+static void djui_panel_main_release_notes_create(UNUSED struct DjuiBase* caller) {
+    vr_release_notes_load();
+    struct DjuiThreePanel* panel = djui_panel_menu_create("Release Notes", false);
+    struct DjuiBase* body = djui_three_panel_get_body(panel);
+    struct DjuiPaginated* paginated = djui_paginated_create(body, 1);
+    for (int32_t page = 0; page < vr_release_notes_page_count(); page++) {
+        struct DjuiText* text = djui_text_create(
+            &paginated->layout->base,
+            vr_release_notes_page_get(page)
+        );
+        djui_base_set_size_type(&text->base, DJUI_SVT_RELATIVE, DJUI_SVT_ABSOLUTE);
+        djui_base_set_size(&text->base, 1.0f, 340.0f);
+        djui_text_set_alignment(text, DJUI_HALIGN_LEFT, DJUI_VALIGN_TOP);
+        djui_text_set_font(text, gDjuiFonts[FONT_ALIASED]);
+        djui_text_set_font_scale(text, text->fontScale * 0.56f);
+        djui_text_set_drop_shadow(text, 0, 0, 0, 180);
+    }
+    djui_paginated_calculate_height(paginated);
+    djui_button_create(body, DLANG(MENU, BACK), DJUI_BUTTON_STYLE_BACK,
+                       djui_panel_menu_back);
+    djui_three_panel_recalculate_body_size(panel);
+    djui_panel_add(caller, panel, NULL);
+}
 static void djui_panel_main_open_vr_releases(
     UNUSED struct DjuiBase* caller
 ) {
-    open_url(VR_RELEASES_URL);
+    struct DjuiButton* button = (struct DjuiButton*) caller;
+    djui_text_set_text(button->text, "Preparing update...");
+    djui_base_set_enabled(&button->base, false);
+    if (!vr_update_install_latest()) {
+        djui_text_set_text(button->text, "Update could not start - Retry");
+        djui_base_set_enabled(&button->base, true);
+    }
 }
 
 static void djui_panel_main_create_vr_version_status(
@@ -80,7 +110,7 @@ static void djui_panel_main_create_vr_version_status(
         snprintf(
             updateText,
             sizeof(updateText),
-            "Update available: %s - Open GitHub",
+            "Update available: %s - Install",
             vr_update_get_latest_version()
         );
         struct DjuiButton* updateButton = djui_button_create(
@@ -185,6 +215,8 @@ void djui_panel_main_create(struct DjuiBase* caller) {
             if (!configExCoopTheme) { djui_base_set_location(&vrButton->base, 0, -30); }
             struct DjuiButton* button3 = djui_button_create(body, DLANG(MAIN, OPTIONS), DJUI_BUTTON_STYLE_NORMAL, djui_panel_options_create);
             if (!configExCoopTheme) { djui_base_set_location(&button3->base, 0, -30); }
+            struct DjuiButton* releaseNotesButton = djui_button_create(body, "Release Notes", DJUI_BUTTON_STYLE_NORMAL, djui_panel_main_release_notes_create);
+            if (!configExCoopTheme) { djui_base_set_location(&releaseNotesButton->base, 0, -30); }
             struct DjuiButton* button4 = djui_button_create(body, DLANG(MAIN, QUIT), DJUI_BUTTON_STYLE_BACK, djui_panel_main_quit);
             if (!configExCoopTheme) { djui_base_set_location(&button4->base, 0, -30); }
         }

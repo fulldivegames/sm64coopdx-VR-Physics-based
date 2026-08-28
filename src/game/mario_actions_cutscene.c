@@ -20,6 +20,7 @@
 #include "mario.h"
 #include "mario_actions_moving.h"
 #include "mario_step.h"
+#include "vr_hand_interaction.h"
 #include "moving_texture.h"
 #include "object_helpers.h"
 #include "object_list_processor.h"
@@ -3116,6 +3117,8 @@ static s32 act_end_waving_cutscene(struct MarioState *m) {
 
 static s32 check_for_instant_quicksand(struct MarioState *m) {
     if (!m) { return 0; }
+    // This fatal-sand check bypasses mario_update_quicksand().
+    if (mario_sonic_shoes_can_run_on_quicksand(m)) { return FALSE; }
     if (m != &gMarioStates[0]) {
         // never kill remote marios
         return FALSE;

@@ -962,6 +962,9 @@ Returns true if conditions to slide are met.
 |descriptionEnd| */
 s32 should_begin_sliding(struct MarioState *m) {
     if (!m) { return FALSE; }
+    if (vr_special_moves_sonic_shoes_prevent_slope_slide(m)) {
+        return FALSE;
+    }
     if (m->input & INPUT_ABOVE_SLIDE) {
         s32 slideLevel = (m->area->terrainType & TERRAIN_MASK) == TERRAIN_SLIDE;
         s32 movingBackward =

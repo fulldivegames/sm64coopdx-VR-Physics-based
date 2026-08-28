@@ -7,6 +7,8 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <android/log.h>
+#include <android/native_activity.h>
+#include <jni.h>
 
 #include "pc/platform.h"
 #include "pc/controller/controller_mouse.h"
@@ -43,6 +45,7 @@ bool gGfxInited;
 bool gUpdateMessage;
 static enum VrUpdateStatus sVrUpdateStatus = VR_UPDATE_CHECKING;
 static char sVrLatestVersion[32];
+#define QUEST_TEST_FORCE_UPDATE_INSTALLER 0
 bool gRomIsValid = true;
 int8_t gDebugLevelSelect;
 int8_t gShowProfiler;
@@ -102,16 +105,43 @@ static void quest_refresh_update_status(void) {
     const bool newer = latestMajor > currentMajor ||
             (latestMajor == currentMajor && latestMinor > currentMinor) ||
             (latestMajor == currentMajor && latestMinor == currentMinor && latestPatch > currentPatch);
-    sVrUpdateStatus = newer ? VR_UPDATE_AVAILABLE : VR_UPDATE_UP_TO_DATE;
-    gUpdateMessage = newer;
+    const bool available = newer || (QUEST_TEST_FORCE_UPDATE_INSTALLER && version[0] != '\0');
+    sVrUpdateStatus = available ? VR_UPDATE_AVAILABLE : VR_UPDATE_UP_TO_DATE;
+    gUpdateMessage = available;
 }
 
 enum VrUpdateStatus vr_update_get_status(void) {
     quest_refresh_update_status();
     return sVrUpdateStatus;
 }
+ANativeActivity *quest_android_get_activity(void);
+void quest_android_request_update_install(void) {
+    ANativeActivity *activity = quest_android_get_activity();
+    if (activity == NULL || activity->vm == NULL || activity->clazz == NULL) return;
+    JNIEnv *env = NULL;
+    bool detach = false;
+    jint status = (*activity->vm)->GetEnv(activity->vm, (void **)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*activity->vm)->AttachCurrentThread(activity->vm, &env, NULL) != JNI_OK) return;
+        detach = true;
+    } else if (status != JNI_OK || env == NULL) {
+        return;
+    }
+    jclass clazz = (*env)->GetObjectClass(env, activity->clazz);
+    jmethodID method = clazz == NULL ? NULL : (*env)->GetMethodID(
+        env, clazz, "downloadLatestStandaloneUpdateFromNative", "()V");
+    if (method != NULL) {
+        (*env)->CallVoidMethod(env, activity->clazz, method);
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    }
+    if (clazz != NULL) (*env)->DeleteLocalRef(env, clazz);
+    if (detach) (*activity->vm)->DetachCurrentThread(activity->vm);
+
+}
+
 const char *vr_update_get_latest_version(void) { return sVrLatestVersion; }
 void show_update_popup(void) {}
+bool vr_update_install_latest(void) { quest_android_request_update_install(); return true; }
 void check_for_updates(void) {}
 
 static void quest_parse_version(const char *value, int *major, int *minor, int *patch) {
