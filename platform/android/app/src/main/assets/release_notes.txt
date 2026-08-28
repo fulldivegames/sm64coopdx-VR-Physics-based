@@ -1,8 +1,8 @@
-## v0.8.2 — Updater and Release Notes Update
+## v0.8.2 — Standalone Updater Hotfix
 
-- Added the in-game standalone updater, which checks the latest standalone GitHub release, downloads the APK, installs it, and relaunches the game.
-- Added title-screen Release Notes pages sourced from the standalone repository.
-- Added clear update feedback and permission guidance during the Quest installation flow.
+- Restored the selectable Quest title-screen update button at the top of the main menu.
+- Kept latest standalone-release lookup, APK installation, permission guidance, and automatic relaunch.
+- Kept the standalone Release Notes page synchronized with this release.
 
 ## v0.8.0 — Sonic Shoes Update
 

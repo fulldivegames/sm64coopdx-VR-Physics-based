@@ -113,24 +113,25 @@ static void djui_panel_main_create_vr_version_status(
             "Update available: %s - Install",
             vr_update_get_latest_version()
         );
+        // Keep the install action in the same flow as the title-screen
+        // buttons. Attaching it directly to the three-panel root made it
+        // render in the footer area without participating in VR cursor
+        // navigation, leaving the visible button impossible to select.
+        struct DjuiBase* body = djui_three_panel_get_body(panel);
+        body->addChildrenToHead = true;
         struct DjuiButton* updateButton = djui_button_create(
-            &panel->base,
+            body,
             updateText,
             DJUI_BUTTON_STYLE_NORMAL,
             djui_panel_main_open_vr_releases
         );
+        body->addChildrenToHead = false;
         djui_base_set_size_type(
             &updateButton->base,
             DJUI_SVT_ABSOLUTE,
             DJUI_SVT_ABSOLUTE
         );
         djui_base_set_size(&updateButton->base, 440.0f, 36.0f);
-        djui_base_set_alignment(
-            &updateButton->base,
-            DJUI_HALIGN_LEFT,
-            DJUI_VALIGN_BOTTOM
-        );
-        djui_base_set_location(&updateButton->base, 8.0f, 6.0f);
         djui_base_set_border_width(&updateButton->base, 1.0f);
         djui_text_set_font_scale(
             updateButton->text,
