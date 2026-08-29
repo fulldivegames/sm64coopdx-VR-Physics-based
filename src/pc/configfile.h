@@ -220,6 +220,7 @@ extern bool         configVrSpecialFireFlowerMusic;
 extern bool         configVrSpecialHammerSuit;
 extern bool         configVrSpecialSonicShoes;
 extern unsigned int configVrSonicShoesSpeed;
+extern bool         configVrSpecialTrunkMode;
 extern bool         configVrSpecialRasengan;
 extern bool         configVrSpecialRasenganGripTrigger;
 extern bool         configVrRasenShurikenOverheadCharge;

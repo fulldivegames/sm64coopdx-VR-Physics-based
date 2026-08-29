@@ -54,6 +54,9 @@ bool vr_hand_interaction_is_tracked_held_object(
 bool vr_hand_interaction_is_hammer_charge_object(
     struct Object* object
 );
+bool vr_hand_interaction_is_trunk_mode_object(
+    struct Object* object
+);
 u32 vr_hand_interaction_get_tracked_held_hand(
     struct Object* object
 );
@@ -85,6 +88,7 @@ enum VrBoxReward {
     VR_BOX_REWARD_FIRE_FLOWER,
     VR_BOX_REWARD_HAMMER_SUIT,
     VR_BOX_REWARD_SONIC_SHOES,
+    VR_BOX_REWARD_TRUNK_MODE,
 };
 enum VrBoxReward vr_special_moves_roll_box_reward(
     struct Object* box,
@@ -93,6 +97,7 @@ enum VrBoxReward vr_special_moves_roll_box_reward(
 bool vr_special_moves_spawn_cheat_fire_flower(void);
 bool vr_special_moves_spawn_cheat_hammer_suit(void);
 bool vr_special_moves_spawn_cheat_sonic_shoes(void);
+bool vr_special_moves_spawn_cheat_trunk_mode(void);
 enum VrCheatSpawnCap {
     VR_CHEAT_SPAWN_WING_CAP,
     VR_CHEAT_SPAWN_VANISH_CAP,
@@ -117,6 +122,8 @@ Gfx* geo_switch_vr_sonic_foot(
     struct GraphNode* node,
     void* context
 );
+bool vr_special_moves_trunk_mode_active(void);
+bool vr_special_moves_grant_trunk_mode(void);
 Gfx* geo_vr_fireball_color(
     s32 callContext,
     struct GraphNode* node,

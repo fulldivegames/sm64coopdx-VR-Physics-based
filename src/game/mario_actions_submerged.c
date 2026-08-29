@@ -37,6 +37,15 @@ static s16 sSwimStrength[MAX_PLAYERS] = { MIN_SWIM_STRENGTH, MIN_SWIM_STRENGTH, 
                                           MIN_SWIM_STRENGTH, MIN_SWIM_STRENGTH, MIN_SWIM_STRENGTH, MIN_SWIM_STRENGTH };
 static s16 sVrSwimStableYaw[MAX_PLAYERS] = { 0 };
 static bool sVrSwimStableYawValid[MAX_PLAYERS] = { false };
+#if 0 // Shelved experimental physical-swimming implementation.
+static bool sVrPhysicalSwimVelocityActive[MAX_PLAYERS] = { false };
+static Vec3f sVrPhysicalSwimVelocity[MAX_PLAYERS] = { { 0 } };
+static f32 sVrPhysicalSwimDecayScale[MAX_PLAYERS] = { 0 };
+static u8 sVrPhysicalSwimPhase[MAX_PLAYERS] = { 0 };
+static u8 sVrPhysicalSwimPhaseFrames[MAX_PLAYERS] = { 0 };
+static u8 sVrPhysicalSwimStillFrames[MAX_PLAYERS] = { 0 };
+static Vec3f sVrPhysicalSwimDirection[MAX_PLAYERS] = { { 0 } };
+#endif
 
 static s16 sWaterCurrentSpeeds[] = { 28, 12, 8, 4 };
 
@@ -87,6 +96,309 @@ static f32 get_buoyancy(struct MarioState *m) {
 
     return buoyancy;
 }
+
+#if 0 // Shelved experimental physical-swimming implementation.
+static bool vr_physical_swimming_action_supported(u32 action) {
+    switch (action) {
+        case ACT_WATER_IDLE:
+        case ACT_HOLD_WATER_IDLE:
+        case ACT_WATER_ACTION_END:
+        case ACT_HOLD_WATER_ACTION_END:
+        case ACT_BREASTSTROKE:
+        case ACT_SWIMMING_END:
+        case ACT_FLUTTER_KICK:
+        case ACT_HOLD_BREASTSTROKE:
+        case ACT_HOLD_SWIMMING_END:
+        case ACT_HOLD_FLUTTER_KICK:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static void vr_physical_swimming_reset(struct MarioState* m) {
+    if (m == NULL || m->playerIndex >= MAX_PLAYERS) {
+        return;
+    }
+    const u16 playerIndex = m->playerIndex;
+    sVrPhysicalSwimVelocityActive[playerIndex] = false;
+    vec3f_set(sVrPhysicalSwimVelocity[playerIndex], 0.0f, 0.0f, 0.0f);
+    sVrPhysicalSwimDecayScale[playerIndex] = 1.0f;
+    sVrPhysicalSwimPhase[playerIndex] = 0;
+    sVrPhysicalSwimPhaseFrames[playerIndex] = 0;
+    sVrPhysicalSwimStillFrames[playerIndex] = 0;
+    vec3f_set(sVrPhysicalSwimDirection[playerIndex], 0.0f, 0.0f, 0.0f);
+}
+
+static f32 vr_physical_swimming_speed_scale(void) {
+    return (f32)clamp(
+        ns_coopnet_vr_gameplay_allowed()
+            ? configVrSwimmingSpeed
+            : VR_SWIMMING_SPEED_DEFAULT,
+        VR_SWIMMING_SPEED_MIN,
+        VR_SWIMMING_SPEED_MAX
+    ) / 100.0f;
+}
+
+static void vr_physical_swimming_update_stroke(struct MarioState* m) {
+    const f32 minimumMotionSpeed = 5.0f;
+    const f32 strokeStartSpeed = 8.0f;
+    const f32 fullStrokeSpeed = 40.0f;
+    const f32 eachHandMinSpeed = 4.0f;
+    const f32 triggerThreshold = 0.55f;
+
+    if (m == NULL ||
+        m->playerIndex != 0 ||
+        !vr_is_active() ||
+        !vr_physical_swimming_action_supported(m->action)) {
+        vr_physical_swimming_reset(m);
+        return;
+    }
+
+    if (!configVrStandardSwimming) {
+        m->input &= ~(INPUT_A_PRESSED | INPUT_A_DOWN);
+    }
+    if (!configVrPhysicalSwimming) {
+        vr_physical_swimming_reset(m);
+        return;
+    }
+
+    Vec3f viewDirection;
+    if (!vr_get_first_person_view_direction(m, viewDirection)) {
+        vr_physical_swimming_reset(m);
+        return;
+    }
+
+    struct VrControllerState leftState;
+    struct VrControllerState rightState;
+    if (!vr_get_controller_state(VR_CONTROLLER_LEFT, &leftState) ||
+        !vr_get_controller_state(VR_CONTROLLER_RIGHT, &rightState) ||
+        !leftState.gripLinearVelocityValid ||
+        !rightState.gripLinearVelocityValid) {
+        vr_physical_swimming_reset(m);
+        return;
+    }
+
+    // Standard swimming keeps the normal A-button controls available and
+    // uses both analog triggers as an explicit physical-swim clutch. Turning
+    // Standard Swimming off removes the button stroke and lets hand motion
+    // drive swimming without holding the triggers.
+    if (configVrStandardSwimming &&
+        (leftState.trigger < triggerThreshold ||
+         rightState.trigger < triggerThreshold)) {
+        vr_physical_swimming_reset(m);
+        return;
+    }
+
+    Vec3f unusedPosition;
+    Vec3f leftVelocity;
+    Vec3f rightVelocity;
+    if (!vr_get_controller_world_fist_raw_from_state(
+            VR_CONTROLLER_LEFT,
+            &leftState,
+            unusedPosition,
+            leftVelocity
+        ) ||
+        !vr_get_controller_world_fist_raw_from_state(
+            VR_CONTROLLER_RIGHT,
+            &rightState,
+            unusedPosition,
+            rightVelocity
+        )) {
+        vr_physical_swimming_reset(m);
+        return;
+    }
+
+    const f32 leftSpeed = sqrtf(
+        leftVelocity[0] * leftVelocity[0] +
+        leftVelocity[1] * leftVelocity[1] +
+        leftVelocity[2] * leftVelocity[2]
+    );
+    const f32 rightSpeed = sqrtf(
+        rightVelocity[0] * rightVelocity[0] +
+        rightVelocity[1] * rightVelocity[1] +
+        rightVelocity[2] * rightVelocity[2]
+    );
+    Vec3f averageVelocity = {
+        (leftVelocity[0] + rightVelocity[0]) * 0.5f,
+        (leftVelocity[1] + rightVelocity[1]) * 0.5f,
+        (leftVelocity[2] + rightVelocity[2]) * 0.5f
+    };
+
+    Vec3f headsetForward = { viewDirection[0], 0.0f, viewDirection[2] };
+    f32 horizontalLength = sqrtf(
+        headsetForward[0] * headsetForward[0] +
+        headsetForward[2] * headsetForward[2]
+    );
+    if (horizontalLength > 0.15f) {
+        headsetForward[0] /= horizontalLength;
+        headsetForward[2] /= horizontalLength;
+    } else {
+        headsetForward[0] = sins(m->faceAngle[1]);
+        headsetForward[2] = coss(m->faceAngle[1]);
+    }
+
+    // Drive the native water velocity directly from the current two-hand
+    // motion. This avoids waiting for a stroke-ending still frame, which is
+    // unreliable on real OpenXR controllers because their velocity never
+    // becomes perfectly motionless. A deliberate 0.4 m/s stroke reaches the
+    // same speed cap as normal button swimming, while slower strokes scale
+    // smoothly below it.
+    const f32 forwardPropulsion = -(
+        averageVelocity[0] * headsetForward[0] +
+        averageVelocity[2] * headsetForward[2]
+    );
+    const f32 verticalPropulsion = -averageVelocity[1];
+    const f32 effectiveSpeed = sqrtf(
+        forwardPropulsion * forwardPropulsion +
+        verticalPropulsion * verticalPropulsion
+    );
+    const u16 playerIndex = m->playerIndex;
+    Vec3f propulsion = {
+        headsetForward[0] * forwardPropulsion,
+        verticalPropulsion,
+        headsetForward[2] * forwardPropulsion
+    };
+    const bool bothHandsMoving =
+        leftSpeed >= eachHandMinSpeed && rightSpeed >= eachHandMinSpeed;
+    bool beginNativeStroke = false;
+
+    // Phase 0: ready. Lock the first deliberate direction for this stroke.
+    if (sVrPhysicalSwimPhase[playerIndex] == 0) {
+        if (effectiveSpeed < strokeStartSpeed || !bothHandsMoving) {
+            return;
+        }
+        vec3f_copy(sVrPhysicalSwimDirection[playerIndex], propulsion);
+        vec3f_normalize(sVrPhysicalSwimDirection[playerIndex]);
+        sVrPhysicalSwimPhase[playerIndex] = 1;
+        sVrPhysicalSwimPhaseFrames[playerIndex] = 0;
+        sVrPhysicalSwimStillFrames[playerIndex] = 0;
+        beginNativeStroke = true;
+    }
+
+    f32 motionAlongStroke =
+        propulsion[0] * sVrPhysicalSwimDirection[playerIndex][0] +
+        propulsion[1] * sVrPhysicalSwimDirection[playerIndex][1] +
+        propulsion[2] * sVrPhysicalSwimDirection[playerIndex][2];
+
+    // Phase 2: recovery. Ignore the hand return entirely. A new pull in the
+    // locked direction automatically begins the next stroke, while a short
+    // still point returns to ready and allows a different direction.
+    if (sVrPhysicalSwimPhase[playerIndex] == 2) {
+        sVrPhysicalSwimPhaseFrames[playerIndex]++;
+        if (effectiveSpeed <= minimumMotionSpeed) {
+            sVrPhysicalSwimStillFrames[playerIndex]++;
+            if (sVrPhysicalSwimStillFrames[playerIndex] >= 2) {
+                sVrPhysicalSwimPhase[playerIndex] = 0;
+                sVrPhysicalSwimPhaseFrames[playerIndex] = 0;
+                sVrPhysicalSwimStillFrames[playerIndex] = 0;
+            }
+            return;
+        }
+        sVrPhysicalSwimStillFrames[playerIndex] = 0;
+        if (sVrPhysicalSwimPhaseFrames[playerIndex] < 3 ||
+            motionAlongStroke < strokeStartSpeed || !bothHandsMoving) {
+            return;
+        }
+        sVrPhysicalSwimPhase[playerIndex] = 1;
+        sVrPhysicalSwimPhaseFrames[playerIndex] = 0;
+        beginNativeStroke = true;
+    }
+
+    // Phase 1: power stroke. Once the hands stop or reverse, enter recovery
+    // before that opposite motion can move Mario back the other way.
+    if (sVrPhysicalSwimPhase[playerIndex] == 1) {
+        if (sVrPhysicalSwimPhaseFrames[playerIndex] >= 2 &&
+            (motionAlongStroke <= minimumMotionSpeed || !bothHandsMoving)) {
+            sVrPhysicalSwimPhase[playerIndex] = 2;
+            sVrPhysicalSwimPhaseFrames[playerIndex] = 0;
+            sVrPhysicalSwimStillFrames[playerIndex] = 0;
+            return;
+        }
+        sVrPhysicalSwimPhaseFrames[playerIndex]++;
+    }
+
+    motionAlongStroke = MAX(motionAlongStroke, minimumMotionSpeed);
+
+    const f32 speedScale = vr_physical_swimming_speed_scale();
+    const f32 strokeStrength = clamp(
+        (motionAlongStroke - minimumMotionSpeed) /
+            (fullStrokeSpeed - minimumMotionSpeed),
+        0.08f,
+        1.0f
+    );
+    const f32 lockedForward =
+        sVrPhysicalSwimDirection[playerIndex][0] * headsetForward[0] +
+        sVrPhysicalSwimDirection[playerIndex][2] * headsetForward[2];
+    const f32 lockedVertical = sVrPhysicalSwimDirection[playerIndex][1];
+    const f32 totalDirectionalTravel =
+        fabsf(lockedForward) + fabsf(lockedVertical);
+    const f32 reverseTravel =
+        MAX(-lockedForward, 0.0f) + MAX(-lockedVertical, 0.0f);
+    const f32 reverseDirectionScale = totalDirectionalTravel > 0.001f
+        ? 1.0f - 0.5f * reverseTravel / totalDirectionalTravel
+        : 1.0f;
+    const f32 swimSpeed =
+        28.0f * speedScale * strokeStrength * reverseDirectionScale;
+    vec3f_copy(
+        sVrPhysicalSwimVelocity[playerIndex],
+        sVrPhysicalSwimDirection[playerIndex]
+    );
+    vec3f_mul(sVrPhysicalSwimVelocity[playerIndex], swimSpeed);
+    sVrPhysicalSwimVelocityActive[playerIndex] = true;
+    sVrPhysicalSwimDecayScale[playerIndex] = reverseDirectionScale;
+
+    // Pulse the native swim input so the normal breaststroke actions,
+    // animation, sounds, water collision, and currents remain authoritative.
+    if (beginNativeStroke) {
+        m->input |= INPUT_A_PRESSED | INPUT_A_DOWN;
+    }
+}
+
+static void vr_physical_swimming_apply_velocity(
+    struct MarioState* m,
+    f32 buoyancy
+) {
+    if (m == NULL ||
+        m->playerIndex != 0 ||
+        !configVrPhysicalSwimming ||
+        !vr_physical_swimming_action_supported(m->action) ||
+        !sVrPhysicalSwimVelocityActive[m->playerIndex]) {
+        return;
+    }
+
+    Vec3f* physicalVelocity = &sVrPhysicalSwimVelocity[m->playerIndex];
+    const f32 speed = sqrtf(
+        (*physicalVelocity)[0] * (*physicalVelocity)[0] +
+        (*physicalVelocity)[1] * (*physicalVelocity)[1] +
+        (*physicalVelocity)[2] * (*physicalVelocity)[2]
+    );
+    if (speed <= 0.001f) {
+        sVrPhysicalSwimVelocityActive[m->playerIndex] = false;
+        return;
+    }
+
+    m->vel[0] = (*physicalVelocity)[0];
+    m->vel[1] = (*physicalVelocity)[1] + buoyancy;
+    m->vel[2] = (*physicalVelocity)[2];
+    const f32 signedForwardSpeed =
+        (*physicalVelocity)[0] * sins(m->faceAngle[1]) +
+        (*physicalVelocity)[2] * coss(m->faceAngle[1]);
+    m->forwardVel = MAX(signedForwardSpeed, 0.0f);
+
+    const f32 nextSpeed = MAX(
+        speed - 0.5f * vr_physical_swimming_speed_scale() *
+            sVrPhysicalSwimDecayScale[m->playerIndex],
+        0.0f
+    );
+    if (nextSpeed <= 0.001f) {
+        vec3f_set(*physicalVelocity, 0.0f, 0.0f, 0.0f);
+        sVrPhysicalSwimVelocityActive[m->playerIndex] = false;
+    } else {
+        vec3f_mul(*physicalVelocity, nextSpeed / speed);
+    }
+}
+#endif
 
 /* |description|Performs a full water movement step where ceilings, floors, and walls are handled. Generally, you should use `perform_water_step` for the full step functionality|descriptionEnd| */
 u32 perform_water_full_step(struct MarioState *m, VEC_OUT Vec3f nextPos) {

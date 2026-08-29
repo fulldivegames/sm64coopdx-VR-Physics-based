@@ -74,6 +74,8 @@
 #define MAX_FAR_PLANE_DIST 1000000.f
 #define VR_LEDGE_CAMERA_DROP 80.0f
 #define VR_STAR_SPAWN_FOCUS_RESPONSE 0.24f
+#define VR_TRUNK_HEAD_ATTACHMENT_BACK 10.0f
+#define VR_TRUNK_HEAD_ATTACHMENT_DOWN 24.0f
 
 f32 gProjectionMaxNearValue = 5;
 s16 gProjectionVanillaNearValue = 100;
@@ -2016,6 +2018,20 @@ static bool vr_get_true_first_person_body_basis_legacy(
         cameraForward[1] = -pitch;
         cameraForward[2] = stableForward[2] * vertical;
     }
+    return true;
+}
+
+static bool vr_get_headset_attachment_matrix(Mat4 matrix) {
+    float translation[3] = { 0.0f, 0.0f, 0.0f };
+    if (matrix == NULL || !vr_get_head_translation(translation) ||
+        !vr_build_head_rotation_matrix(matrix)) {
+        return false;
+    }
+    vr_apply_roomscale_tracking_compensation(translation);
+    matrix[3][0] = translation[0] * 100.0f;
+    matrix[3][1] = translation[1] * 100.0f;
+    matrix[3][2] = translation[2] * 100.0f;
+    matrix[3][3] = 1.0f;
     return true;
 }
 
@@ -4521,6 +4537,42 @@ void patch_mtx_vr_shared(void) {
                  interp != NULL;
                  interp = interp->nextVrHeld) {
                 if (interp->owner == NULL) {
+                    continue;
+                }
+
+                if (vr_hand_interaction_is_trunk_mode_object(
+                        interp->owner)) {
+                    Mat4 headMatrix;
+                    struct MtxInterp* rootInterp = NULL;
+                    if (!vr_get_headset_attachment_matrix(headMatrix)) {
+                        continue;
+                    }
+                    for (struct MtxInterp* candidate = sVrHeldMatrixHead;
+                         candidate != NULL;
+                         candidate = candidate->nextVrHeld) {
+                        if (candidate->owner == interp->owner &&
+                            candidate->displayList ==
+                                vr_elephant_trunk_base_dl) {
+                            rootInterp = candidate;
+                            break;
+                        }
+                    }
+                    if (rootInterp == NULL) {
+                        continue;
+                    }
+                    // The model's base joint belongs just behind the user's
+                    // nose. Late-latch only the rigid root displacement; all
+                    // three spring joints retain their interpolated relative
+                    // transforms and therefore stay smooth at 72/90/120 Hz.
+                    for (u32 axis = 0; axis < 3; axis++) {
+                        const f32 desiredRoot = headMatrix[3][axis] +
+                            headMatrix[2][axis] *
+                                VR_TRUNK_HEAD_ATTACHMENT_BACK -
+                            headMatrix[1][axis] *
+                                VR_TRUNK_HEAD_ATTACHMENT_DOWN;
+                        interp->interp.m[3][axis] += desiredRoot -
+                            rootInterp->vrBase.m[3][axis];
+                    }
                     continue;
                 }
 

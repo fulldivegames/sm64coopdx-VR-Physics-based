@@ -117,6 +117,7 @@ bool         configVrSpecialFireFlowerMusic        = true;
 bool         configVrSpecialHammerSuit              = true;
 bool         configVrSpecialSonicShoes              = true;
 unsigned int configVrSonicShoesSpeed                = VR_SONIC_SHOES_SPEED_DEFAULT;
+bool         configVrSpecialTrunkMode                = true;
 bool         configVrSpecialRasengan               = true;
 bool         configVrSpecialRasenganGripTrigger    = false;
 bool         configVrRasenShurikenOverheadCharge   = true;
@@ -484,6 +485,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_special_hammer_suit",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialHammerSuit},
     {.name = "vr_special_sonic_shoes",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialSonicShoes},
     {.name = "vr_sonic_shoes_speed_v3",          .type = CONFIG_TYPE_UINT, .uintValue = &configVrSonicShoesSpeed},
+    {.name = "vr_special_trunk_mode",             .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialTrunkMode},
     {.name = "vr_special_rasengan",             .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialRasengan},
     {.name = "vr_special_rasengan_grip_trigger",.type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialRasenganGripTrigger},
     {.name = "vr_rasen_shuriken_overhead_charge",.type = CONFIG_TYPE_BOOL, .boolValue = &configVrRasenShurikenOverheadCharge},
