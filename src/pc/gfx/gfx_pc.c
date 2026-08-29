@@ -131,6 +131,17 @@ struct RSP {
     struct GfxVertex loaded_vertices[MAX_VERTICES + 4];
 };
 static struct RSP rsp;
+// A large display list can load many vertices that are entirely outside the
+// current clip volume. Keep the source batch around so we can defer the
+// expensive lighting/fog work until a triangle actually needs those vertices.
+// The high bit is outside the six normal clip-plane bits used by GfxVertex.
+#define GFX_CLIP_REJ_BATCH 0x40
+static const Vtx *sDeferredBatchVertices[MAX_VERTICES + 4] = { 0 };
+static uint8_t sDeferredBatchStart[MAX_VERTICES + 4] = { 0 };
+static uint8_t sDeferredBatchCount[MAX_VERTICES + 4] = { 0 };
+static bool sDeferredBatchLuaVertexColor[MAX_VERTICES + 4] = { 0 };
+static bool sDeferredBatchPending = false;
+static bool sMaterializingDeferredBatch = false;
 
 struct RDP {
     const uint8_t *palette[2];
@@ -879,6 +890,70 @@ static float gfx_adjust_x_for_aspect_ratio(float x) {
     return adjusted;
 }
 
+static bool gfx_batch_outside_clip(
+    size_t n_vertices, const Vtx *vertices, uint8_t *common_rejection
+) {
+    if (n_vertices == 0 || vertices == NULL || common_rejection == NULL) {
+        return false;
+    }
+
+    float min_x = vertices[0].v.ob[0];
+    float max_x = min_x;
+    float min_y = vertices[0].v.ob[1];
+    float max_y = min_y;
+    float min_z = vertices[0].v.ob[2];
+    float max_z = min_z;
+    for (size_t i = 1; i < n_vertices; ++i) {
+        min_x = fminf(min_x, vertices[i].v.ob[0]);
+        max_x = fmaxf(max_x, vertices[i].v.ob[0]);
+        min_y = fminf(min_y, vertices[i].v.ob[1]);
+        max_y = fmaxf(max_y, vertices[i].v.ob[1]);
+        min_z = fminf(min_z, vertices[i].v.ob[2]);
+        max_z = fmaxf(max_z, vertices[i].v.ob[2]);
+    }
+
+    // Clip half-spaces are linear in homogeneous coordinates. Testing all
+    // eight transformed AABB corners therefore gives a conservative result:
+    // a batch is rejected only when every corner is outside the same plane.
+    uint8_t common = 0x3f;
+    for (uint8_t corner = 0; corner < 8; ++corner) {
+        const float x_local = (corner & 1) ? max_x : min_x;
+        const float y_local = (corner & 2) ? max_y : min_y;
+        const float z_local = (corner & 4) ? max_z : min_z;
+        float x = x_local * rsp.MP_matrix[0][0]
+            + y_local * rsp.MP_matrix[1][0]
+            + z_local * rsp.MP_matrix[2][0]
+            + rsp.MP_matrix[3][0];
+        const float y = x_local * rsp.MP_matrix[0][1]
+            + y_local * rsp.MP_matrix[1][1]
+            + z_local * rsp.MP_matrix[2][1]
+            + rsp.MP_matrix[3][1];
+        const float z = x_local * rsp.MP_matrix[0][2]
+            + y_local * rsp.MP_matrix[1][2]
+            + z_local * rsp.MP_matrix[2][2]
+            + rsp.MP_matrix[3][2];
+        const float w = x_local * rsp.MP_matrix[0][3]
+            + y_local * rsp.MP_matrix[1][3]
+            + z_local * rsp.MP_matrix[2][3]
+            + rsp.MP_matrix[3][3];
+
+        x = gfx_adjust_x_for_aspect_ratio(x);
+        uint8_t rejection = 0;
+        if (x < -w) rejection |= 1;
+        if (x >  w) rejection |= 2;
+        if (y < -w) rejection |= 4;
+        if (y >  w) rejection |= 8;
+        if (z < -w) rejection |= 16;
+        if (z >  w) rejection |= 32;
+        common &= rejection;
+        if (common == 0) {
+            return false;
+        }
+    }
+
+    *common_rejection = common;
+    return true;
+}
 static OPTIMIZE_O3 void gfx_local_to_world_space(VEC_OUT Vec3f pos, VEC_OUT Vec3f normal) {
     if (!sHasInverseCameraMatrix) { return; }
 
@@ -912,6 +987,53 @@ static OPTIMIZE_O3 void gfx_local_to_world_space(VEC_OUT Vec3f pos, VEC_OUT Vec3
 static void OPTIMIZE_O3 gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *vertices, bool luaVertexColor) {
     if (!vertices) { return; }
 
+    const size_t loaded_vertex_count = MAX_VERTICES + 4;
+    if (dest_index < loaded_vertex_count) {
+        size_t clear_end = dest_index + n_vertices;
+        if (clear_end > loaded_vertex_count) {
+            clear_end = loaded_vertex_count;
+        }
+        for (size_t i = dest_index; i < clear_end; ++i) {
+            sDeferredBatchVertices[i] = NULL;
+            sDeferredBatchStart[i] = 0;
+            sDeferredBatchCount[i] = 0;
+            sDeferredBatchLuaVertexColor[i] = false;
+        }
+    }
+
+    // Only defer normal world-geometry loads. DJUI's extended vertex path is
+    // intentionally untouched, and the minimum batch size avoids overhead on
+    // the small animated objects that benefit little from this pass.
+    if (!sMaterializingDeferredBatch && luaVertexColor &&
+        !sOnlyTextureChangeOnAddrChange && n_vertices >= 12 &&
+        dest_index <= MAX_VERTICES &&
+        n_vertices <= MAX_VERTICES - dest_index) {
+        uint8_t common_rejection = 0;
+        if (gfx_batch_outside_clip(n_vertices, vertices, &common_rejection)) {
+            for (size_t i = 0; i < n_vertices; ++i) {
+                struct GfxVertex *d = &rsp.loaded_vertices[dest_index + i];
+                d->x = 0.0f;
+                d->y = 0.0f;
+                d->z = 0.0f;
+                d->w = 1.0f;
+                d->u = 0.0f;
+                d->v = 0.0f;
+                d->color.r = 0;
+                d->color.g = 0;
+                d->color.b = 0;
+                d->color.a = 0;
+                d->fog_z = 0;
+                d->clip_rej = GFX_CLIP_REJ_BATCH | common_rejection;
+                d->world_geometry = true;
+                sDeferredBatchVertices[dest_index + i] = vertices;
+                sDeferredBatchStart[dest_index + i] = (uint8_t)dest_index;
+                sDeferredBatchCount[dest_index + i] = (uint8_t)n_vertices;
+                sDeferredBatchLuaVertexColor[dest_index + i] = luaVertexColor;
+            }
+            sDeferredBatchPending = true;
+            return;
+        }
+    }
     Vec3f globalLightCached[2];
     Vec3f vertexColorCached;
     if ((rsp.geometry_mode & G_LIGHTING) && !(rsp.geometry_mode & G_LIGHT_MAP_EXT)) {
@@ -1210,12 +1332,64 @@ static void OPTIMIZE_O3 gfx_sp_vertex(size_t n_vertices, size_t dest_index, cons
     }
 }
 
+static void gfx_materialize_deferred_vertex(size_t index) {
+    const size_t loaded_vertex_count = MAX_VERTICES + 4;
+    if (index >= loaded_vertex_count ||
+        !(rsp.loaded_vertices[index].clip_rej & GFX_CLIP_REJ_BATCH)) {
+        return;
+    }
+
+    const Vtx *vertices = sDeferredBatchVertices[index];
+    const size_t start = sDeferredBatchStart[index];
+    const size_t count = sDeferredBatchCount[index];
+    const bool luaVertexColor = sDeferredBatchLuaVertexColor[index];
+    if (vertices == NULL || count == 0 || start + count > MAX_VERTICES) {
+        rsp.loaded_vertices[index].clip_rej &= ~GFX_CLIP_REJ_BATCH;
+        sDeferredBatchVertices[index] = NULL;
+        return;
+    }
+
+    sMaterializingDeferredBatch = true;
+    gfx_sp_vertex(count, start, vertices, luaVertexColor);
+    sMaterializingDeferredBatch = false;
+}
+
+static void gfx_materialize_deferred_batches(void) {
+    const size_t loaded_vertex_count = MAX_VERTICES + 4;
+    if (!sDeferredBatchPending) {
+        return;
+    }
+    for (size_t i = 0; i < loaded_vertex_count; ++i) {
+        if (rsp.loaded_vertices[i].clip_rej & GFX_CLIP_REJ_BATCH) {
+            gfx_materialize_deferred_vertex(i);
+        }
+    }
+    sDeferredBatchPending = false;
+}
 static void OPTIMIZE_O3 gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
     struct GfxVertex *v1 = &rsp.loaded_vertices[vtx1_idx];
     struct GfxVertex *v2 = &rsp.loaded_vertices[vtx2_idx];
     struct GfxVertex *v3 = &rsp.loaded_vertices[vtx3_idx];
     struct GfxVertex *v_arr[3] = {v1, v2, v3};
 
+    if (sDeferredBatchPending) {
+        const uint8_t common_rejection =
+            (v1->clip_rej & v2->clip_rej & v3->clip_rej) & 0x3f;
+        if (common_rejection != 0) {
+            // All three vertices share an outside clip plane. No source
+            // vertex data or lighting work is needed for this triangle.
+            return;
+        }
+        if (v1->clip_rej & GFX_CLIP_REJ_BATCH) {
+            gfx_materialize_deferred_vertex(vtx1_idx);
+        }
+        if (v2->clip_rej & GFX_CLIP_REJ_BATCH) {
+            gfx_materialize_deferred_vertex(vtx2_idx);
+        }
+        if (v3->clip_rej & GFX_CLIP_REJ_BATCH) {
+            gfx_materialize_deferred_vertex(vtx3_idx);
+        }
+    }
     if (v1->clip_rej & v2->clip_rej & v3->clip_rej) {
         // The whole triangle lies outside the visible area
         return;
@@ -1981,11 +2155,32 @@ static inline void *seg_addr(uintptr_t w1) {
 #define C0(pos, width) ((cmd->words.w0 >> (pos)) & ((1U << width) - 1))
 #define C1(pos, width) ((cmd->words.w1 >> (pos)) & ((1U << width) - 1))
 
+static bool gfx_opcode_consumes_vertices(uint32_t opcode) {
+    if (opcode == G_TRI1) {
+        return true;
+    }
+#ifdef G_TRI2
+    if (opcode == G_TRI2) {
+        return true;
+    }
+#endif
+#ifdef G_TRI2_EXT
+    if (opcode == G_TRI2_EXT) {
+        return true;
+    }
+#endif
+    return false;
+}
 static void OPTIMIZE_O3 gfx_run_dl(Gfx* cmd) {
     if (!cmd) { return; }
 
     for (;;) {
         uint32_t opcode = cmd->words.w0 >> 24;
+        if (sDeferredBatchPending && !gfx_opcode_consumes_vertices(opcode)) {
+            // State-changing commands must materialize deferred vertices while
+            // their original load-time state is still current.
+            gfx_materialize_deferred_batches();
+        }
 
         switch (opcode) {
             // RSP commands:
@@ -2225,6 +2420,12 @@ static void OPTIMIZE_O3 gfx_run_dl(Gfx* cmd) {
 
 static void gfx_sp_reset(void) {
     rsp.modelview_matrix_stack_size = 1;
+    memset(sDeferredBatchVertices, 0, sizeof(sDeferredBatchVertices));
+    memset(sDeferredBatchStart, 0, sizeof(sDeferredBatchStart));
+    memset(sDeferredBatchCount, 0, sizeof(sDeferredBatchCount));
+    memset(sDeferredBatchLuaVertexColor, 0, sizeof(sDeferredBatchLuaVertexColor));
+    sDeferredBatchPending = false;
+    sMaterializingDeferredBatch = false;
     rsp.current_num_lights = 2;
     rsp.lights_changed = true;
     num_gfx_states = 0;
