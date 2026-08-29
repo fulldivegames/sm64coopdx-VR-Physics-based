@@ -5832,9 +5832,12 @@ static void geo_process_level_of_detail(struct GraphNodeLevelOfDetail *node) {
     f32 distanceFromCam = 0;
     if (gBehaviorValues.ProcessLODs) {
         if (vr_is_active()) {
-            const f32 x = (f32)mtx->m[3][0];
-            const f32 y = (f32)mtx->m[3][1];
-            const f32 z = (f32)mtx->m[3][2];
+            // VR builds both eyes from one scene traversal. Use the distance
+            // from the render origin so authored LOD ranges stay stereo-safe,
+            // without relying on one eye's forward-axis value.
+            const f32 x = gMatStack[gMatStackIndex][3][0];
+            const f32 y = gMatStack[gMatStackIndex][3][1];
+            const f32 z = gMatStack[gMatStackIndex][3][2];
             distanceFromCam = sqrtf(x * x + y * y + z * z);
         } else {
             distanceFromCam = (s32) -mtx->m[3][2];
