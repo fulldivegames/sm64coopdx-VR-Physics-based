@@ -215,6 +215,7 @@ extern bool         configVrSpecialMovesEnabled;
 extern bool         configVrSpecialFireFlower;
 extern bool         configVrSpecialFireFlowerMusic;
 extern bool         configVrSpecialHammerSuit;
+extern bool         configVrSpecialTrunkMode;
 extern bool         configVrSpecialRasengan;
 extern bool         configVrSpecialRasenganGripTrigger;
 extern bool         configVrRasenShurikenOverheadCharge;

@@ -133,6 +133,11 @@ static void djui_panel_vr_spawn_hammer_suit(struct DjuiBase* caller) {
     vr_special_moves_spawn_cheat_hammer_suit();
 }
 
+static void djui_panel_vr_spawn_trunk_mode(struct DjuiBase* caller) {
+    (void)caller;
+    vr_special_moves_spawn_cheat_trunk_mode();
+}
+
 static void djui_panel_vr_spawn_wing_cap(UNUSED struct DjuiBase* caller) {
     vr_special_moves_spawn_cheat_cap(VR_CHEAT_SPAWN_WING_CAP);
 }
@@ -160,6 +165,8 @@ static void djui_panel_vr_spawn_menu_create(struct DjuiBase* caller) {
         djui_panel_vr_spawn_fire_flower);
     djui_button_create(body, "Hammer (Hammer Suit)", DJUI_BUTTON_STYLE_NORMAL,
         djui_panel_vr_spawn_hammer_suit);
+    djui_button_create(body, "Elephant Trunk", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_spawn_trunk_mode);
     djui_button_create(
         body,
         DLANG(MENU, BACK),
@@ -333,6 +340,7 @@ static void djui_panel_vr_special_moves_defaults(
     configVrSpecialFireFlower = true;
     configVrSpecialFireFlowerMusic = true;
     configVrSpecialHammerSuit = true;
+    configVrSpecialTrunkMode = true;
     configVrSpecialRasengan = true;
     configVrSpecialRasenganGripTrigger = false;
     configVrRasenShurikenOverheadCharge = true;
@@ -1623,6 +1631,12 @@ static void djui_panel_vr_special_moves_create(
             body,
             "Hammer Suit",
             &configVrSpecialHammerSuit,
+            NULL
+        );
+        djui_checkbox_create(
+            body,
+            "Trunk Mode",
+            &configVrSpecialTrunkMode,
             NULL
         );
         djui_checkbox_create(

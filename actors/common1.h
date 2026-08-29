@@ -184,6 +184,20 @@ extern const Gfx vr_rasen_shuriken_dl[];
 extern ALIGNED8 const Texture vr_rasen_shuriken_texture[];
 extern const GeoLayout vr_hammer_geo[];
 extern const Gfx vr_hammer_dl[];
+extern const GeoLayout vr_elephant_trunk_geo[];
+extern const Gfx vr_elephant_trunk_base_dl[];
+extern const Gfx vr_elephant_trunk_upper_mid_dl[];
+extern const Gfx vr_elephant_trunk_lower_mid_dl[];
+extern const Gfx vr_elephant_trunk_tip_dl[];
+void vr_elephant_trunk_set_joint_angles(
+    s16 upperPitch,
+    s16 middlePitch,
+    s16 tipPitch,
+    s16 upperYaw,
+    s16 middleYaw,
+    s16 tipYaw
+);
+extern const struct AnimationTable vr_elephant_trunk_anims;
 extern const Gfx mushroom_1up_seg3_dl_0302A628[];
 extern const Gfx mushroom_1up_seg3_dl_0302A660[];
 

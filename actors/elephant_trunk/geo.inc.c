@@ -1,0 +1,16 @@
+const GeoLayout vr_elephant_trunk_geo[] = {
+    GEO_NODE_START(),
+    GEO_OPEN_NODE(),
+        GEO_ANIMATED_PART(LAYER_OPAQUE, 0, 0, 0, vr_elephant_trunk_base_dl),
+        GEO_OPEN_NODE(),
+            GEO_ANIMATED_PART(LAYER_OPAQUE, 0, -2, 23, vr_elephant_trunk_upper_mid_dl),
+            GEO_OPEN_NODE(),
+                GEO_ANIMATED_PART(LAYER_OPAQUE, 0, -3, 23, vr_elephant_trunk_lower_mid_dl),
+                GEO_OPEN_NODE(),
+                    GEO_ANIMATED_PART(LAYER_OPAQUE, 0, -4, 21, vr_elephant_trunk_tip_dl),
+                GEO_CLOSE_NODE(),
+            GEO_CLOSE_NODE(),
+        GEO_CLOSE_NODE(),
+    GEO_CLOSE_NODE(),
+    GEO_END(),
+};

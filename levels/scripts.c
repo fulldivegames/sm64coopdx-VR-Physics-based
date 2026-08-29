@@ -151,6 +151,7 @@ const LevelScript level_main_scripts_entry[] = {
     LOAD_MODEL_FROM_GEO(MODEL_VR_RASEN_SHURIKEN,          vr_rasen_shuriken_geo),
     LOAD_MODEL_FROM_GEO(MODEL_VR_HAMMER_SHELL,            vr_hammer_shell_geo),
     LOAD_MODEL_FROM_GEO(MODEL_VR_HAMMER,                  vr_hammer_geo),
+    LOAD_MODEL_FROM_GEO(MODEL_VR_ELEPHANT_TRUNK,          vr_elephant_trunk_geo),
 
     // CUSTOM MODELS END
 

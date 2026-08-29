@@ -113,6 +113,18 @@
 #define VR_HAMMER_MELEE_RADIUS 30.0f
 #define VR_HAMMER_PICKUP_GRAVITY 0.65f
 #define VR_HAMMER_PICKUP_FALL_SPEED 7.0f
+#define VR_TRUNK_MODE_DURATION_FRAMES 1800U
+#define VR_TRUNK_PICKUP_GRAVITY 0.65f
+#define VR_TRUNK_PICKUP_FALL_SPEED 7.0f
+#define VR_TRUNK_HEAD_OFFSET_Y 24.0f
+#define VR_TRUNK_HEAD_OFFSET_BACK 10.0f
+#define VR_TRUNK_SPRING_STIFFNESS 0.18f
+#define VR_TRUNK_SPRING_DAMPING 0.76f
+#define VR_TRUNK_SPRING_DRIVE 18.0f
+#define VR_TRUNK_MAX_BEND 0x900
+#define VR_TRUNK_REST_UPPER 0x500
+#define VR_TRUNK_REST_MIDDLE 0x900
+#define VR_TRUNK_REST_TIP 0xD00
 #define VR_RASENGAN_IMPACT_GROW_FRAMES 10U
 #define VR_RASENGAN_IMPACT_MAX_FRAMES 90U
 // Two rotated, double-sided shells contribute four translucent surfaces.
@@ -336,6 +348,23 @@ static Vec3f sVrHammerProjectileVelocity[VR_HAMMER_PROJECTILE_COUNT] = {
 static u16 sVrHammerProjectileLifetime[VR_HAMMER_PROJECTILE_COUNT] = {
     0
 };
+static bool sVrTrunkModePowered = false;
+static u16 sVrTrunkModeTimer = 0;
+static s16 sVrTrunkModeLevel = -1;
+static s16 sVrTrunkModeArea = -1;
+static struct Object* sVrTrunkModeObject = NULL;
+static struct Object* sVrTrunkModePickupObject = NULL;
+static f32 sVrTrunkModePickupVelocityY = 0.0f;
+static bool sVrTrunkModePickupLanded = false;
+static u16 sVrTrunkModePickupAge = 0;
+static bool sVrTrunkPreviousHeadValid = false;
+static Vec3f sVrTrunkPreviousHead = { 0.0f, 0.0f, 0.0f };
+static Vec3f sVrTrunkPreviousVelocity = { 0.0f, 0.0f, 0.0f };
+static f32 sVrTrunkBend = 0.0f;
+static f32 sVrTrunkBendVelocity = 0.0f;
+static f32 sVrTrunkSideBend = 0.0f;
+static f32 sVrTrunkSideBendVelocity = 0.0f;
+static s16 sVrTrunkPreviousYaw = 0;
 static struct Object* sVrRasenganObject = NULL;
 static struct Object* sVrRasenganTarget = NULL;
 static u16 sVrRasenganChargeFrames = 0;
@@ -1200,8 +1229,15 @@ bool vr_hand_interaction_is_tracked_held_object(
           sVrTrackedHeldGripMask != 0) ||
          object == sVrFireballChargeObject ||
          object == sVrHammerChargeObject ||
+         object == sVrTrunkModeObject ||
          (object == sVrRasenganObject &&
           sVrRasenganTarget == NULL));
+}
+
+bool vr_hand_interaction_is_trunk_mode_object(
+    struct Object* object
+) {
+    return object != NULL && object == sVrTrunkModeObject;
 }
 
 bool vr_hand_interaction_is_hammer_charge_object(
@@ -1305,6 +1341,11 @@ bool vr_hand_interaction_get_late_held_object_position(
         handPosition[1] += 2.0f *
             (f32)clamp(configVrGloveSize, 25U, 250U) / 70.0f;
         vec3f_copy(position, handPosition);
+        return true;
+    }
+
+    if (object == sVrTrunkModeObject) {
+        vec3f_copy(position, &object->oPosX);
         return true;
     }
 
@@ -5350,6 +5391,23 @@ static bool vr_special_moves_online_allowed(void) {
         is_player_active(&gMarioStates[0]);
 }
 
+static void vr_special_moves_reset_trunk_mode(void) {
+    sVrTrunkModePowered = false;
+    sVrTrunkModeTimer = 0;
+    sVrTrunkModeLevel = -1;
+    sVrTrunkModeArea = -1;
+    vr_special_moves_delete_object(&sVrTrunkModeObject);
+    sVrTrunkPreviousHeadValid = false;
+    vec3f_set(sVrTrunkPreviousHead, 0.0f, 0.0f, 0.0f);
+    vec3f_set(sVrTrunkPreviousVelocity, 0.0f, 0.0f, 0.0f);
+    sVrTrunkBend = 0.0f;
+    sVrTrunkBendVelocity = 0.0f;
+    sVrTrunkSideBend = 0.0f;
+    sVrTrunkSideBendVelocity = 0.0f;
+    sVrTrunkPreviousYaw = 0;
+    vr_elephant_trunk_set_joint_angles(0, 0, 0, 0, 0, 0);
+}
+
 static bool vr_special_moves_try_player_hit(
     struct MarioState* attacker,
     const Vec3f position,
@@ -5420,6 +5478,7 @@ bool vr_special_moves_grant_fire_flower(void) {
         return false;
     }
     vr_special_moves_reset_hammer_suit();
+    vr_special_moves_reset_trunk_mode();
     sVrFireFlowerPowered = true;
     sVrFireFlowerTimer = VR_FIRE_FLOWER_DURATION_FRAMES;
     sVrFireFlowerMusicTimer = VR_FIRE_FLOWER_DURATION_FRAMES;
@@ -5804,6 +5863,59 @@ static bool vr_special_moves_spawn_hammer_pickup(
     return true;
 }
 
+static bool vr_special_moves_spawn_trunk_pickup(
+    struct Object* parent,
+    f32 x,
+    f32 y,
+    f32 z,
+    f32 velocityY
+) {
+    if (parent == NULL || (sVrTrunkModePickupObject != NULL &&
+        (sVrTrunkModePickupObject->activeFlags & ACTIVE_FLAG_ACTIVE) != 0)) {
+        return false;
+    }
+    sVrTrunkModePickupObject = spawn_object(
+        parent,
+        MODEL_VR_ELEPHANT_TRUNK,
+        bhvStaticObject
+    );
+    if (sVrTrunkModePickupObject == NULL) {
+        return false;
+    }
+    sVrTrunkModePickupObject->oPosX = x;
+    sVrTrunkModePickupObject->oPosY = y;
+    sVrTrunkModePickupObject->oPosZ = z;
+    sVrTrunkModePickupObject->oInteractType = 0;
+    obj_scale(sVrTrunkModePickupObject, 0.55f);
+    obj_update_gfx_pos_and_angle(sVrTrunkModePickupObject);
+    sVrTrunkModePickupVelocityY = velocityY;
+    sVrTrunkModePickupLanded = false;
+    sVrTrunkModePickupAge = 0;
+    return true;
+}
+
+bool vr_special_moves_trunk_mode_active(void) {
+    return configVrSpecialTrunkMode &&
+        sVrTrunkModePowered &&
+        vr_special_moves_online_allowed();
+}
+
+bool vr_special_moves_grant_trunk_mode(void) {
+    if (!configVrSpecialTrunkMode || !vr_is_active() ||
+        !vr_special_moves_online_allowed() ||
+        gMarioStates[0].marioObj == NULL) {
+        return false;
+    }
+    vr_special_moves_reset_power();
+    vr_special_moves_reset_hammer_suit();
+    vr_special_moves_clear_rasengan();
+    sVrTrunkModePowered = true;
+    sVrTrunkModeTimer = VR_TRUNK_MODE_DURATION_FRAMES;
+    sVrTrunkModeLevel = gCurrLevelNum;
+    sVrTrunkModeArea = gCurrAreaIndex;
+    return true;
+}
+
 enum VrBoxReward vr_special_moves_roll_box_reward(
     struct Object* box,
     struct MarioState* owner
@@ -5822,13 +5934,16 @@ enum VrBoxReward vr_special_moves_roll_box_reward(
         return sVrRolledBoxReward;
     }
 
-    enum VrBoxReward choices[3] = { VR_BOX_REWARD_ORIGINAL };
+    enum VrBoxReward choices[4] = { VR_BOX_REWARD_ORIGINAL };
     u32 choiceCount = 1;
     if (configVrSpecialFireFlower) {
         choices[choiceCount++] = VR_BOX_REWARD_FIRE_FLOWER;
     }
     if (configVrSpecialHammerSuit) {
         choices[choiceCount++] = VR_BOX_REWARD_HAMMER_SUIT;
+    }
+    if (configVrSpecialTrunkMode) {
+        choices[choiceCount++] = VR_BOX_REWARD_TRUNK_MODE;
     }
     const enum VrBoxReward choice = choices[random_u16() % choiceCount];
     bool spawned = false;
@@ -5848,11 +5963,35 @@ enum VrBoxReward vr_special_moves_roll_box_reward(
             box->oPosZ,
             20.0f
         );
+    } else if (choice == VR_BOX_REWARD_TRUNK_MODE) {
+        spawned = vr_special_moves_spawn_trunk_pickup(
+            owner->marioObj,
+            box->oPosX,
+            box->oPosY + 65.0f,
+            box->oPosZ,
+            20.0f
+        );
     }
     if (choice == VR_BOX_REWARD_ORIGINAL || spawned) {
         sVrRolledBoxReward = choice;
     }
     return sVrRolledBoxReward;
+}
+
+bool vr_special_moves_spawn_cheat_trunk_mode(void) {
+    struct MarioState* mario = &gMarioStates[0];
+    if (!vr_special_moves_online_allowed() ||
+        !configVrSpecialTrunkMode || mario->marioObj == NULL) {
+        return false;
+    }
+    vr_special_moves_delete_object(&sVrTrunkModePickupObject);
+    return vr_special_moves_spawn_trunk_pickup(
+        mario->marioObj,
+        mario->pos[0],
+        mario->pos[1] + 480.0f,
+        mario->pos[2],
+        0.0f
+    );
 }
 
 bool vr_special_moves_spawn_cheat_fire_flower(void) {
@@ -6091,6 +6230,7 @@ bool vr_special_moves_grant_hammer_suit(void) {
         return false;
     }
     vr_special_moves_reset_power();
+    vr_special_moves_reset_trunk_mode();
     sVrHammerSuitPowered = true;
     sVrHammerSuitTimer = VR_HAMMER_SUIT_DURATION_FRAMES;
     sVrHammerSuitMusicTimer = VR_HAMMER_SUIT_DURATION_FRAMES;
@@ -6326,6 +6466,216 @@ static void vr_special_moves_update_hammer_suit_shell(
     sVrHammerSuitShellObject->header.gfx.prevAngle[0] = -0x4000;
     sVrHammerSuitShellObject->header.gfx.prevAngle[1] = previousYaw;
     sVrHammerSuitShellObject->header.gfx.prevAngle[2] = 0;
+}
+
+static void vr_special_moves_update_trunk_pickup(
+    struct MarioState* mario
+) {
+    struct Object* pickup = sVrTrunkModePickupObject;
+    if (pickup == NULL || mario == NULL || mario->marioObj == NULL) {
+        return;
+    }
+    if ((pickup->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
+        sVrTrunkModePickupObject = NULL;
+        sVrTrunkModePickupAge = 0;
+        return;
+    }
+    if (sVrTrunkModePickupAge < 0xFFFFU) {
+        sVrTrunkModePickupAge++;
+    }
+
+    if (sVrTrunkModePickupLanded) {
+        struct Surface* support = NULL;
+        const f32 supportHeight = find_floor(
+            pickup->oPosX,
+            pickup->oPosY + 80.0f,
+            pickup->oPosZ,
+            &support
+        );
+        if (support == NULL ||
+            fabsf(pickup->oPosY - supportHeight) > 2.0f) {
+            sVrTrunkModePickupLanded = false;
+            sVrTrunkModePickupVelocityY = 0.0f;
+        } else {
+            pickup->oPosY = supportHeight;
+        }
+    }
+    if (!sVrTrunkModePickupLanded) {
+        pickup->oPosY += sVrTrunkModePickupVelocityY;
+        sVrTrunkModePickupVelocityY = fmaxf(
+            sVrTrunkModePickupVelocityY - VR_TRUNK_PICKUP_GRAVITY,
+            -VR_TRUNK_PICKUP_FALL_SPEED
+        );
+        struct Surface* floor = NULL;
+        const f32 floorHeight = find_floor(
+            pickup->oPosX,
+            pickup->oPosY + 80.0f,
+            pickup->oPosZ,
+            &floor
+        );
+        if (sVrTrunkModePickupVelocityY <= 0.0f && floor != NULL &&
+            pickup->oPosY <= floorHeight) {
+            pickup->oPosY = floorHeight;
+            sVrTrunkModePickupVelocityY = 0.0f;
+            sVrTrunkModePickupLanded = true;
+        }
+    }
+    pickup->oFaceAngleYaw += 0x300;
+    obj_update_gfx_pos_and_angle(pickup);
+
+    if (sVrTrunkModePickupAge < VR_FIRE_FLOWER_PICKUP_GRACE_FRAMES) {
+        return;
+    }
+    Vec3f points[2 + VR_CONTROLLER_COUNT];
+    bool valid[2 + VR_CONTROLLER_COUNT] = { true, false, false, false };
+    vec3f_set(
+        points[0],
+        mario->marioObj->oPosX,
+        mario->marioObj->oPosY + 45.0f,
+        mario->marioObj->oPosZ
+    );
+    valid[1] = vr_get_stabilized_headset_world_position(points[1], false);
+    for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
+        struct VrControllerState state = { 0 };
+        Vec3f velocity;
+        valid[2 + hand] = vr_get_controller_state(hand, &state) &&
+            vr_get_controller_world_fist_raw_from_state(
+                hand,
+                &state,
+                points[2 + hand],
+                velocity
+            );
+    }
+    const f32 radii[2 + VR_CONTROLLER_COUNT] = {
+        VR_FIRE_FLOWER_PICKUP_RADIUS,
+        VR_FIRE_FLOWER_HEAD_PICKUP_RADIUS,
+        VR_FIRE_FLOWER_HAND_PICKUP_RADIUS,
+        VR_FIRE_FLOWER_HAND_PICKUP_RADIUS
+    };
+    u32 collectingPoint = 2 + VR_CONTROLLER_COUNT;
+    for (u32 point = 0; point < 2 + VR_CONTROLLER_COUNT; point++) {
+        if (!valid[point]) {
+            continue;
+        }
+        const f32 dx = pickup->oPosX - points[point][0];
+        const f32 dy = pickup->oPosY - points[point][1];
+        const f32 dz = pickup->oPosZ - points[point][2];
+        if (dx * dx + dy * dy + dz * dz <= radii[point] * radii[point]) {
+            collectingPoint = point;
+            break;
+        }
+    }
+    if (collectingPoint < 2 + VR_CONTROLLER_COUNT &&
+        vr_special_moves_grant_trunk_mode()) {
+        if (collectingPoint >= 2) {
+            vr_apply_haptic(
+                collectingPoint - 2,
+                0.45f,
+                0.10f,
+                -1.0f
+            );
+        } else {
+            vr_apply_haptic(VR_CONTROLLER_LEFT, 0.30f, 0.08f, -1.0f);
+            vr_apply_haptic(VR_CONTROLLER_RIGHT, 0.30f, 0.08f, -1.0f);
+        }
+        vr_special_moves_delete_object(&sVrTrunkModePickupObject);
+        sVrTrunkModePickupAge = 0;
+    }
+}
+
+static void vr_special_moves_update_trunk_mode(struct MarioState* mario) {
+    if (!vr_special_moves_trunk_mode_active() || mario == NULL ||
+        mario->marioObj == NULL) {
+        vr_special_moves_delete_object(&sVrTrunkModeObject);
+        return;
+    }
+    Vec3f head;
+    if (!vr_get_stabilized_headset_world_position(head, false)) {
+        return;
+    }
+    if (sVrTrunkModeObject == NULL) {
+        sVrTrunkModeObject = spawn_object(
+            mario->marioObj,
+            MODEL_VR_ELEPHANT_TRUNK,
+            bhvStaticObject
+        );
+        if (sVrTrunkModeObject == NULL) {
+            return;
+        }
+        sVrTrunkModeObject->oInteractType = 0;
+        obj_scale(sVrTrunkModeObject, 0.88f);
+        obj_init_animation_with_sound(
+            sVrTrunkModeObject,
+            &vr_elephant_trunk_anims,
+            0
+        );
+    }
+
+    const s16 yaw = vr_get_first_person_headset_yaw();
+    sVrTrunkModeObject->oPosX = head[0] -
+        sins(yaw) * VR_TRUNK_HEAD_OFFSET_BACK;
+    sVrTrunkModeObject->oPosY = head[1] - VR_TRUNK_HEAD_OFFSET_Y;
+    sVrTrunkModeObject->oPosZ = head[2] -
+        coss(yaw) * VR_TRUNK_HEAD_OFFSET_BACK;
+    sVrTrunkModeObject->oFaceAnglePitch = 0;
+    sVrTrunkModeObject->oFaceAngleYaw = yaw;
+    sVrTrunkModeObject->oFaceAngleRoll = 0;
+
+    if (sVrTrunkPreviousHeadValid) {
+        Vec3f velocity = {
+            head[0] - sVrTrunkPreviousHead[0],
+            head[1] - sVrTrunkPreviousHead[1],
+            head[2] - sVrTrunkPreviousHead[2]
+        };
+        const f32 accelerationForward =
+            (velocity[0] - sVrTrunkPreviousVelocity[0]) * sins(yaw) +
+            (velocity[2] - sVrTrunkPreviousVelocity[2]) * coss(yaw);
+        const f32 accelerationRight =
+            (velocity[0] - sVrTrunkPreviousVelocity[0]) * coss(yaw) -
+            (velocity[2] - sVrTrunkPreviousVelocity[2]) * sins(yaw);
+        const s16 yawDelta = yaw - sVrTrunkPreviousYaw;
+        const f32 target = clamp(
+            -accelerationForward * VR_TRUNK_SPRING_DRIVE,
+            -(f32)VR_TRUNK_MAX_BEND,
+            (f32)VR_TRUNK_MAX_BEND
+        );
+        sVrTrunkBendVelocity +=
+            (target - sVrTrunkBend) * VR_TRUNK_SPRING_STIFFNESS;
+        sVrTrunkBendVelocity *= VR_TRUNK_SPRING_DAMPING;
+        sVrTrunkBend = clamp(
+            sVrTrunkBend + sVrTrunkBendVelocity,
+            -(f32)VR_TRUNK_MAX_BEND,
+            (f32)VR_TRUNK_MAX_BEND
+        );
+        const f32 sideTarget = clamp(
+            accelerationRight * VR_TRUNK_SPRING_DRIVE -
+                (f32)yawDelta * 0.30f,
+            -(f32)VR_TRUNK_MAX_BEND,
+            (f32)VR_TRUNK_MAX_BEND
+        );
+        sVrTrunkSideBendVelocity +=
+            (sideTarget - sVrTrunkSideBend) * VR_TRUNK_SPRING_STIFFNESS;
+        sVrTrunkSideBendVelocity *= VR_TRUNK_SPRING_DAMPING;
+        sVrTrunkSideBend = clamp(
+            sVrTrunkSideBend + sVrTrunkSideBendVelocity,
+            -(f32)VR_TRUNK_MAX_BEND,
+            (f32)VR_TRUNK_MAX_BEND
+        );
+        vec3f_copy(sVrTrunkPreviousVelocity, velocity);
+    } else {
+        sVrTrunkPreviousHeadValid = true;
+    }
+    vec3f_copy(sVrTrunkPreviousHead, head);
+    sVrTrunkPreviousYaw = yaw;
+    vr_elephant_trunk_set_joint_angles(
+        (s16)(VR_TRUNK_REST_UPPER + sVrTrunkBend * 0.42f),
+        (s16)(VR_TRUNK_REST_MIDDLE + sVrTrunkBend * 0.72f),
+        (s16)(VR_TRUNK_REST_TIP + sVrTrunkBend),
+        (s16)(sVrTrunkSideBend * 0.42f),
+        (s16)(sVrTrunkSideBend * 0.72f),
+        (s16)sVrTrunkSideBend
+    );
+    obj_update_gfx_pos_and_angle(sVrTrunkModeObject);
 }
 
 static bool vr_special_moves_point_is_behind_target(
@@ -8769,6 +9119,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
     if (!vr_special_moves_online_allowed()) {
         vr_special_moves_reset_power();
         vr_special_moves_reset_hammer_suit();
+        vr_special_moves_reset_trunk_mode();
         vr_special_moves_clear_rasengan();
         vr_special_moves_clear_rasen_shuriken_projectile();
         for (u32 i = 0; i < VR_FIRE_FLOWER_PICKUP_COUNT; i++) {
@@ -8781,6 +9132,10 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         sVrHammerSuitPickupVelocityY = 0.0f;
         sVrHammerSuitPickupLanded = false;
         sVrHammerSuitPickupAge = 0;
+        vr_special_moves_delete_object(&sVrTrunkModePickupObject);
+        sVrTrunkModePickupVelocityY = 0.0f;
+        sVrTrunkModePickupLanded = false;
+        sVrTrunkModePickupAge = 0;
     }
 
     if (!configVrSpecialRasengan || !vr_is_active() ||
@@ -8802,6 +9157,13 @@ void vr_hand_interaction_update(struct MarioState* mario) {
           sVrHammerSuitArea != gCurrAreaIndex))) {
         vr_special_moves_reset_hammer_suit();
     }
+    if (!configVrSpecialTrunkMode || !vr_is_active() ||
+        !vr_special_moves_online_allowed() ||
+        (sVrTrunkModePowered &&
+         (sVrTrunkModeLevel != gCurrLevelNum ||
+          sVrTrunkModeArea != gCurrAreaIndex))) {
+        vr_special_moves_reset_trunk_mode();
+    }
     vr_special_moves_update_fire_flower_music(mario);
     vr_special_moves_update_hammer_suit_music(mario);
     if (sVrFireFlowerPowered &&
@@ -8813,20 +9175,27 @@ void vr_hand_interaction_update(struct MarioState* mario) {
     }
     vr_special_moves_update_pickups(mario);
     vr_special_moves_update_hammer_suit_pickup(mario);
+    vr_special_moves_update_trunk_pickup(mario);
     vr_special_moves_update_hammer_suit_shell(mario);
+    vr_special_moves_update_trunk_mode(mario);
     vr_special_moves_update_projectiles(mario);
     vr_special_moves_update_hammer_projectiles(mario);
     vr_special_moves_update_rasen_shuriken_projectile(mario);
     if ((!configVrSpecialRasengan ||
          !vr_special_moves_online_allowed() ||
          vr_special_moves_fire_flower_active() ||
-         vr_special_moves_hammer_suit_active()) &&
+         vr_special_moves_hammer_suit_active() ||
+         vr_special_moves_trunk_mode_active()) &&
         sVrRasenganObject != NULL) {
         vr_special_moves_clear_rasengan();
     }
     if (sVrHammerSuitPowered && sVrHammerSuitTimer > 0 &&
         --sVrHammerSuitTimer == 0) {
         vr_special_moves_reset_hammer_suit();
+    }
+    if (sVrTrunkModePowered && sVrTrunkModeTimer > 0 &&
+        --sVrTrunkModeTimer == 0) {
+        vr_special_moves_reset_trunk_mode();
     }
     vr_special_moves_update_rasengan_impact(mario);
     vr_special_moves_try_quick_fireball(mario);
@@ -9026,6 +9395,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
         configVrSpecialRasengan &&
         !vr_special_moves_fire_flower_active() &&
         !vr_special_moves_hammer_suit_active() &&
+        !vr_special_moves_trunk_mode_active() &&
         rasenganRightPreviewValid &&
         rasenganRightPreview.trigger >=
             VR_FIREBALL_TRIGGER_THRESHOLD &&

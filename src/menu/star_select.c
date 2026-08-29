@@ -70,6 +70,21 @@ static s32 sActSelectorMenuTimer = 0;
 // state local to the selector preserves the original 3D presentation in flat
 // mode and prevents the hidden selector objects from leaking between screens.
 static bool sVrActSelectorOverlay = false;
+static u8 sVrVisibleStarMask = 0;
+static u8 sVrSelectableStarCount = 0;
+
+static s8 vr_act_selector_slot_from_ordinal(u8 ordinal) {
+    for (s8 slot = 0; slot < 6; slot++) {
+        if ((sVrVisibleStarMask & (1 << slot)) == 0) {
+            continue;
+        }
+        if (ordinal == 0) {
+            return slot;
+        }
+        ordinal--;
+    }
+    return 0;
+}
 
 // A clean, blank IA8 star used for the next unlocked mission. IA8 lets the
 // overlay tint the same mask blue without introducing another ROM asset.
@@ -157,19 +172,38 @@ void bhv_act_selector_init(void) {
 
     sVrActSelectorOverlay = vr_is_active();
     if (sVrActSelectorOverlay) {
-        // Reveal only the uninterrupted completed sequence and the next
-        // mission. Later stars remain hidden even if a mod/save obtained one
-        // out of order, matching the requested one-at-a-time progression.
+        // Collected stars are always shown in their real mission slots, even
+        // when obtained out of order. Uncollected stars remain gated: only
+        // the first missing star after the uninterrupted completed sequence
+        // is revealed as the next blue star.
+        u8 nextUnlockedSlot = 0;
+        while (nextUnlockedSlot < 6 &&
+               (stars & (1 << nextUnlockedSlot)) != 0) {
+            nextUnlockedSlot++;
+        }
+        sVrVisibleStarMask = stars & 0x3F;
+        if (nextUnlockedSlot < 6) {
+            sVrVisibleStarMask |= 1 << nextUnlockedSlot;
+        }
+
         sVisibleStars = 0;
-        while (sVisibleStars < 6 &&
-               (stars & (1 << sVisibleStars)) != 0) {
-            sVisibleStars++;
+        sVrSelectableStarCount = 0;
+        for (i = 0; i < 6; i++) {
+            if ((sVrVisibleStarMask & (1 << i)) == 0) {
+                continue;
+            }
+            sVisibleStars = i + 1;
+            sVrSelectableStarCount++;
         }
-        if (sVisibleStars < 6) {
-            sVisibleStars++;
+        sInitSelectedActNum = nextUnlockedSlot < 6
+            ? nextUnlockedSlot + 1
+            : max(sVisibleStars, 1);
+        sSelectableStarIndex = 0;
+        for (i = 0; i < sInitSelectedActNum - 1; i++) {
+            if ((sVrVisibleStarMask & (1 << i)) != 0) {
+                sSelectableStarIndex++;
+            }
         }
-        sInitSelectedActNum = max(sVisibleStars, 1);
-        sSelectableStarIndex = max(sVisibleStars - 1, 0);
         return;
     }
 
@@ -238,9 +272,12 @@ void bhv_act_selector_loop(void) {
             MENU_SCROLL_HORIZONTAL,
             &sSelectableStarIndex,
             0,
-            max(sVisibleStars - 1, 0)
+            sVrSelectableStarCount > 0
+                ? sVrSelectableStarCount - 1
+                : 0
         );
-        sSelectedActIndex = sSelectableStarIndex;
+        sSelectedActIndex =
+            vr_act_selector_slot_from_ordinal(sSelectableStarIndex);
         return;
     }
 
@@ -410,6 +447,10 @@ void print_act_selector_strings(void) {
 
     // Print the numbers above each star.
     for (i = 1; i <= sVisibleStars; i++) {
+        if (sVrActSelectorOverlay &&
+            (sVrVisibleStarMask & (1 << (i - 1))) == 0) {
+            continue;
+        }
         starNumbers[0] = i;
         s16 x = 0;
 #ifdef VERSION_EU
@@ -483,6 +524,9 @@ void print_act_selector_strings(void) {
             gCurrCourseNum - 1
         );
         for (i = 0; i < sVisibleStars; i++) {
+            if ((sVrVisibleStarMask & (1 << i)) == 0) {
+                continue;
+            }
 #ifdef VERSION_EU
             const s16 centerX = 143 - sVisibleStars * 15 + (i + 1) * 30 + 4;
 #else
@@ -557,6 +601,8 @@ s32 lvl_init_act_selector_values_and_stars(UNUSED s32 arg, UNUSED s32 unused) {
     sSelectedActIndex = 0;
     sSelectableStarIndex = 0;
     sVrActSelectorOverlay = false;
+    sVrVisibleStarMask = 0;
+    sVrSelectableStarCount = 0;
     sObtainedStars = save_file_get_course_star_count(gCurrSaveFileNum - 1, gCurrCourseNum - 1);
 
     // Don't count 100 coin star
@@ -614,7 +660,9 @@ void star_select_finish_selection(void) {
     queue_rumble_data(60, 70);
     func_sh_8024C89C(1);
 #endif
-    if (sInitSelectedActNum >= sSelectedActIndex + 1) {
+    if (sVrActSelectorOverlay) {
+        sLoadedActNum = sSelectedActIndex + 1;
+    } else if (sInitSelectedActNum >= sSelectedActIndex + 1) {
         sLoadedActNum = sSelectedActIndex + 1;
     } else {
         sLoadedActNum = sInitSelectedActNum;

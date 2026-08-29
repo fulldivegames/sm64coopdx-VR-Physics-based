@@ -115,6 +115,7 @@ bool         configVrSpecialMovesEnabled           = true;
 bool         configVrSpecialFireFlower             = true;
 bool         configVrSpecialFireFlowerMusic        = true;
 bool         configVrSpecialHammerSuit              = true;
+bool         configVrSpecialTrunkMode                = true;
 bool         configVrSpecialRasengan               = true;
 bool         configVrSpecialRasenganGripTrigger    = false;
 bool         configVrRasenShurikenOverheadCharge   = true;
@@ -480,6 +481,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_special_fire_flower",          .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialFireFlower},
     {.name = "vr_special_fire_flower_music",    .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialFireFlowerMusic},
     {.name = "vr_special_hammer_suit",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialHammerSuit},
+    {.name = "vr_special_trunk_mode",             .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialTrunkMode},
     {.name = "vr_special_rasengan",             .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialRasengan},
     {.name = "vr_special_rasengan_grip_trigger",.type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialRasenganGripTrigger},
     {.name = "vr_rasen_shuriken_overhead_charge",.type = CONFIG_TYPE_BOOL, .boolValue = &configVrRasenShurikenOverheadCharge},
