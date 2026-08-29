@@ -2654,6 +2654,14 @@ void mario_process_interactions(struct MarioState *m) {
 void check_death_barrier(struct MarioState *m) {
     if (!m || m->playerIndex != 0) { return; }
 
+    /* A physical climb can momentarily put Mario below a roof or inside a
+     * wall while the active hand changes planes. Recover to the nearest
+     * resolved surface before the ordinary death barrier can warp him. */
+    if (vr_hand_interaction_is_physical_surface_climb_active(m) &&
+        vr_hand_interaction_recover_from_geometry(m)) {
+        return;
+    }
+
     if (m->pos[1] < m->floorHeight + 2048.0f) {
         bool allowDeath = true;
         smlua_call_event_hooks(HOOK_ON_DEATH, m, &allowDeath);

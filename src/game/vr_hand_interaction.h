@@ -16,6 +16,13 @@ void vr_hand_interaction_apply_hand_collision_position(
     u32 hand,
     Vec3f position
 );
+void vr_hand_interaction_apply_big_hands_collision_position(
+    u32 hand,
+    Vec3f position
+);
+bool vr_hand_interaction_recover_from_geometry(
+    struct MarioState* mario
+);
 void vr_hand_interaction_update_headset_collider(
     struct MarioState* mario
 );
@@ -54,9 +61,6 @@ bool vr_hand_interaction_is_tracked_held_object(
 bool vr_hand_interaction_is_hammer_charge_object(
     struct Object* object
 );
-bool vr_hand_interaction_is_trunk_mode_object(
-    struct Object* object
-);
 u32 vr_hand_interaction_get_tracked_held_hand(
     struct Object* object
 );
@@ -88,7 +92,7 @@ enum VrBoxReward {
     VR_BOX_REWARD_FIRE_FLOWER,
     VR_BOX_REWARD_HAMMER_SUIT,
     VR_BOX_REWARD_SONIC_SHOES,
-    VR_BOX_REWARD_TRUNK_MODE,
+    VR_BOX_REWARD_BIG_HANDS,
 };
 enum VrBoxReward vr_special_moves_roll_box_reward(
     struct Object* box,
@@ -97,7 +101,7 @@ enum VrBoxReward vr_special_moves_roll_box_reward(
 bool vr_special_moves_spawn_cheat_fire_flower(void);
 bool vr_special_moves_spawn_cheat_hammer_suit(void);
 bool vr_special_moves_spawn_cheat_sonic_shoes(void);
-bool vr_special_moves_spawn_cheat_trunk_mode(void);
+bool vr_special_moves_spawn_cheat_big_hands(void);
 enum VrCheatSpawnCap {
     VR_CHEAT_SPAWN_WING_CAP,
     VR_CHEAT_SPAWN_VANISH_CAP,
@@ -111,6 +115,9 @@ bool vr_special_moves_grant_hammer_suit(void);
 bool vr_special_moves_sonic_shoes_active(void);
 bool vr_special_moves_sonic_shoes_prevent_slope_slide(struct MarioState *m);
 bool vr_special_moves_grant_sonic_shoes(void);
+bool vr_special_moves_big_hands_active(void);
+f32 vr_special_moves_big_hands_scale(void);
+bool vr_special_moves_grant_big_hands(void);
 f32 vr_special_moves_sonic_speed_scale(void);
 Gfx* geo_vr_sonic_shoe(
     s32 callContext,
@@ -122,8 +129,6 @@ Gfx* geo_switch_vr_sonic_foot(
     struct GraphNode* node,
     void* context
 );
-bool vr_special_moves_trunk_mode_active(void);
-bool vr_special_moves_grant_trunk_mode(void);
 Gfx* geo_vr_fireball_color(
     s32 callContext,
     struct GraphNode* node,

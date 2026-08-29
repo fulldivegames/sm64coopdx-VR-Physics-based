@@ -31,6 +31,8 @@ static float sVrPunchTravel[VR_CONTROLLER_COUNT] = {
 };
 static bool sVrPhysicalCrouchActive = false;
 static uint32_t sVrPhysicalCrouchTrackingGeneration = 0;
+static bool sVrPhysicalCrouchReferenceValid = false;
+static float sVrPhysicalCrouchReferenceY = 0.0f;
 
 static float controller_vr_clampf(
     float value,
@@ -192,6 +194,7 @@ static bool controller_vr_update_physical_crouch(void) {
         configVrCameraMode != VR_CAMERA_MODE_FIRST_PERSON ||
         !configVrPhysicalCrouching) {
         sVrPhysicalCrouchActive = false;
+        sVrPhysicalCrouchReferenceValid = false;
         return false;
     }
 
@@ -201,6 +204,7 @@ static bool controller_vr_update_physical_crouch(void) {
         sVrPhysicalCrouchTrackingGeneration) {
         sVrPhysicalCrouchTrackingGeneration = trackingGeneration;
         sVrPhysicalCrouchActive = false;
+        sVrPhysicalCrouchReferenceValid = false;
         return false;
     }
 
@@ -209,17 +213,25 @@ static bool controller_vr_update_physical_crouch(void) {
     if (!vr_get_head_translation(translation) ||
         !vr_get_calibrated_head_height(&calibratedHeight)) {
         sVrPhysicalCrouchActive = false;
+        sVrPhysicalCrouchReferenceValid = false;
         return false;
     }
 
     const float crouchDescent = calibratedHeight *
         (1.0f - VR_PHYSICAL_CROUCH_HEIGHT_RATIO);
+    if (!sVrPhysicalCrouchReferenceValid) {
+        sVrPhysicalCrouchReferenceY = translation[1];
+        sVrPhysicalCrouchReferenceValid = true;
+        sVrPhysicalCrouchActive = false;
+        return false;
+    }
     const float releaseDescent = fmaxf(
         0.0f,
         crouchDescent -
             VR_PHYSICAL_CROUCH_RELEASE_HYSTERESIS
     );
-    const float downwardTravel = -translation[1];
+    const float downwardTravel =
+        -(translation[1] - sVrPhysicalCrouchReferenceY);
 
     if (sVrPhysicalCrouchActive) {
         if (downwardTravel <= releaseDescent) {
@@ -371,6 +383,7 @@ static void controller_vr_read(OSContPad* pad) {
     if (!vr_is_active() || pad == NULL) {
         controller_vr_reset_physical_punches();
         sVrPhysicalCrouchActive = false;
+        sVrPhysicalCrouchReferenceValid = false;
         return;
     }
 

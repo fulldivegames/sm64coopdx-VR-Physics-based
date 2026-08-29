@@ -605,6 +605,12 @@ Gfx* geo_switch_mario_hand(s32 callContext, struct GraphNode* node, UNUSED Mat4*
     struct MarioBodyState* bodyState = geo_get_body_state();
 
     if (callContext == GEO_CONTEXT_RENDER) {
+        struct MarioState* mario = geo_get_mario_state();
+        if (mario != NULL && mario->playerIndex == 0 &&
+            vr_special_moves_big_hands_active()) {
+            switchCase->selectedCase = 0;
+            return NULL;
+        }
         if (bodyState->handState == MARIO_HAND_FISTS) {
             // switch between fists (0) and open (1)
             switchCase->selectedCase = ((bodyState->action & ACT_FLAG_SWIMMING_OR_FLYING) != 0);
@@ -651,6 +657,12 @@ Gfx* geo_mario_hand_foot_scaler(s32 callContext, struct GraphNode* node, UNUSED 
             scaleNode->scale =
                 gMarioAttackScaleAnimation[asGenerated->parameter * 6 + (bodyState->punchState & 0x3F)]
                 / 10.0f;
+        }
+        if (geo_get_mario_state() != NULL &&
+            geo_get_mario_state()->playerIndex == 0 &&
+            vr_special_moves_big_hands_active() &&
+            asGenerated->parameter < 2) {
+            scaleNode->scale *= vr_special_moves_big_hands_scale();
         }
     }
     return NULL;

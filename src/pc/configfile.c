@@ -113,17 +113,19 @@ bool         configVrUltraPerformanceMode         = false;
 unsigned int configVrQuestRefreshRate              = 2;
 bool         configVrSpecialMovesEnabled           = true;
 bool         configVrSpecialFireFlower             = true;
-bool         configVrSpecialFireFlowerMusic        = true;
+bool         configVrSpecialFireFlowerMusic       = true;
 bool         configVrSpecialHammerSuit              = true;
 bool         configVrSpecialSonicShoes              = true;
 unsigned int configVrSonicShoesSpeed                = VR_SONIC_SHOES_SPEED_DEFAULT;
-bool         configVrSpecialTrunkMode                = true;
+unsigned int configVrBigHandsReach                 = VR_BIG_HANDS_REACH_DEFAULT;
 bool         configVrSpecialRasengan               = true;
-bool         configVrSpecialRasenganGripTrigger    = false;
-bool         configVrRasenShurikenOverheadCharge   = true;
 unsigned int configVrFireballChargeTime            = 15;
 unsigned int configVrRasenganChargeTime            = 30;
 unsigned int configVrRasenShurikenChargeTime       = 20;
+bool         configVrSpawnPoolFireFlower           = true;
+bool         configVrSpawnPoolHammerSuit           = true;
+bool         configVrSpawnPoolSonicShoes           = true;
+bool         configVrSpawnPoolBigHands             = true;
 bool         configVrDisableFog                   = true;
 bool         configVrDesktopMirror                = true;
 unsigned int configVrDesktopMirrorFps             = 60;
@@ -182,6 +184,7 @@ unsigned int configVrBowserMaxSpinSpeed           = 100;
 static unsigned int sConfigVrInteractionTuningVersion = 0;
 static unsigned int sConfigVrStarFocusDefaultVersion = 0;
 static unsigned int sConfigVrEffectsDefaultVersion = 0;
+static unsigned int sConfigVrBigHandsReachVersion = 0;
 unsigned int configVrGloveSize                    = 70;
 unsigned int configVrLeftGloveRotationX           = 180;
 unsigned int configVrLeftGloveRotationY           = 0;
@@ -481,17 +484,19 @@ static const struct ConfigOption options[] = {
     {.name = "vr_quest_refresh_rate",           .type = CONFIG_TYPE_UINT, .uintValue = &configVrQuestRefreshRate},
     {.name = "vr_special_moves_enabled",        .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialMovesEnabled},
     {.name = "vr_special_fire_flower",          .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialFireFlower},
-    {.name = "vr_special_fire_flower_music",    .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialFireFlowerMusic},
+    {.name = "vr_power_up_music",               .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialFireFlowerMusic},
     {.name = "vr_special_hammer_suit",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialHammerSuit},
     {.name = "vr_special_sonic_shoes",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialSonicShoes},
     {.name = "vr_sonic_shoes_speed_v3",          .type = CONFIG_TYPE_UINT, .uintValue = &configVrSonicShoesSpeed},
-    {.name = "vr_special_trunk_mode",             .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialTrunkMode},
+    {.name = "vr_big_hands_reach",               .type = CONFIG_TYPE_UINT, .uintValue = &configVrBigHandsReach},
     {.name = "vr_special_rasengan",             .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialRasengan},
-    {.name = "vr_special_rasengan_grip_trigger",.type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpecialRasenganGripTrigger},
-    {.name = "vr_rasen_shuriken_overhead_charge",.type = CONFIG_TYPE_BOOL, .boolValue = &configVrRasenShurikenOverheadCharge},
     {.name = "vr_fireball_charge_time",          .type = CONFIG_TYPE_UINT, .uintValue = &configVrFireballChargeTime},
     {.name = "vr_rasengan_charge_time",          .type = CONFIG_TYPE_UINT, .uintValue = &configVrRasenganChargeTime},
     {.name = "vr_rasen_shuriken_charge_time",    .type = CONFIG_TYPE_UINT, .uintValue = &configVrRasenShurikenChargeTime},
+    {.name = "vr_spawn_pool_fire_flower",        .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpawnPoolFireFlower},
+    {.name = "vr_spawn_pool_hammer_suit",        .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpawnPoolHammerSuit},
+    {.name = "vr_spawn_pool_sonic_shoes",        .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpawnPoolSonicShoes},
+    {.name = "vr_spawn_pool_big_hands",          .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpawnPoolBigHands},
     {.name = "vr_disable_fog",                  .type = CONFIG_TYPE_BOOL, .boolValue = &configVrDisableFog},
     {.name = "vr_desktop_mirror",              .type = CONFIG_TYPE_BOOL, .boolValue = &configVrDesktopMirror},
     {.name = "vr_desktop_mirror_fps",          .type = CONFIG_TYPE_UINT, .uintValue = &configVrDesktopMirrorFps},
@@ -549,6 +554,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_interaction_tuning_version",  .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrInteractionTuningVersion},
     {.name = "vr_star_focus_default_version",  .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrStarFocusDefaultVersion},
     {.name = "vr_effects_default_version",     .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrEffectsDefaultVersion},
+    {.name = "vr_big_hands_reach_version",     .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrBigHandsReachVersion},
     {.name = "vr_glove_size",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrGloveSize},
     {.name = "vr_left_glove_rotation_x",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrLeftGloveRotationX},
     {.name = "vr_left_glove_rotation_y",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrLeftGloveRotationY},
@@ -1158,6 +1164,20 @@ static void configfile_migrate_vr_interaction_tuning(void) {
     }
 }
 
+static void configfile_migrate_vr_big_hands_reach(void) {
+    if (sConfigVrBigHandsReachVersion >= 3) {
+        return;
+    }
+
+    // Version 2 shipped with a 100% default. Move that former default to
+    // the clarified 150% default, while preserving explicit 150/300 values.
+    if (sConfigVrBigHandsReachVersion == 2 &&
+        configVrBigHandsReach == 100U) {
+        configVrBigHandsReach = VR_BIG_HANDS_REACH_DEFAULT;
+    }
+    sConfigVrBigHandsReachVersion = 3;
+}
+
 static void configfile_migrate_vr_star_focus_default(void) {
     if (sConfigVrStarFocusDefaultVersion >= 1) {
         return;
@@ -1214,6 +1234,7 @@ static void configfile_load_internal(const char *filename, bool* error) {
         configfile_migrate_vr_glove_calibration();
         configfile_migrate_vr_camera_height();
         configfile_migrate_vr_interaction_tuning();
+        configfile_migrate_vr_big_hands_reach();
         configfile_migrate_vr_star_focus_default();
         configfile_migrate_vr_effect_defaults();
         configfile_save(filename);
@@ -1331,6 +1352,7 @@ NEXT_OPTION:
     configfile_migrate_vr_glove_calibration();
     configfile_migrate_vr_camera_height();
     configfile_migrate_vr_interaction_tuning();
+    configfile_migrate_vr_big_hands_reach();
     configfile_migrate_vr_star_focus_default();
     configfile_migrate_vr_effect_defaults();
 #ifndef __ANDROID__

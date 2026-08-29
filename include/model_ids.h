@@ -624,6 +624,6 @@
 #define MODEL_VR_HAMMER_SHELL                0xFD // vr_hammer_shell_geo
 #define MODEL_VR_HAMMER                      0xFE // vr_hammer_geo
 #define MODEL_VR_SONIC_SHOES                 0xFF // vr_sonic_shoes_geo
-#define MODEL_VR_ELEPHANT_TRUNK              0x100 // vr_elephant_trunk_geo
+#define MODEL_VR_BIG_HANDS                  0x100 // vr_big_hands_geo
 
 #endif // MODEL_IDS_H

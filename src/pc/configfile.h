@@ -71,6 +71,9 @@
 #define VR_SONIC_SHOES_SPEED_MIN      0U
 #define VR_SONIC_SHOES_SPEED_MAX    300U
 #define VR_SONIC_SHOES_SPEED_DEFAULT  0U
+ #define VR_BIG_HANDS_REACH_MIN       0U
+#define VR_BIG_HANDS_REACH_MAX       300U
+ #define VR_BIG_HANDS_REACH_DEFAULT   150U
 #ifdef __ANDROID__
 #define VR_RENDER_SCALE_MIN        10U
 #else
@@ -216,14 +219,16 @@ extern bool         configVrCheatFreeFly;
 extern bool         configVrCheatNoFireFlowerTimer;
 extern bool         configVrSpecialMovesEnabled;
 extern bool         configVrSpecialFireFlower;
+extern unsigned int configVrBigHandsReach;
 extern bool         configVrSpecialFireFlowerMusic;
 extern bool         configVrSpecialHammerSuit;
 extern bool         configVrSpecialSonicShoes;
 extern unsigned int configVrSonicShoesSpeed;
-extern bool         configVrSpecialTrunkMode;
 extern bool         configVrSpecialRasengan;
-extern bool         configVrSpecialRasenganGripTrigger;
-extern bool         configVrRasenShurikenOverheadCharge;
+extern bool         configVrSpawnPoolFireFlower;
+extern bool         configVrSpawnPoolHammerSuit;
+extern bool         configVrSpawnPoolSonicShoes;
+extern bool         configVrSpawnPoolBigHands;
 extern unsigned int configVrFireballChargeTime;
 extern unsigned int configVrRasenganChargeTime;
 extern unsigned int configVrRasenShurikenChargeTime;

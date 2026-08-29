@@ -74,8 +74,6 @@
 #define MAX_FAR_PLANE_DIST 1000000.f
 #define VR_LEDGE_CAMERA_DROP 80.0f
 #define VR_STAR_SPAWN_FOCUS_RESPONSE 0.24f
-#define VR_TRUNK_HEAD_ATTACHMENT_BACK 10.0f
-#define VR_TRUNK_HEAD_ATTACHMENT_DOWN 24.0f
 
 f32 gProjectionMaxNearValue = 5;
 s16 gProjectionVanillaNearValue = 100;
@@ -892,8 +890,10 @@ void vr_invalidate_first_person_tracked_world_cache(void) {
     sVrControllerCameraInverseValid = false;
     sVrControllerCameraInverseTimestamp = 0;
     sVrControllerCameraInverseDelta = -1.0f;
-    sVrBodyAnchorSampleValid = false;
-    sVrBodyAnchorSampleTimestamp = 0;
+    // Keep the body anchor's previous/current samples intact. This cache
+    // invalidation is also used for controller matrix refreshes; resetting
+    // the body history here collapses interpolation and makes room-scale
+    // torso motion visibly jitter at the render rate.
     for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
         sVrArmTargetSampleValid[hand] = false;
         sVrArmTargetSampleTimestamp[hand] = 0;
@@ -1415,7 +1415,8 @@ static void vr_hide_controller_hand_matrix(Mtx* fixedMatrix) {
 static void vr_patch_controller_hand_matrices(uint32_t eyeIndex) {
     const float worldUnitsPerMeter = 100.0f;
     const float handModelScale = 0.20f *
-        (float)clamp(configVrGloveSize, 25U, 250U) / 100.0f;
+        (float)clamp(configVrGloveSize, 25U, 250U) / 100.0f *
+        vr_special_moves_big_hands_scale();
     const float wristToGripOffset = 25.0f * handModelScale;
 
     for (uint32_t hand = 0;
@@ -1548,25 +1549,58 @@ static void vr_patch_controller_hand_matrices(uint32_t eyeIndex) {
                 rawWorldPosition,
                 NULL
             ) && sVrControllerCameraInverseValid) {
-            Vec3f constrainedWorldPosition;
-            vec3f_copy(constrainedWorldPosition, rawWorldPosition);
-            vr_hand_interaction_apply_hand_collision_position(
-                hand,
-                constrainedWorldPosition
-            );
-            Vec3f worldCorrection = {
-                constrainedWorldPosition[0] - rawWorldPosition[0],
-                constrainedWorldPosition[1] - rawWorldPosition[1],
-                constrainedWorldPosition[2] - rawWorldPosition[2]
-            };
-            for (u32 localAxis = 0; localAxis < 3; localAxis++) {
-                matrix[3][localAxis] +=
-                    worldCorrection[0] *
-                        sVrControllerCameraInverse[localAxis][0] +
-                    worldCorrection[1] *
-                        sVrControllerCameraInverse[localAxis][1] +
-                    worldCorrection[2] *
-                        sVrControllerCameraInverse[localAxis][2];
+            // Keep raw tracking separate from the Big Hands visual target.
+            const bool bigHandsActive = vr_special_moves_big_hands_active();
+            if (bigHandsActive) {
+                Vec3f reachWorldPosition;
+                if (vr_get_controller_world_fist_reach_target_from_state(
+                        hand,
+                        &state,
+                        reachWorldPosition,
+                        NULL
+                    )) {
+                    vr_hand_interaction_apply_big_hands_collision_position(
+                        hand,
+                        reachWorldPosition
+                    );
+                    Vec3f reachCorrection = {
+                        reachWorldPosition[0] - rawWorldPosition[0],
+                        reachWorldPosition[1] - rawWorldPosition[1],
+                        reachWorldPosition[2] - rawWorldPosition[2]
+                    };
+                    for (u32 localAxis = 0; localAxis < 3; localAxis++) {
+                        matrix[3][localAxis] +=
+                            reachCorrection[0] *
+                                sVrControllerCameraInverse[localAxis][0] +
+                            reachCorrection[1] *
+                                sVrControllerCameraInverse[localAxis][1] +
+                            reachCorrection[2] *
+                                sVrControllerCameraInverse[localAxis][2];
+                    }
+                }
+            }
+
+            if (!bigHandsActive) {
+                Vec3f constrainedWorldPosition;
+                vec3f_copy(constrainedWorldPosition, rawWorldPosition);
+                vr_hand_interaction_apply_hand_collision_position(
+                    hand,
+                    constrainedWorldPosition
+                );
+                Vec3f worldCorrection = {
+                    constrainedWorldPosition[0] - rawWorldPosition[0],
+                    constrainedWorldPosition[1] - rawWorldPosition[1],
+                    constrainedWorldPosition[2] - rawWorldPosition[2]
+                };
+                for (u32 localAxis = 0; localAxis < 3; localAxis++) {
+                    matrix[3][localAxis] +=
+                        worldCorrection[0] *
+                            sVrControllerCameraInverse[localAxis][0] +
+                        worldCorrection[1] *
+                            sVrControllerCameraInverse[localAxis][1] +
+                        worldCorrection[2] *
+                            sVrControllerCameraInverse[localAxis][2];
+                }
             }
         }
         mtxf_to_mtx(fixedMatrix, matrix);
@@ -2018,20 +2052,6 @@ static bool vr_get_true_first_person_body_basis_legacy(
         cameraForward[1] = -pitch;
         cameraForward[2] = stableForward[2] * vertical;
     }
-    return true;
-}
-
-static bool vr_get_headset_attachment_matrix(Mat4 matrix) {
-    float translation[3] = { 0.0f, 0.0f, 0.0f };
-    if (matrix == NULL || !vr_get_head_translation(translation) ||
-        !vr_build_head_rotation_matrix(matrix)) {
-        return false;
-    }
-    vr_apply_roomscale_tracking_compensation(translation);
-    matrix[3][0] = translation[0] * 100.0f;
-    matrix[3][1] = translation[1] * 100.0f;
-    matrix[3][2] = translation[2] * 100.0f;
-    matrix[3][3] = 1.0f;
     return true;
 }
 
@@ -3017,6 +3037,17 @@ bool vr_get_roomscale_body_displacement(Vec3f worldDisplacement) {
         remainingLocal[0] * remainingLocal[0] +
         remainingLocal[2] * remainingLocal[2]
     );
+    // Discard sub-centimetre tracking noise instead of leaving it in the
+    // unconsumed remainder. Accumulating tiny oscillations eventually emits
+    // them as a visible burst that makes the body twitch while standing or
+    // taking small real-world steps.
+    if (remainingLength < 0.75f) {
+        vec3f_copy(sVrRoomscaleConsumedLocal, rawLocal);
+        vec3f_copy(sVrRoomscaleConsumedLocalPrev, rawLocal);
+        sVrRoomscaleConsumedTimestamp = gGlobalTimer;
+        vec3f_set(worldDisplacement, 0.0f, 0.0f, 0.0f);
+        return true;
+    }
     // Runtime recentering and tracking-origin replacement can jump several
     // metres in one sample. Adopt that as the new neutral point instead of
     // teleporting Mario through the level.
@@ -3129,6 +3160,114 @@ static s16 vr_get_stabilized_body_yaw(bool previousFrame) {
         : sVrBodyYawSample;
 }
 
+#define VR_BIG_HANDS_REACH_MAX_DISTANCE 240.0f
+
+static f32 vr_big_hands_reach_scale(void) {
+    const unsigned int setting = clamp(
+        configVrBigHandsReach,
+        VR_BIG_HANDS_REACH_MIN,
+        VR_BIG_HANDS_REACH_MAX
+    );
+    // Reach increases with the slider. Zero is the unextended controller
+    // distance, 150 is the requested 5x default, and 300 is the requested
+    // 10x maximum. The two halves remain linear so every slider value has a
+    // predictable physical effect.
+    if (setting <= 150U) {
+        return 1.0f + (f32)setting * 4.0f / 150.0f;
+    }
+    return 5.0f +
+        ((f32)setting - 150.0f) * 5.0f / 150.0f;
+}
+
+/*
+ * Big Hands keeps the real controller close to the player while extending
+ * the interaction point toward the same direction. Keeping this in world
+ * space makes every caller
+ * (grabs, pickups, punches, and climbing) agree on the same reach.
+ */
+static void vr_apply_big_hands_reach_extension(Vec3f worldPosition) {
+    if (worldPosition == NULL || !vr_special_moves_big_hands_active()) {
+        return;
+    }
+
+    Vec3f bodyPosition;
+    // Raw controller conversion and the target extension use the same
+    // camera-space basis. Prefer that same-frame origin so the offset cannot
+    // collapse when the stabilized body sample is one frame out of date.
+    if (sVrControllerCameraInverseValid) {
+        vec3f_copy(bodyPosition, sVrControllerCameraInverse[3]);
+    } else if (!vr_get_stabilized_headset_world_position(
+            bodyPosition,
+            false
+        )) {
+        return;
+    }
+
+    Vec3f offset = {
+        worldPosition[0] - bodyPosition[0],
+        worldPosition[1] - bodyPosition[1],
+        worldPosition[2] - bodyPosition[2]
+    };
+    const f32 distanceSquared =
+        offset[0] * offset[0] +
+        offset[1] * offset[1] +
+        offset[2] * offset[2];
+    const f32 distance = sqrtf(distanceSquared);
+    if (distance <= 0.001f) {
+        return;
+    }
+
+    // Apply the configured reach multiplier to the complete hand offset.
+    // There is no dead-zone: even hands held close to the headset receive
+    // the requested extension, so the slider cannot appear to only resize
+    // the glove model.
+    const f32 reachScale = vr_big_hands_reach_scale();
+    const f32 maxDistance = 240.0f * (reachScale / 4.0f);
+    const f32 extendedDistance = fminf(distance * reachScale, maxDistance);
+    const f32 distanceScale = extendedDistance / distance;
+    for (u32 axis = 0; axis < 3; axis++) {
+        worldPosition[axis] = bodyPosition[axis] +
+            offset[axis] * distanceScale;
+    }
+}
+
+static void vr_big_hands_build_reach_target(
+    Vec3f rawWorldPosition,
+    Vec3f targetWorldPosition
+) {
+    if (rawWorldPosition == NULL || targetWorldPosition == NULL) {
+        return;
+    }
+
+    vec3f_copy(targetWorldPosition, rawWorldPosition);
+    if (!vr_special_moves_big_hands_active()) {
+        return;
+    }
+
+    // Extend in stable world space. The camera inverse is render-frame state
+    // and may not be populated yet when gameplay samples hand targets; using
+    // it here silently disabled reach during those frames. This helper uses
+    // the stabilized headset position and is shared by all interaction paths.
+    vr_apply_big_hands_reach_extension(targetWorldPosition);
+}
+
+bool vr_get_controller_world_fist_reach_target_from_state(
+    u32 handIndex,
+    const struct VrControllerState* state,
+    Vec3f worldPosition,
+    Vec3f worldVelocity
+) {
+    if (!vr_get_controller_world_fist_raw_from_state(
+            handIndex,
+            state,
+            worldPosition,
+            worldVelocity
+        )) {
+        return false;
+    }
+    vr_big_hands_build_reach_target(worldPosition, worldPosition);
+    return true;
+}
 bool vr_get_controller_world_fist_raw_from_state(
     u32 handIndex,
     const struct VrControllerState* state,
@@ -3255,6 +3394,7 @@ bool vr_get_controller_world_fist_raw_from_state(
             localPosition[2] * sVrControllerCameraInverse[2][axis] +
             sVrControllerCameraInverse[3][axis];
     }
+
 
     if (worldVelocity != NULL) {
         vec3f_set(worldVelocity, 0.0f, 0.0f, 0.0f);
@@ -4540,42 +4680,6 @@ void patch_mtx_vr_shared(void) {
                     continue;
                 }
 
-                if (vr_hand_interaction_is_trunk_mode_object(
-                        interp->owner)) {
-                    Mat4 headMatrix;
-                    struct MtxInterp* rootInterp = NULL;
-                    if (!vr_get_headset_attachment_matrix(headMatrix)) {
-                        continue;
-                    }
-                    for (struct MtxInterp* candidate = sVrHeldMatrixHead;
-                         candidate != NULL;
-                         candidate = candidate->nextVrHeld) {
-                        if (candidate->owner == interp->owner &&
-                            candidate->displayList ==
-                                vr_elephant_trunk_base_dl) {
-                            rootInterp = candidate;
-                            break;
-                        }
-                    }
-                    if (rootInterp == NULL) {
-                        continue;
-                    }
-                    // The model's base joint belongs just behind the user's
-                    // nose. Late-latch only the rigid root displacement; all
-                    // three spring joints retain their interpolated relative
-                    // transforms and therefore stay smooth at 72/90/120 Hz.
-                    for (u32 axis = 0; axis < 3; axis++) {
-                        const f32 desiredRoot = headMatrix[3][axis] +
-                            headMatrix[2][axis] *
-                                VR_TRUNK_HEAD_ATTACHMENT_BACK -
-                            headMatrix[1][axis] *
-                                VR_TRUNK_HEAD_ATTACHMENT_DOWN;
-                        interp->interp.m[3][axis] += desiredRoot -
-                            rootInterp->vrBase.m[3][axis];
-                    }
-                    continue;
-                }
-
                 if (vr_hand_interaction_is_hammer_charge_object(
                         interp->owner)) {
                     Mat4 handMatrix;
@@ -5718,12 +5822,24 @@ static void geo_process_perspective(struct GraphNodePerspective *node) {
  */
 static void geo_process_level_of_detail(struct GraphNodeLevelOfDetail *node) {
     Mtx *mtx = gMatStackFixed[gMatStackIndex];
-    // The desktop camera does not describe the direction the player is looking
-    // in VR. Select the zero-distance (highest-detail) branch while VR is active.
-    f32 distanceFromCam =
-        (!vr_is_active() && gBehaviorValues.ProcessLODs)
-            ? (s32) -mtx->m[3][2]
-            : 0; // z-component of the translation column
+    /*
+     * VR's shared scene is built once for both eyes, so the old path disabled
+     * LODs entirely to avoid using one eye's forward axis. LOD distance is
+     * radial, however, and is independent of view yaw. Use that conservative
+     * distance when a map explicitly enables ProcessLODs; maps that leave it
+     * disabled retain the original highest-detail behavior.
+     */
+    f32 distanceFromCam = 0;
+    if (gBehaviorValues.ProcessLODs) {
+        if (vr_is_active()) {
+            const f32 x = (f32)mtx->m[3][0];
+            const f32 y = (f32)mtx->m[3][1];
+            const f32 z = (f32)mtx->m[3][2];
+            distanceFromCam = sqrtf(x * x + y * y + z * z);
+        } else {
+            distanceFromCam = (s32) -mtx->m[3][2];
+        }
+    }
 
     if ((f32)node->minDistance <= distanceFromCam && distanceFromCam < (f32)node->maxDistance) {
         if (node->node.children != 0) {
@@ -7319,10 +7435,12 @@ static void geo_process_object(struct Object *node) {
                     // same live HMD correction to both endpoints. This keeps
                     // stick-driven movement smooth while physical walking
                     // follows the render-rate headset without a 30 Hz trail.
-                    const f32 liveOffsetX =
+                    f32 liveOffsetX =
                         liveHeadsetPosition[0] - headsetPosition[0];
-                    const f32 liveOffsetZ =
+                    f32 liveOffsetZ =
                         liveHeadsetPosition[2] - headsetPosition[2];
+                    if (fabsf(liveOffsetX) < 0.75f) liveOffsetX = 0.0f;
+                    if (fabsf(liveOffsetZ) < 0.75f) liveOffsetZ = 0.0f;
                     renderPosition[0] =
                         headsetPosition[0] + liveOffsetX;
                     renderPosition[2] =
