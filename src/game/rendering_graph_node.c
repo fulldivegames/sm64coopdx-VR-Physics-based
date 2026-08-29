@@ -7199,48 +7199,6 @@ static s32 obj_is_in_view(struct GraphNodeObject *node, Mat4 matrix) {
         cullingRadius = (f32)((struct GraphNodeCullingRadius *) geo)->cullingRadius; //! Why is there a f32 cast?
     }
 
-    if (vr_is_active()) {
-        const f32 x = matrix[3][0];
-        const f32 z = matrix[3][2];
-        // The scene is built once and then submitted to both eye views. Use a
-        // deliberately widened horizontal union frustum so off-screen map
-        // geometry can be rejected without allowing either eye to pop objects
-        // at its edge. Vertical culling remains disabled as in the original
-        // renderer, and the margin also covers normal head motion between
-        // scene builds.
-        const f32 safeDistance = configDrawDistance == 6
-            ? 60000.0f
-            : 20000.0f;
-        const f32 distanceSquared = x * x + matrix[3][1] * matrix[3][1] + z * z;
-        const f32 maximumDistance = safeDistance + cullingRadius;
-
-        if (distanceSquared >= maximumDistance * maximumDistance) {
-            return FALSE;
-        }
-
-        // Keep a conservative 12-degree margin around the authored FOV. This
-        // is wider than the eye separation and prevents rejecting geometry
-        // visible to either eye while still removing clearly off-screen
-        // objects before they reach the display-list traversal.
-        const f32 vrFovMargin = 12.0f;
-        s16 halfFov = (gCurGraphNodeCamFrustum->fov / 2.0f + 1.0f + vrFovMargin)
-                     * 32768.0f / 180.0f + 0.5f;
-        f32 divisor = coss(halfFov);
-        if (divisor == 0) { divisor = 1; }
-        f32 hScreenEdge = -z * sins(halfFov) / divisor;
-        hScreenEdge *= GFX_DIMENSIONS_ASPECT_RATIO;
-
-        // Keep the same near-plane safety rule as desktop culling. The
-        // culling radius makes the test conservative for large objects.
-        if (z > -100.0f + cullingRadius) {
-            return FALSE;
-        }
-        if (x > hScreenEdge + cullingRadius || x < -hScreenEdge - cullingRadius) {
-            return FALSE;
-        }
-        return TRUE;
-    }
-
     // ! @bug The aspect ratio is not accounted for. When the fov value is 45,
     // the horizontal effective fov is actually 60 degrees, so you can see objects
     // visibly pop in or out at the edge of the screen.
