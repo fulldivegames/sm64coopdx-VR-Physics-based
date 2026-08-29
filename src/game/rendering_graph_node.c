@@ -7186,6 +7186,25 @@ static s32 obj_is_in_view(struct GraphNodeObject *node, Mat4 matrix) {
         cullingRadius = (f32)((struct GraphNodeCullingRadius *) geo)->cullingRadius; //! Why is there a f32 cast?
     }
 
+    if (vr_is_active()) {
+        const f32 x = matrix[3][0];
+        const f32 y = matrix[3][1];
+        const f32 z = matrix[3][2];
+        // The scene is built once before both independently rotated eye views
+        // are submitted, so vanilla angular culling can pop objects that the
+        // other eye can see after a head turn. Keep VR objects visible within
+        // the fixed-point safety range instead.
+        const f32 safeDistance = configDrawDistance == 6
+            ? 60000.0f
+            : 20000.0f;
+        const f32 distanceSquared = x * x + y * y + z * z;
+        const f32 maximumDistance = safeDistance + cullingRadius;
+
+        if (distanceSquared >= maximumDistance * maximumDistance) {
+            return FALSE;
+        }
+        return TRUE;
+    }
     // ! @bug The aspect ratio is not accounted for. When the fov value is 45,
     // the horizontal effective fov is actually 60 degrees, so you can see objects
     // visibly pop in or out at the edge of the screen.
