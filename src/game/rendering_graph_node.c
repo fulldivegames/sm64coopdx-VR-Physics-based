@@ -5822,25 +5822,12 @@ static void geo_process_perspective(struct GraphNodePerspective *node) {
  */
 static void geo_process_level_of_detail(struct GraphNodeLevelOfDetail *node) {
     Mtx *mtx = gMatStackFixed[gMatStackIndex];
-    /*
-     * VR's shared scene is built once for both eyes, so the old path disabled
-     * LODs entirely to avoid using one eye's forward axis. LOD distance is
-     * radial, however, and is independent of view yaw. Use that conservative
-     * distance when a map explicitly enables ProcessLODs; maps that leave it
-     * disabled retain the original highest-detail behavior.
-     */
-    f32 distanceFromCam = 0;
-    if (gBehaviorValues.ProcessLODs) {
-        if (vr_is_active()) {
-            const f32 x = (f32)mtx->m[3][0];
-            const f32 y = (f32)mtx->m[3][1];
-            const f32 z = (f32)mtx->m[3][2];
-            distanceFromCam = sqrtf(x * x + y * y + z * z);
-        } else {
-            distanceFromCam = (s32) -mtx->m[3][2];
-        }
-    }
-
+    // The desktop camera does not describe the direction the player is looking
+    // in VR. Select the zero-distance (highest-detail) branch while VR is active.
+    f32 distanceFromCam =
+        (!vr_is_active() && gBehaviorValues.ProcessLODs)
+            ? (s32) -mtx->m[3][2]
+            : 0; // z-component of the translation column
     if ((f32)node->minDistance <= distanceFromCam && distanceFromCam < (f32)node->maxDistance) {
         if (node->node.children != 0) {
             geo_process_node_and_siblings(node->node.children);
