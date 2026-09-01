@@ -182,6 +182,16 @@ void djui_interactable_set_binding(struct DjuiBase* base) {
     }
 }
 
+void djui_interactable_cancel_binding(void) {
+    gInteractableBinding = NULL;
+    sIgnoreInteractableUntilCursorReleased = false;
+    sIgnoreAllInputsWhenBinding = false;
+    gInteractableMouseDown = NULL;
+    gDjuiCursorDownOn = NULL;
+    sLastInteractablePad = gInteractablePad;
+    sLastMouseButtons = 0;
+}
+
 void djui_interactable_set_navigation_axis_free(struct DjuiBase* base, bool enabled) {
     if (base == NULL || base->interactable == NULL) {
         return;

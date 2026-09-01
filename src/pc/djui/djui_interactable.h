@@ -58,6 +58,7 @@ extern u8 sPageIndex;
 
 bool djui_interactable_is_binding(void);
 void djui_interactable_set_binding(struct DjuiBase* base);
+void djui_interactable_cancel_binding(void);
 void djui_interactable_set_navigation_axis_free(struct DjuiBase* base, bool enabled);
 void djui_interactable_set_input_focus(struct DjuiBase* base);
 bool djui_interactable_is_input_focus(struct DjuiBase* base);

@@ -111,6 +111,11 @@ void djui_panel_back(void) {
         }
     }
 
+    // Leaving a panel must never leave controller-binding capture or its
+    // input suppression state active. In particular, closing VR Controller
+    // Bindings without changing anything must return input to the new panel.
+    djui_interactable_cancel_binding();
+
     // deselect cursor input
     djui_cursor_input_controlled_center(NULL);
 
@@ -196,6 +201,7 @@ void djui_panel_shutdown(void) {
     static bool sShuttingDown = false;
     if (sShuttingDown) { return; }
     sShuttingDown = true;
+    djui_interactable_cancel_binding();
     struct DjuiPanel* panel = sPanelList;
     while (panel != NULL) {
         struct DjuiPanel* next = panel->parent;
