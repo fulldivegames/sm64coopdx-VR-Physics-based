@@ -866,14 +866,6 @@ static void djui_panel_vr_controller_settings_create(
         djui_three_panel_get_body(panel);
 
     {
-        struct DjuiCheckbox* motionControllerInput = djui_checkbox_create(
-            body,
-            "Motion Controller Input",
-            &configVrMotionControllerInput,
-            NULL
-        );
-        djui_interactable_set_navigation_axis_free(&motionControllerInput->base, true);
-
         struct DjuiSelectionbox* movementStick = djui_selectionbox_create(
             body,
             "Movement",

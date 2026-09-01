@@ -517,7 +517,6 @@ static const struct ConfigOption options[] = {
     {.name = "vr_normal_maps",                 .type = CONFIG_TYPE_BOOL, .boolValue = &configVrNormalMaps},
     {.name = "vr_normal_map_strength",           .type = CONFIG_TYPE_UINT, .uintValue = &configVrNormalMapStrength},
     {.name = "vr_normal_map_gloss",              .type = CONFIG_TYPE_UINT, .uintValue = &configVrNormalMapGloss},
-    {.name = "vr_motion_controller_input",     .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControllerInput},
     {.name = "vr_move_stick",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrMoveStick},
     {.name = "vr_camera_stick",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrCameraStick},
     {.name = "vr_jump_binding",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrJumpBinding},
@@ -1437,6 +1436,10 @@ NEXT_OPTION:
 #ifndef __ANDROID__
     configfile_migrate_coopnet_pc_identity();
 #endif
+
+    // Motion-controller bindings are always enabled. The former user-facing
+    // toggle was removed so an old saved false value cannot disable input.
+    configVrMotionControllerInput = true;
 
     if (configGraphicsBackend < GAPI_GL || configGraphicsBackend > GAPI_MAX) { configGraphicsBackend = GAPI_GL; }
 
