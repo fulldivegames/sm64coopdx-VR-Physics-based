@@ -1030,6 +1030,8 @@ static void vr_refresh_tracking_origin(void) {
     // reference-space recenter. The following valid frame establishes both
     // endpoints from the runtime's new tracking origin.
     vr_reset_first_person_calibration();
+    // The gameplay camera observes this generation separately after the
+    // native camera solver has produced its orbit for the current frame.
 }
 
 static void vr_update_first_person_action_turn(void) {
@@ -2578,6 +2580,17 @@ static bool vr_get_stabilized_first_person_pose(
             cameraFocus[axis] += climbCameraOffset[axis];
         }
     }
+
+    // Keep the rendered HMD on the visible side of vertical world geometry.
+    // This is wall-only; floor/ceiling movement remains owned by Mario physics.
+    Vec3f cameraBeforeCollision;
+    vec3f_copy(cameraBeforeCollision, cameraPosition);
+    if (vr_hand_interaction_resolve_headset_camera_position(cameraPosition)) {
+        for (u32 axis = 0; axis < 3; axis++) {
+            cameraFocus[axis] += cameraPosition[axis] -
+                cameraBeforeCollision[axis];
+        }
+    }
     return true;
 }
 
@@ -2943,6 +2956,9 @@ static bool vr_calculate_stabilized_headset_world_position(
         ) - (s32)VR_CAMERA_DEPTH_CENTER;
     worldPosition[0] -= forward[0] * (f32)cameraDepthOffset;
     worldPosition[2] -= forward[2] * (f32)cameraDepthOffset;
+    // Apply the same wall guard after tracked head translation so a physical
+    // lean cannot place the final first-person view inside a pillar or wall.
+    vr_hand_interaction_resolve_headset_camera_position(worldPosition);
     return vr_move_world_sample_to_current_gameplay_anchor(
         worldPosition
     );
@@ -3679,6 +3695,10 @@ static bool vr_build_head_view_matrix(
     uint32_t eyeIndex,
     Mat4 matrix
 ) {
+    // Tracking-origin changes can also happen while third-person is active,
+    // where the first-person pose helper is not called. Refresh here so the
+    // same one-shot camera reset is applied for runtime and menu recentering.
+    vr_refresh_tracking_origin();
     const bool menuScene = vr_is_menu_scene();
     const float worldUnitsPerMeter = menuScene ? 850.0f : 100.0f;
     float headTranslation[3] = { 0 };
@@ -3731,6 +3751,19 @@ static bool vr_build_head_view_matrix(
         headTranslation[1] = 0.0f;
     }
 
+#ifndef __ANDROID__
+    if (!menuScene &&
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON) {
+        // PC runtimes can report a LOCAL-space origin above the floor (or
+        // retain a stale vertical offset after a runtime recenter). The game
+        // camera already has a calibrated Mario eye anchor, so applying that
+        // extra PC-only Y translation makes the player appear unnaturally
+        // tall. Keep horizontal room-scale movement and headset rotation, but
+        // let the configured in-game eye height own the vertical position.
+        headTranslation[1] = 0.0f;
+    }
+#endif
+
     const float trackedX = headTranslation[0] * worldUnitsPerMeter;
     const float trackedY = headTranslation[1] * worldUnitsPerMeter;
     const float trackedZ = headTranslation[2] * worldUnitsPerMeter;
@@ -3757,6 +3790,72 @@ static bool vr_build_head_view_matrix(
     return true;
 }
 
+/*
+ * The scene display list is built once and then replayed for both OpenXR
+ * eyes. Keep the two headset views used by object visibility in a per-scene
+ * cache instead of querying tracking and rebuilding matrices for every
+ * object. This is intentionally fail-open: a temporarily unavailable pose
+ * must keep geometry visible rather than introduce a visual pop-in.
+ */
+struct VrObjectVisibilityState {
+    bool valid;
+    Mat4 headView[2];
+    f32 tanLeft[2];
+    f32 tanRight[2];
+};
+
+static struct VrObjectVisibilityState sVrObjectVisibility = { 0 };
+
+static void vr_prepare_object_visibility(void) {
+    sVrObjectVisibility.valid = false;
+
+    if (!vr_is_active() || vr_is_menu_scene()) {
+        return;
+    }
+
+    const f32 fovScale =
+        (f32)clamp(configVrFov, 70U, 120U) / 100.0f;
+
+    for (u32 eye = 0; eye < 2; eye++) {
+        float eyeTangents[4] = { 0.0f };
+        if (!vr_get_eye_tangents(eye, eyeTangents) ||
+            !vr_build_head_view_matrix(eye, sVrObjectVisibility.headView[eye])) {
+            return;
+        }
+
+        sVrObjectVisibility.tanLeft[eye] = eyeTangents[0] * fovScale;
+        sVrObjectVisibility.tanRight[eye] = eyeTangents[1] * fovScale;
+        if (sVrObjectVisibility.tanRight[eye] <=
+            sVrObjectVisibility.tanLeft[eye]) {
+            return;
+        }
+    }
+
+    sVrObjectVisibility.valid = true;
+}
+
+/*
+ * Return whether the object's bounding sphere intersects either eye's
+ * horizontal frustum. matrix is already in gameplay-camera space, so applying
+ * the cached headset view gives the per-eye coordinates used by the VR
+ * projection. Vertical culling remains disabled on purpose: this avoids
+ * popping tall/overhead custom-map geometry while removing objects wholly
+ * behind or to the side of both eyes.
+ */
+static bool vr_object_is_in_view(Mat4 matrix, f32 cullingRadius) {
+    /*
+     * The object matrix passed to obj_is_in_view is already in gameplay
+     * camera space. Applying the headset view here double-applies head
+     * rotation, which can reject objects that are visibly in front of the
+     * player (especially while looking down or moving around corners).
+     * Keep this path fail-open until visibility is evaluated in the same
+     * coordinate space as the final eye projection. The normal distance
+     * guard in obj_is_in_view still bounds far-away dynamic objects.
+     */
+    (void)matrix;
+    (void)cullingRadius;
+    return true;
+}
 static bool vr_world_pos_to_eye_ndc(
     Vec3f worldPosition,
     u32 eyeIndex,
@@ -4629,8 +4728,10 @@ void patch_mtx_vr_shared(void) {
     // identical for both eyes, so prepare them once per submitted XR frame.
     patch_mtx_vr_billboards(0);
     if (configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
-        configVrMotionControllerInput) {
-        vr_patch_controller_hand_matrices(0);
+        (configVrMotionControllerInput || sVrHeldMatrixHead != NULL)) {
+        if (configVrMotionControllerInput) {
+            vr_patch_controller_hand_matrices(0);
+        }
 
         if (sVrHeldMatrixHead != NULL) {
             // Keep an immutable copy of the complete held hierarchy before
@@ -7190,10 +7291,6 @@ static s32 obj_is_in_view(struct GraphNodeObject *node, Mat4 matrix) {
         const f32 x = matrix[3][0];
         const f32 y = matrix[3][1];
         const f32 z = matrix[3][2];
-        // The scene is built once before both independently rotated eye views
-        // are submitted, so vanilla angular culling can pop objects that the
-        // other eye can see after a head turn. Keep VR objects visible within
-        // the fixed-point safety range instead.
         const f32 safeDistance = configDrawDistance == 6
             ? 60000.0f
             : 20000.0f;
@@ -7203,7 +7300,7 @@ static s32 obj_is_in_view(struct GraphNodeObject *node, Mat4 matrix) {
         if (distanceSquared >= maximumDistance * maximumDistance) {
             return FALSE;
         }
-        return TRUE;
+        return vr_object_is_in_view(matrix, (f32)cullingRadius);
     }
     // ! @bug The aspect ratio is not accounted for. When the fov value is 45,
     // the horizontal effective fov is actually 60 degrees, so you can see objects
@@ -7393,7 +7490,6 @@ static void geo_process_object(struct Object *node) {
             vec3f_copy(node->header.gfx.prevPos, node->header.gfx.pos);
             vec3s_copy(node->header.gfx.prevAngle, node->header.gfx.angle);
             node->header.gfx.prevTimestamp = gGlobalTimer;
-
             Vec3f renderPosition;
             Vec3f renderPositionPrev;
             vec3f_copy(renderPosition, node->header.gfx.pos);
@@ -7433,7 +7529,6 @@ static void geo_process_object(struct Object *node) {
                         headsetPositionPrev[2] + liveOffsetZ;
                 }
             }
-
             Vec3s renderAngle;
             Vec3s renderAnglePrev;
             if (processLocalMarioVrSkeleton) {
@@ -7468,13 +7563,11 @@ static void geo_process_object(struct Object *node) {
                 vec3s_copy(renderAngle, node->header.gfx.angle);
                 vec3s_copy(renderAnglePrev, anglePrev);
             }
-
             mtxf_rotate_zxy_and_translate(mtxf, renderPosition, renderAngle);
             mtxf_mul(gMatStack[gMatStackIndex + 1], mtxf, gMatStack[gMatStackIndex]);
             mtxf_rotate_zxy_and_translate(mtxf, renderPositionPrev, renderAnglePrev);
             mtxf_mul(gMatStackPrev[gMatStackIndex + 1], mtxf, gMatStackPrev[gMatStackIndex]);
         }
-
         if (gGlobalTimer == node->header.gfx.prevScaleTimestamp + 1 &&
             gGlobalTimer != node->header.gfx.skipInterpolationTimestamp &&
             gGlobalTimer != gLakituState.skipCameraInterpolationTimestamp) {

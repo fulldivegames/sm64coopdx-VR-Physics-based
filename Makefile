@@ -582,6 +582,7 @@ MOD_DIR := mods
 _ := $(shell $(PYTHON) $(TOOLS_DIR)/remove_built_in_mods.py)
 
 PALETTES_DIR := palettes
+SONIC_SHOES_DIR := sonic_shoes
 
 # Remove old palettes dir
 _ := $(shell rm -rf ./$(BUILD_DIR)/$(PALETTES_DIR))
@@ -1171,6 +1172,15 @@ $(BUILD_DIR)/$(MOD_DIR):
 $(BUILD_DIR)/$(PALETTES_DIR):
 	@$(CP) -f -r $(PALETTES_DIR) $(BUILD_DIR)
 
+$(BUILD_DIR)/normal_maps.bin: assets/normal_maps.bin
+	@$(CP) -f $< $@
+
+# Sonic Shoes and Big Hands use external music at runtime. Stage the source
+# directory beside the executable so unpacked PC builds and release packages
+# resolve the same resource path as the Quest asset copy.
+$(BUILD_DIR)/$(SONIC_SHOES_DIR): $(wildcard $(SONIC_SHOES_DIR)/*)
+	@$(CP) -f -r $(SONIC_SHOES_DIR) $(BUILD_DIR)
+
 # Extra object file dependencies
 
 ifeq ($(TARGET_N64),1)
@@ -1510,7 +1520,7 @@ ifeq ($(TARGET_N64),1)
   $(BUILD_DIR)/$(TARGET).objdump: $(ELF)
 	$(OBJDUMP) -D $< > $@
 else
-  $(EXE): $(O_FILES) $(MIO0_FILES:.mio0=.o) $(ULTRA_O_FILES) $(GODDARD_O_FILES) $(BUILD_DIR)/$(RPC_LIBS) $(BUILD_DIR)/$(DISCORD_SDK_LIBS) $(BUILD_DIR)/$(COOPNET_LIBS) $(BUILD_DIR)/$(UPDATER_EXEC) $(BUILD_DIR)/$(LANG_DIR) $(BUILD_DIR)/$(MOD_DIR) $(BUILD_DIR)/$(PALETTES_DIR)
+  $(EXE): $(O_FILES) $(MIO0_FILES:.mio0=.o) $(ULTRA_O_FILES) $(GODDARD_O_FILES) $(BUILD_DIR)/$(RPC_LIBS) $(BUILD_DIR)/$(DISCORD_SDK_LIBS) $(BUILD_DIR)/$(COOPNET_LIBS) $(BUILD_DIR)/$(UPDATER_EXEC) $(BUILD_DIR)/$(LANG_DIR) $(BUILD_DIR)/$(MOD_DIR) $(BUILD_DIR)/$(PALETTES_DIR) $(BUILD_DIR)/normal_maps.bin $(BUILD_DIR)/$(SONIC_SHOES_DIR)
 	@$(PRINT) "$(GREEN)Linking executable: $(BLUE)$@ $(NO_COL)\n"
 	$(V)$(LD) $(PROF_FLAGS) -L $(BUILD_DIR) -o $@ $(O_FILES) $(ULTRA_O_FILES) $(GODDARD_O_FILES) $(LDFLAGS)
 endif

@@ -41,6 +41,7 @@
 #include "../platform.h"
 #include "../configfile.h"
 #include "gfx_cc.h"
+#include "gfx_normal_maps.h"
 #include "gfx_rendering_api.h"
 #include "gfx_pc.h"
 #include "../vr/vr.h"
@@ -51,7 +52,7 @@
 #if defined(__ANDROID__)
 #define SHADER_BINARY_CACHE_MAGIC 0x534D5652u
 // Increment whenever generated GLSL or the on-disk format changes.
-#define SHADER_BINARY_CACHE_VERSION 7u
+#define SHADER_BINARY_CACHE_VERSION 20u
 #define SHADER_BINARY_CACHE_MAX_BYTES (1024u * 1024u)
 
 struct ShaderBinaryCacheHeader {
@@ -126,6 +127,16 @@ static uint64_t gfx_opengl_hash_string(uint64_t hash, const char *value) {
     return hash;
 }
 
+static uint64_t gfx_opengl_hash_bytes(
+    uint64_t hash, const void *data, size_t length
+) {
+    const uint8_t *bytes = (const uint8_t *)data;
+    for (size_t i = 0; i < length; i++) {
+        hash ^= bytes[i];
+        hash *= UINT64_C(1099511628211);
+    }
+    return hash;
+}
 static uint64_t gfx_opengl_driver_hash(void) {
     static uint64_t driver_hash;
     if (driver_hash != 0) return driver_hash;
@@ -365,6 +376,27 @@ struct ShaderProgram {
     bool used_noise;
     bool used_lightmap;
     bool world_geometry;
+    GLint normal_sampler_location[2];
+    GLint normal_enabled_location[2];
+    GLint normal_strength_location;
+    GLint normal_gloss_location;
+    bool normal_uniform_valid[2];
+    GLuint last_normal_texture_id[2];
+    bool last_normal_enabled[2];
+    // Uniform values persist in each GL program. Keep the last values so
+    // switching between the many combiner programs does not resend identical
+    // uniforms on every draw.
+    bool uniforms_initialized;
+    uint32_t last_frame_count;
+    GLfloat last_lightmap[3];
+    int last_shader_flags[SHADER_FLAG_MAX];
+    GLfloat last_shader_values[SHADER_FLAG_MAX];
+    int last_filter;
+    int last_vr_color_filter;
+    bool texture_uniform_valid[2];
+    GLuint last_texture_id[2];
+    GLfloat last_texture_size[2][2];
+    bool last_texture_filter[2];
 };
 
 struct GLTexture {
@@ -372,7 +404,13 @@ struct GLTexture {
     GLfloat size[2];
     bool filter;
     bool sampler_initialized;
+    GLuint normal_gltex;
+    bool has_normal;
     bool sampler_linear;
+    bool normal_mipmapped;
+    GLenum wrap_s;
+    GLenum wrap_t;
+    bool normal_clamp_edges;
 };
 
 static struct ShaderProgram shader_program_pool[CC_MAX_SHADERS];
@@ -390,6 +428,32 @@ static struct GLTexture *tex_cache = NULL;
 
 static struct ShaderProgram *opengl_prg = NULL;
 static struct GLTexture *opengl_tex[2];
+// The normal-map checkbox can be changed from a pause/settings menu while
+// the same shader and textures remain bound. Track the last value so the
+// sampler uniform is refreshed exactly once when the setting changes instead
+// of waiting for another texture selection.
+static bool opengl_normal_maps_state_valid = false;
+static bool opengl_normal_maps_state = false;
+static bool opengl_normal_map_strength_state_valid = false;
+static unsigned int opengl_normal_map_strength_state = 0;
+static bool opengl_normal_map_gloss_state_valid = false;
+static unsigned int opengl_normal_map_gloss_state = 0;
+
+// Color filters are uniforms on the active combiner program. Keep a small
+// runtime cache so changing the Filters menu takes effect immediately even
+// when the current draw keeps the same shader bound.
+static bool opengl_color_filter_state_valid = false;
+static unsigned int opengl_color_filter_state = VR_COLOR_FILTER_NONE;
+// Vertex attribute arrays are context state, not shader state. Keep them
+// enabled across shader switches; unused attributes are ignored by GL.
+// Re-disabling/re-enabling every attribute for each combiner causes a large
+// CPU/driver cost on GLES-heavy maps. Pointers are still refreshed per shader.
+static uint32_t opengl_enabled_attrib_mask = 0;
+static bool opengl_attrib_layout_valid = false;
+static uint8_t opengl_attrib_layout_num = 0;
+static size_t opengl_attrib_layout_num_floats = 0;
+static GLint opengl_attrib_layout_locations[7];
+static uint8_t opengl_attrib_layout_sizes[7];
 static int opengl_curtex = 0;
 
 static uint32_t frame_count;
@@ -399,55 +463,121 @@ static bool gfx_opengl_z_is_from_0_to_1(void) {
 }
 
 static void gfx_opengl_vertex_array_set_attribs(struct ShaderProgram *prg) {
-    size_t num_floats = prg->num_floats;
-    size_t pos = 0;
+    const size_t num_floats = prg->num_floats;
+    bool same_layout = opengl_attrib_layout_valid &&
+        opengl_attrib_layout_num == prg->num_attribs &&
+        opengl_attrib_layout_num_floats == num_floats;
+    if (same_layout) {
+        for (int i = 0; i < prg->num_attribs; i++) {
+            if (opengl_attrib_layout_locations[i] != prg->attrib_locations[i] ||
+                opengl_attrib_layout_sizes[i] != prg->attrib_sizes[i]) {
+                same_layout = false;
+                break;
+            }
+        }
+    }
+    // All draws use the same VBO binding. If the new shader has the same
+    // attribute layout, its pointers are already valid and no GL calls are
+    // needed for this switch.
+    if (same_layout) {
+        return;
+    }
 
+    size_t pos = 0;
     for (int i = 0; i < prg->num_attribs; i++) {
-        glEnableVertexAttribArray(prg->attrib_locations[i]);
-        glVertexAttribPointer(prg->attrib_locations[i], prg->attrib_sizes[i], GL_FLOAT, GL_FALSE, num_floats * sizeof(float), (void *) (pos * sizeof(float)));
+        const GLint location = prg->attrib_locations[i];
+        if (location >= 0 && location < 32) {
+            const uint32_t bit = UINT32_C(1) << (uint32_t)location;
+            if ((opengl_enabled_attrib_mask & bit) == 0) {
+                glEnableVertexAttribArray(location);
+                opengl_enabled_attrib_mask |= bit;
+            }
+        } else if (location >= 0) {
+            glEnableVertexAttribArray(location);
+        }
+        glVertexAttribPointer(location, prg->attrib_sizes[i], GL_FLOAT, GL_FALSE, num_floats * sizeof(float), (void *) (pos * sizeof(float)));
+        opengl_attrib_layout_locations[i] = location;
+        opengl_attrib_layout_sizes[i] = prg->attrib_sizes[i];
         pos += prg->attrib_sizes[i];
     }
+    opengl_attrib_layout_num = prg->num_attribs;
+    opengl_attrib_layout_num_floats = num_floats;
+    opengl_attrib_layout_valid = true;
 }
 
 static inline void gfx_opengl_set_shader_uniforms(struct ShaderProgram *prg) {
-    if (prg->used_noise) { glUniform1f(prg->uniform_locations[4], (float)frame_count); }
-    if (prg->used_lightmap) { glUniform3f(prg->uniform_locations[5], gVertexColor[0] / 255.0f, gVertexColor[1] / 255.0f, gVertexColor[2] / 255.0f); }
+    const bool initialized = prg->uniforms_initialized;
+
+    if (prg->used_noise && (!initialized || prg->last_frame_count != frame_count)) {
+        glUniform1f(prg->uniform_locations[4], (float)frame_count);
+        prg->last_frame_count = frame_count;
+    }
+
+    if (prg->used_lightmap) {
+        const GLfloat lightmap[3] = {
+            gVertexColor[0] / 255.0f,
+            gVertexColor[1] / 255.0f,
+            gVertexColor[2] / 255.0f,
+        };
+        if (!initialized || memcmp(prg->last_lightmap, lightmap,
+                                   sizeof(lightmap)) != 0) {
+            glUniform3f(prg->uniform_locations[5],
+                        lightmap[0], lightmap[1], lightmap[2]);
+            memcpy(prg->last_lightmap, lightmap, sizeof(lightmap));
+        }
+    }
+
     if (prg->world_geometry) {
+        int shaderFlags[SHADER_FLAG_MAX];
+        GLfloat shaderValues[SHADER_FLAG_MAX];
         if (vr_is_active() && (configVrBrightness != 100U
                               || configVrSaturation != 100U
                               || configVrContrast != 100U)) {
-            int vrShaderFlags[SHADER_FLAG_MAX];
-            float vrShaderValues[SHADER_FLAG_MAX];
             for (int i = 0; i < SHADER_FLAG_MAX; ++i) {
-                vrShaderFlags[i] = gShaderFlags[i];
-                vrShaderValues[i] = gShaderFlagValues[i];
+                shaderFlags[i] = gShaderFlags[i];
+                shaderValues[i] = gShaderFlagValues[i];
             }
-            vrShaderFlags[SHADER_FLAG_BRIGHTNESS] = 1;
+            shaderFlags[SHADER_FLAG_BRIGHTNESS] = 1;
             const float baseBrightness =
                 gShaderFlags[SHADER_FLAG_BRIGHTNESS]
                     ? gShaderFlagValues[SHADER_FLAG_BRIGHTNESS]
                     : 1.0f;
-            vrShaderValues[SHADER_FLAG_BRIGHTNESS] =
+            shaderValues[SHADER_FLAG_BRIGHTNESS] =
                 baseBrightness * (float)configVrBrightness / 100.0f;
-            vrShaderFlags[SHADER_FLAG_SATURATION] = 1;
+            shaderFlags[SHADER_FLAG_SATURATION] = 1;
             const float baseSaturation =
                 gShaderFlags[SHADER_FLAG_SATURATION]
                     ? gShaderFlagValues[SHADER_FLAG_SATURATION]
                     : 1.0f;
-            vrShaderValues[SHADER_FLAG_SATURATION] =
+            shaderValues[SHADER_FLAG_SATURATION] =
                 baseSaturation * (float)configVrSaturation / 100.0f;
-            vrShaderFlags[SHADER_FLAG_CONTRAST] = 1;
+            shaderFlags[SHADER_FLAG_CONTRAST] = 1;
             const float baseContrast =
                 gShaderFlags[SHADER_FLAG_CONTRAST]
                     ? gShaderFlagValues[SHADER_FLAG_CONTRAST]
                     : 1.0f;
-            vrShaderValues[SHADER_FLAG_CONTRAST] =
+            shaderValues[SHADER_FLAG_CONTRAST] =
                 baseContrast * (float)configVrContrast / 100.0f;
-            glUniform1iv(prg->uniform_locations[6], SHADER_FLAG_MAX, vrShaderFlags);
-            glUniform1fv(prg->uniform_locations[7], SHADER_FLAG_MAX, vrShaderValues);
         } else {
-            glUniform1iv(prg->uniform_locations[6], SHADER_FLAG_MAX, gShaderFlags);
-            glUniform1fv(prg->uniform_locations[7], SHADER_FLAG_MAX, gShaderFlagValues);
+            for (int i = 0; i < SHADER_FLAG_MAX; ++i) {
+                shaderFlags[i] = gShaderFlags[i];
+                shaderValues[i] = gShaderFlagValues[i];
+            }
+        }
+
+        if (!initialized ||
+            memcmp(prg->last_shader_flags, shaderFlags,
+                   sizeof(shaderFlags)) != 0) {
+            glUniform1iv(prg->uniform_locations[6], SHADER_FLAG_MAX,
+                         shaderFlags);
+            memcpy(prg->last_shader_flags, shaderFlags, sizeof(shaderFlags));
+        }
+        if (!initialized ||
+            memcmp(prg->last_shader_values, shaderValues,
+                   sizeof(shaderValues)) != 0) {
+            glUniform1fv(prg->uniform_locations[7], SHADER_FLAG_MAX,
+                         shaderValues);
+            memcpy(prg->last_shader_values, shaderValues, sizeof(shaderValues));
         }
     }
 
@@ -458,38 +588,151 @@ static inline void gfx_opengl_set_shader_uniforms(struct ShaderProgram *prg) {
         configVrUltraPerformanceMode && configFiltering == 2
             ? 1
             : configFiltering;
-    glUniform1i(prg->uniform_locations[8], activeFiltering);
-    glUniform1i(prg->uniform_locations[9], (int)configVrColorFilter);
+    if (!initialized || prg->last_filter != activeFiltering) {
+        glUniform1i(prg->uniform_locations[8], activeFiltering);
+        prg->last_filter = activeFiltering;
+    }
+    if (!initialized ||
+        prg->last_vr_color_filter != (int)configVrColorFilter) {
+        glUniform1i(prg->uniform_locations[9], (int)configVrColorFilter);
+        prg->last_vr_color_filter = (int)configVrColorFilter;
+    }
+
+    prg->uniforms_initialized = true;
+}
+
+static inline GLenum gfx_opengl_normal_map_min_filter(bool mipmapped) {
+    // Normal vectors must stay smooth even when the base N64 texture uses
+    // point or three-point filtering. Linear filtering is required here to
+    // avoid high-frequency normal noise and diagonal static on stretched UVs.
+    return mipmapped ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR;
+}
+
+static inline GLenum gfx_opengl_normal_map_wrap(
+    GLenum base_wrap,
+    bool clamp_edges
+) {
+    return clamp_edges ? GL_CLAMP_TO_EDGE : base_wrap;
+}
+
+static bool gfx_opengl_normal_map_has_discontinuous_edges(
+    const uint8_t *rgba,
+    int width,
+    int height
+) {
+    if (rgba == NULL || width < 2 || height < 2) return false;
+
+    double error = 0.0;
+    size_t samples = 0;
+    for (int x = 0; x < width; x++) {
+        const size_t top = (size_t)x * 4;
+        const size_t bottom = ((size_t)(height - 1) * (size_t)width + (size_t)x) * 4;
+        for (int channel = 0; channel < 3; channel++) {
+            const double delta = (double)rgba[top + channel] - (double)rgba[bottom + channel];
+            error += delta * delta;
+            samples++;
+        }
+    }
+    for (int y = 0; y < height; y++) {
+        const size_t left = ((size_t)y * (size_t)width) * 4;
+        const size_t right = ((size_t)y * (size_t)width + (size_t)(width - 1)) * 4;
+        for (int channel = 0; channel < 3; channel++) {
+            const double delta = (double)rgba[left + channel] - (double)rgba[right + channel];
+            error += delta * delta;
+            samples++;
+        }
+    }
+    if (samples == 0) return false;
+    // A repeated normal texture whose opposite borders differ by more than
+    // roughly 32 intensity levels per channel will produce a visible seam
+    // when bilinear filtering crosses the wrap boundary. Clamp only those
+    // authored discontinuities; tileable maps retain their requested wrap.
+    return (error / (double)samples) > (32.0 * 32.0);
 }
 
 static inline void gfx_opengl_set_texture_uniforms(struct ShaderProgram *prg, const int tile) {
     if (prg->used_textures[tile] && opengl_tex[tile]) {
+        struct GLTexture *texture = opengl_tex[tile];
         // Three-point filtering samples exact texel centers itself. Keeping
         // GL_LINEAR enabled made every one of its three taps a four-texel
         // bilinear lookup, multiplying bandwidth in terrain-heavy views.
         // GL_NEAREST produces the same center samples for the three-point
         // reconstruction. Mode 1 remains ordinary hardware bilinear.
         const bool samplerLinear =
-            opengl_tex[tile]->filter && configFiltering == 1;
-        if (!opengl_tex[tile]->sampler_initialized ||
-            opengl_tex[tile]->sampler_linear != samplerLinear) {
+            texture->filter && configFiltering == 1;
+        if (!texture->sampler_initialized ||
+            texture->sampler_linear != samplerLinear) {
+            const GLenum filter = samplerLinear ? GL_LINEAR : GL_NEAREST;
             glActiveTexture(GL_TEXTURE0 + tile);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
-                            samplerLinear ? GL_LINEAR : GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
-                            samplerLinear ? GL_LINEAR : GL_NEAREST);
-            opengl_tex[tile]->sampler_initialized = true;
-            opengl_tex[tile]->sampler_linear = samplerLinear;
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+            if (texture->normal_gltex != 0) {
+                glActiveTexture(GL_TEXTURE2 + tile);
+                glBindTexture(GL_TEXTURE_2D, texture->normal_gltex);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                                gfx_opengl_normal_map_min_filter(texture->normal_mipmapped));
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
+                                gfx_opengl_normal_map_wrap(texture->wrap_s != 0 ? texture->wrap_s : GL_REPEAT, texture->normal_clamp_edges));
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
+                                gfx_opengl_normal_map_wrap(texture->wrap_t != 0 ? texture->wrap_t : GL_REPEAT, texture->normal_clamp_edges));
+                glActiveTexture(GL_TEXTURE0 + tile);
+                glBindTexture(GL_TEXTURE_2D, texture->gltex);
+            }
+            texture->sampler_initialized = true;
+            texture->sampler_linear = samplerLinear;
         }
-        glUniform2f(prg->uniform_locations[tile*2 + 0], opengl_tex[tile]->size[0], opengl_tex[tile]->size[1]);
-        glUniform1i(prg->uniform_locations[tile*2 + 1], opengl_tex[tile]->filter);
+
+        const bool uniformChanged =
+            !prg->texture_uniform_valid[tile] ||
+            prg->last_texture_id[tile] != texture->gltex ||
+            prg->last_texture_size[tile][0] != texture->size[0] ||
+            prg->last_texture_size[tile][1] != texture->size[1] ||
+            prg->last_texture_filter[tile] != texture->filter;
+        if (uniformChanged) {
+            glUniform2f(prg->uniform_locations[tile*2 + 0],
+                        texture->size[0], texture->size[1]);
+            glUniform1i(prg->uniform_locations[tile*2 + 1], texture->filter);
+            prg->texture_uniform_valid[tile] = true;
+            prg->last_texture_id[tile] = texture->gltex;
+            prg->last_texture_size[tile][0] = texture->size[0];
+            prg->last_texture_size[tile][1] = texture->size[1];
+            prg->last_texture_filter[tile] = texture->filter;
+        }
+        if (prg->normal_sampler_location[tile] >= 0) {
+            // Keep normal textures resident so the setting can be toggled at
+            // runtime without re-uploading every decoded texture. The shader
+            // remains unchanged when the option is disabled; only the
+            // normal-map contribution is gated here.
+            const bool normal_enabled = configVrNormalMaps && texture->has_normal;
+            const GLuint desired_normal_texture =
+                normal_enabled ? texture->normal_gltex : 0;
+            if (!prg->normal_uniform_valid[tile] ||
+                prg->last_normal_texture_id[tile] != desired_normal_texture) {
+                glActiveTexture(GL_TEXTURE2 + tile);
+                glBindTexture(GL_TEXTURE_2D, desired_normal_texture);
+                glActiveTexture(GL_TEXTURE0 + tile);
+                glBindTexture(GL_TEXTURE_2D, texture->gltex);
+                // Cache the texture that is actually bound. This matters when
+                // the checkbox toggles: disabled binds 0, enabled rebinds the
+                // resident normal texture even though its GL id is unchanged.
+                prg->last_normal_texture_id[tile] = desired_normal_texture;
+            }
+            if (!prg->normal_uniform_valid[tile] ||
+                prg->last_normal_enabled[tile] != normal_enabled) {
+                glUniform1i(prg->normal_enabled_location[tile],
+                            normal_enabled ? 1 : 0);
+                prg->normal_uniform_valid[tile] = true;
+                prg->last_normal_enabled[tile] = normal_enabled;
+            }
+        }
     }
 }
-
 static void gfx_opengl_unload_shader(struct ShaderProgram *old_prg) {
     if (old_prg != NULL) {
-        for (int i = 0; i < old_prg->num_attribs; i++)
-            glDisableVertexAttribArray(old_prg->attrib_locations[i]);
+        // Do not disable vertex arrays here. Attribute arrays are global GL
+        // state and inactive shader inputs are ignored; leaving them enabled
+        // avoids two driver calls per attribute on every shader switch.
         if (old_prg == opengl_prg)
             opengl_prg = NULL;
     } else {
@@ -497,9 +740,37 @@ static void gfx_opengl_unload_shader(struct ShaderProgram *old_prg) {
     }
 }
 
+static inline GLfloat gfx_opengl_normal_map_strength_value(void) {
+    const unsigned int strength = configVrNormalMapStrength > 800
+        ? 800
+        : configVrNormalMapStrength;
+    // The slider maps 400 to the tested baseline and 800 to twice that
+    // response; zero is neutral and does not invert the authored normal.
+    // Zero is a true neutral setting; 400 is the current baseline and 800 doubles it.
+    return (GLfloat)strength * 0.60f / 400.0f;
+}
+
+static inline void gfx_opengl_set_normal_map_strength(struct ShaderProgram *prg) {
+    if (prg != NULL && prg->normal_strength_location >= 0) {
+        glUniform1f(prg->normal_strength_location,
+                    gfx_opengl_normal_map_strength_value());
+    }
+}
+static inline void gfx_opengl_set_normal_map_gloss(struct ShaderProgram *prg) {
+    if (prg != NULL && prg->normal_gloss_location >= 0) {
+        glUniform1f(prg->normal_gloss_location,
+                    (GLfloat)configVrNormalMapGloss / 400.0f);
+    }
+}
+
 static void gfx_opengl_load_shader(struct ShaderProgram *new_prg) {
     opengl_prg = new_prg;
     glUseProgram(new_prg->opengl_program_id);
+    // The settings menu can change strength while no program is bound at
+    // frame start. Refresh it whenever a program becomes active so every
+    // cached combiner observes the current slider value.
+    gfx_opengl_set_normal_map_strength(new_prg);
+    gfx_opengl_set_normal_map_gloss(new_prg);
     gfx_opengl_vertex_array_set_attribs(new_prg);
     gfx_opengl_set_shader_uniforms(new_prg);
     gfx_opengl_set_texture_uniforms(new_prg, 0);
@@ -513,6 +784,58 @@ static void append_str(char *buf, size_t *len, const char *str) {
 static void append_line(char *buf, size_t *len, const char *str) {
     while (*str != '\0') buf[(*len)++] = *str++;
     buf[(*len)++] = '\n';
+}
+
+
+static void append_normal_map_shader(char *fs_buf, size_t *fs_len,
+                                     int tile, bool first) {
+    char line[512];
+    snprintf(line, sizeof(line), "%s (uNormalMap%d) {",
+             first ? "if" : "else if", tile);
+    append_line(fs_buf, fs_len, line);
+    // Normal vectors use a dedicated linear/trilinear sampler. Reusing the
+    // base texture's point/three-point reconstruction creates high-frequency
+    // static on stretched UVs and makes the relief unstable at close range.
+    snprintf(line, sizeof(line),
+             "vec3 mapNormal = texture2D(uNormalTex%d, vTexCoord%d).xyz * 2.0 - 1.0;",
+             tile, tile);
+    append_line(fs_buf, fs_len, line);
+    append_line(fs_buf, fs_len, "float mapNormalLength2 = dot(mapNormal, mapNormal);");
+    append_line(fs_buf, fs_len, "if (mapNormalLength2 > 0.000001) mapNormal *= inversesqrt(mapNormalLength2); else mapNormal = vec3(0.0, 0.0, 1.0);");
+    // Keep the authored tangent-space map in a stable UV basis. Reconstructing
+    // tangents from clip-space derivatives makes the response depend on
+    // camera distance and interpolation, creating bands on stretched or
+    // mirrored N64 polygons.
+    append_line(fs_buf, fs_len, "vec3 normalMapLight = normalize(vec3(-0.45, 0.65, 0.85));");
+    append_line(fs_buf, fs_len, "float baseLight = normalMapLight.z;");
+    append_line(fs_buf, fs_len, "float mappedLight = max(dot(mapNormal, normalMapLight), 0.0);");
+    // Preserve the existing combiner brightness. Relief and gloss are
+    // intentionally independent: strength controls the diffuse normal
+    // response, while gloss controls only a restrained specular sheen. The
+    // previous implementation multiplied relief by gloss, which made the
+    // normal-map slider appear dead at low gloss and made its highlights rise
+    // together with relief instead of behaving like a material control.
+    append_line(fs_buf, fs_len, "float normalMapDetail = mappedLight - baseLight;");
+    append_line(fs_buf, fs_len, "float normalMapStrength = uNormalMapStrength;");
+    append_line(fs_buf, fs_len, "float normalMapGloss = clamp(uNormalMapGloss, 0.0, 1.0);");
+    // Keep strength as a restrained diffuse relief term. A large multiplier
+    // here was the source of the wet/over-bright look users saw when raising
+    // strength; gloss must remain an independent material control.
+    /* The uniform is already normalized for the UI range. The previous attenuation and clamp made normal-map strength nearly invisible. */
+    // Restore the bounded relief response from the last tested strong-strength pass.
+    // It preserves visible contrast at 230 while preventing extreme map texels
+    // from turning into a dark or over-bright wash.
+    append_line(fs_buf, fs_len, "float normalMapRelief = clamp(1.0 + normalMapDetail * normalMapStrength * 0.45, 0.85, 1.15);");
+    // Gloss controls highlight sharpness with a small bounded intensity.
+    // This keeps it independent from relief strength and avoids white additive
+    // bloom on stone, sand, and other bright N64 textures.
+    append_line(fs_buf, fs_len, "float normalMapGlossPower = mix(48.0, 8.0, normalMapGloss);");
+    append_line(fs_buf, fs_len, "float normalMapSpecular = min(pow(mappedLight, normalMapGlossPower) * normalMapGloss * 0.10, 0.12);");
+
+    append_line(fs_buf, fs_len, "texel.rgb *= normalMapRelief;");
+    append_line(fs_buf, fs_len, "texel.rgb += vec3(normalMapSpecular);");
+    // Close the uNormalMap block.
+    append_line(fs_buf, fs_len, "}");
 }
 
 static const char *shader_item_to_str(uint32_t item, bool with_alpha, bool only_alpha, bool inputs_have_alpha, bool hint_single_element) {
@@ -634,6 +957,7 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     bool opt_2cycle = cc->cm.use_2cycle;
     bool opt_light_map = cc->cm.light_map;
     bool world_geometry = cc->cm.world_geometry;
+    bool use_normal_map = ccf.used_textures[0] || ccf.used_textures[1];
 
 #ifdef USE_GLES
     bool opt_dither = false;
@@ -654,10 +978,21 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     append_line(vs_buf, &vs_len, "#version 120");
 #endif
     append_line(vs_buf, &vs_len, "attribute vec4 aVtxPos;");
+    if (use_normal_map) {
+#ifdef USE_GLES
+        append_line(vs_buf, &vs_len, "varying highp vec4 vNormalMapPosition;");
+#else
+        append_line(vs_buf, &vs_len, "varying vec4 vNormalMapPosition;");
+#endif
+    }
     for (int t = 0; t < 2; t++) {
         if (ccf.used_textures[t]) {
             vs_len += sprintf(vs_buf + vs_len, "attribute vec2 aTexCoord%d;\n", t);
+#ifdef USE_GLES
+            vs_len += sprintf(vs_buf + vs_len, "varying highp vec2 vTexCoord%d;\n", t);
+#else
             vs_len += sprintf(vs_buf + vs_len, "varying vec2 vTexCoord%d;\n", t);
+#endif
             num_floats += 2;
         }
     }
@@ -691,6 +1026,9 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     for (int i = 0; i < ccf.num_inputs; i++) {
         vs_len += sprintf(vs_buf + vs_len, "vInput%d = aInput%d;\n", i + 1, i + 1);
     }
+    if (use_normal_map) {
+        append_line(vs_buf, &vs_len, "vNormalMapPosition = aVtxPos;");
+    }
     append_line(vs_buf, &vs_len, "gl_Position = aVtxPos;");
     append_line(vs_buf, &vs_len, "}");
 
@@ -698,15 +1036,27 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
 #ifdef USE_GLES
     append_line(fs_buf, &fs_len, "#version 100");
     append_line(fs_buf, &fs_len, "#extension GL_OES_standard_derivatives : enable");
-    append_line(fs_buf, &fs_len, "precision mediump float;");
+    append_line(fs_buf, &fs_len,
+                use_normal_map ? "precision highp float;" : "precision mediump float;");
 #else
     append_line(fs_buf, &fs_len, "#version 120");
 #endif
 
     for (int t = 0; t < 2; t++) {
         if (ccf.used_textures[t]) {
+#ifdef USE_GLES
+            fs_len += sprintf(fs_buf + fs_len, "varying highp vec2 vTexCoord%d;\n", t);
+#else
             fs_len += sprintf(fs_buf + fs_len, "varying vec2 vTexCoord%d;\n", t);
+#endif
         }
+    }
+    if (use_normal_map) {
+#ifdef USE_GLES
+        append_line(fs_buf, &fs_len, "varying highp vec4 vNormalMapPosition;");
+#else
+        append_line(fs_buf, &fs_len, "varying vec4 vNormalMapPosition;");
+#endif
     }
     if (opt_fog) {
         append_line(fs_buf, &fs_len, "varying vec4 vFog;");
@@ -724,6 +1074,19 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
             fs_len += sprintf(fs_buf + fs_len, "uniform vec2 uTex%dSize;\n", t);
             fs_len += sprintf(fs_buf + fs_len, "uniform bool uTex%dFilter;\n", t);
         }
+    }
+
+    if (use_normal_map) {
+        for (int t = 0; t < 2; t++) {
+            if (ccf.used_textures[t]) {
+                fs_len += sprintf(fs_buf + fs_len,
+                                  "uniform sampler2D uNormalTex%d;\n", t);
+                fs_len += sprintf(fs_buf + fs_len,
+                                  "uniform bool uNormalMap%d;\n", t);
+            }
+        }
+        append_line(fs_buf, &fs_len, "uniform float uNormalMapGloss;");
+        append_line(fs_buf, &fs_len, "uniform float uNormalMapStrength;");
     }
 
     // 3 point texture filtering
@@ -819,7 +1182,14 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     append_line(fs_buf, &fs_len, "uniform int uVrColorFilter;");
     append_line(fs_buf, &fs_len, "vec3 applyVrColorFilter(vec3 color, int mode) {");
     append_line(fs_buf, &fs_len, "    float luma = dot(clamp(color, 0.0, 1.0), vec3(0.299, 0.587, 0.114));");
-    append_line(fs_buf, &fs_len, "    // Lift dark midtones so actors remain readable without treating low-resolution texture texels as outlines.");
+    append_line(fs_buf, &fs_len, "    // Super Mario Land is a readable monochrome palette: black ink outlines, several gray tones, and white highlights.");
+    append_line(fs_buf, &fs_len, "    // Use only per-texel luminance; screen-space derivatives would shimmer on stretched N64 UVs.");
+    append_line(fs_buf, &fs_len, "    if (mode == 3) {");
+    append_line(fs_buf, &fs_len, "        if (luma < 0.035) return vec3(0.0);");
+    append_line(fs_buf, &fs_len, "        float marioLandTone = clamp(pow(max(luma, 0.0), 0.55) * 1.08, 0.0, 1.0);");
+    append_line(fs_buf, &fs_len, "        float grayLevel = floor(marioLandTone * 8.0 + 0.5) / 8.0;");
+    append_line(fs_buf, &fs_len, "        return vec3(grayLevel);");
+    append_line(fs_buf, &fs_len, "    }");
     append_line(fs_buf, &fs_len, "    float tone = pow(luma, mode == 2 ? 0.72 : 0.80);");
     append_line(fs_buf, &fs_len, "    float ramp = clamp(tone * 3.0, 0.0, 3.0);");
     append_line(fs_buf, &fs_len, "    if (mode == 1) {");
@@ -881,6 +1251,22 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
         }
     }
 
+    if (use_normal_map) {
+        // Relief lighting is intentionally bypassed by the monochrome filter.
+        // Its palette is driven by the authored base texture; applying a
+        // normal map first can turn otherwise readable enemies and terrain
+        // into near-black patches.
+        append_line(fs_buf, &fs_len, "if (uVrColorFilter != 3) {");
+        bool first_normal_branch = true;
+        for (int t = 0; t < 2; t++) {
+            if (ccf.used_textures[t]) {
+                append_normal_map_shader(fs_buf, &fs_len, t, first_normal_branch);
+                first_normal_branch = false;
+            }
+        }
+        append_line(fs_buf, &fs_len, "}");
+    }
+
     if (opt_texture_edge && opt_alpha) {
         append_line(fs_buf, &fs_len, "if (texel.a > 0.3) texel.a = 1.0; else discard;");
     }
@@ -931,7 +1317,7 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
 
         // scan lines
         append_line(fs_buf, &fs_len, "if (uShaderFlags[7] == 1) {");
-        append_line(fs_buf, &fs_len, "float scan = sin(gl_FragCoord.y * 1.5) * 0.04;");
+        append_line(fs_buf, &fs_len, "float scan = sin(gl_FragCoord.y * 1.5) * 0.10;");
         append_line(fs_buf, &fs_len, "texel.rgb -= scan * uShaderFlagValues[7];");
         append_line(fs_buf, &fs_len, "}");
     }
@@ -948,8 +1334,9 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
         append_line(fs_buf, &fs_len, "texel.a *= noise;");
     }
 
+    // Apply the selected VR filter to every fragment, including HUD/text
+    // shaders. The uniform is present in both world and overlay programs.
     append_line(fs_buf, &fs_len, "if (uVrColorFilter != 0) texel.rgb = applyVrColorFilter(texel.rgb, uVrColorFilter);");
-
     if (opt_alpha) {
         append_line(fs_buf, &fs_len, "gl_FragColor = texel;");
     } else {
@@ -959,6 +1346,23 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
 
     vs_buf[vs_len] = '\0';
     fs_buf[fs_len] = '\0';
+#if defined(__ANDROID__)
+    // The combiner hash identifies the N64 combine state, not the generated
+    // GLSL. Include both sources so edited shader code can never reuse an
+    // older Quest program binary. The version bump invalidates pre-source-hash
+    // cache files already present on devices.
+    uint64_t shader_binary_hash = cc->hash;
+    shader_binary_hash = gfx_opengl_hash_bytes(
+        shader_binary_hash, vs_buf, vs_len
+    );
+    shader_binary_hash ^= (uint64_t)vs_len;
+    shader_binary_hash *= UINT64_C(1099511628211);
+    shader_binary_hash = gfx_opengl_hash_bytes(
+        shader_binary_hash, fs_buf, fs_len
+    );
+    shader_binary_hash ^= (uint64_t)fs_len;
+    shader_binary_hash *= UINT64_C(1099511628211);
+#endif
 
     /*puts("Vertex shader:");
     puts(vs_buf);
@@ -973,7 +1377,7 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     GLuint shader_program = glCreateProgram();
 #if defined(__ANDROID__)
     const bool loaded_program_binary =
-        gfx_opengl_try_program_binary(shader_program, cc->hash);
+        gfx_opengl_try_program_binary(shader_program, shader_binary_hash);
 #else
     const bool loaded_program_binary = false;
 #endif
@@ -1060,7 +1464,7 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
         glDeleteShader(vertex_shader);
         glDeleteShader(fragment_shader);
 #if defined(__ANDROID__)
-        gfx_opengl_save_program_binary(shader_program, cc->hash);
+        gfx_opengl_save_program_binary(shader_program, shader_binary_hash);
         sShaderSourceCompileCount++;
         sShaderSourceCompileNs +=
             gfx_opengl_monotonic_ns() - source_compile_start;
@@ -1118,6 +1522,18 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     prg->used_textures[1] = ccf.used_textures[1];
     prg->num_floats = num_floats;
     prg->num_attribs = cnt;
+    prg->uniforms_initialized = false;
+    prg->texture_uniform_valid[0] = false;
+    prg->texture_uniform_valid[1] = false;
+    prg->normal_strength_location = -1;
+    prg->normal_gloss_location = -1;
+    for (int t = 0; t < 2; t++) {
+        prg->normal_sampler_location[t] = -1;
+        prg->normal_enabled_location[t] = -1;
+        prg->normal_uniform_valid[t] = false;
+        prg->last_normal_texture_id[t] = 0;
+        prg->last_normal_enabled[t] = false;
+    }
 
     glUseProgram(shader_program);
     for (int t = 0; t < 2; t++) {
@@ -1130,6 +1546,32 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
             sprintf(name, "uTex%dFilter", t);
             prg->uniform_locations[t * 2 + 1] = glGetUniformLocation(shader_program, name);
             glUniform1i(sampler_location, t);
+        }
+    }
+    if (use_normal_map) {
+        for (int t = 0; t < 2; t++) {
+            if (ccf.used_textures[t]) {
+                char name[32];
+                snprintf(name, sizeof(name), "uNormalTex%d", t);
+                prg->normal_sampler_location[t] =
+                    glGetUniformLocation(shader_program, name);
+                snprintf(name, sizeof(name), "uNormalMap%d", t);
+                prg->normal_enabled_location[t] =
+                    glGetUniformLocation(shader_program, name);
+                glUniform1i(prg->normal_sampler_location[t], 2 + t);
+            }
+        }
+        prg->normal_strength_location =
+            glGetUniformLocation(shader_program, "uNormalMapStrength");
+        if (prg->normal_strength_location >= 0) {
+            glUniform1f(prg->normal_strength_location,
+                        gfx_opengl_normal_map_strength_value());
+        }
+        prg->normal_gloss_location =
+            glGetUniformLocation(shader_program, "uNormalMapGloss");
+        if (prg->normal_gloss_location >= 0) {
+            glUniform1f(prg->normal_gloss_location,
+                        (GLfloat)configVrNormalMapGloss / 400.0f);
         }
     }
 
@@ -1201,6 +1643,10 @@ static GLuint gfx_opengl_new_texture(void) {
         opengl_tex[0] = NULL;
         opengl_tex[1] = NULL;
     }
+    // realloc does not initialize newly added cache entries. Clear the
+    // record before creating its GL name so optional normal-map and sampler
+    // state never inherits allocator garbage.
+    memset(&tex_cache[num_textures], 0, sizeof(struct GLTexture));
     glGenTextures(1, &tex_cache[num_textures].gltex);
     return num_textures++;
 }
@@ -1227,7 +1673,65 @@ static void gfx_opengl_upload_texture(const uint8_t *rgba32_buf, int width, int 
     opengl_tex[opengl_curtex]->size[0] = width;
     opengl_tex[opengl_curtex]->size[1] = height;
 }
+static void gfx_opengl_on_texture_uploaded(void) {
+    struct GLTexture *texture = opengl_tex[opengl_curtex];
+    if (texture == NULL) return;
 
+    uint8_t *normal_rgba = NULL;
+    int normal_width = 0;
+    int normal_height = 0;
+    if (!gfx_normal_maps_load_pending(
+            &normal_rgba, &normal_width, &normal_height,
+            (int)texture->size[0], (int)texture->size[1])) {
+        if (texture->normal_gltex != 0) {
+            glDeleteTextures(1, &texture->normal_gltex);
+            texture->normal_gltex = 0;
+        }
+        texture->has_normal = false;
+        texture->normal_mipmapped = false;
+        texture->normal_clamp_edges = false;
+        if (opengl_prg != NULL) {
+            gfx_opengl_set_texture_uniforms(opengl_prg, opengl_curtex);
+        }
+        return;
+    }
+
+    if (texture->normal_gltex == 0) {
+        glGenTextures(1, &texture->normal_gltex);
+    }
+    texture->normal_clamp_edges = gfx_opengl_normal_map_has_discontinuous_edges(
+        normal_rgba, normal_width, normal_height
+    );
+    glActiveTexture(GL_TEXTURE2 + opengl_curtex);
+    glBindTexture(GL_TEXTURE_2D, texture->normal_gltex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
+                    gfx_opengl_normal_map_wrap(texture->wrap_s != 0 ? texture->wrap_s : GL_REPEAT, texture->normal_clamp_edges));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
+                    gfx_opengl_normal_map_wrap(texture->wrap_t != 0 ? texture->wrap_t : GL_REPEAT, texture->normal_clamp_edges));
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, normal_width, normal_height, 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, normal_rgba);
+    // Normal-map samples need mip levels when a low-resolution texture is
+    // stretched across a large polygon; otherwise high-frequency relief
+    // aliases and shimmers as the camera moves. Only generate them for
+    // power-of-two dimensions, which are universally mipmap-safe on GLES2.
+    texture->normal_mipmapped =
+        normal_width > 0 && normal_height > 0 &&
+        (normal_width & (normal_width - 1)) == 0 &&
+        (normal_height & (normal_height - 1)) == 0;
+    if (texture->normal_mipmapped) {
+        glGenerateMipmap(GL_TEXTURE_2D);
+    }
+    const GLenum normal_filter = gfx_opengl_normal_map_min_filter(texture->normal_mipmapped);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, normal_filter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    free(normal_rgba);
+    texture->has_normal = true;
+    glActiveTexture(GL_TEXTURE0 + opengl_curtex);
+    glBindTexture(GL_TEXTURE_2D, texture->gltex);
+    if (opengl_prg != NULL) {
+        gfx_opengl_set_texture_uniforms(opengl_prg, opengl_curtex);
+    }
+}
 static uint32_t gfx_cm_to_opengl(uint32_t val) {
     if (val & G_TX_CLAMP) {
         return GL_CLAMP_TO_EDGE;
@@ -1238,16 +1742,32 @@ static uint32_t gfx_cm_to_opengl(uint32_t val) {
 static void gfx_opengl_set_sampler_parameters(int tile, bool linear_filter, uint32_t cms, uint32_t cmt) {
     const bool samplerLinear = linear_filter && configFiltering == 1;
     const GLenum filter = samplerLinear ? GL_LINEAR : GL_NEAREST;
+    const GLenum wrap_s = gfx_cm_to_opengl(cms);
+    const GLenum wrap_t = gfx_cm_to_opengl(cmt);
     glActiveTexture(GL_TEXTURE0 + tile);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, gfx_cm_to_opengl(cms));
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, gfx_cm_to_opengl(cmt));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap_s);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap_t);
     opengl_curtex = tile;
     if (opengl_tex[tile]) {
-        opengl_tex[tile]->filter = linear_filter;
-        opengl_tex[tile]->sampler_initialized = true;
-        opengl_tex[tile]->sampler_linear = samplerLinear;
+        struct GLTexture *texture = opengl_tex[tile];
+        texture->filter = linear_filter;
+        texture->sampler_initialized = true;
+        texture->sampler_linear = samplerLinear;
+        texture->wrap_s = wrap_s;
+        texture->wrap_t = wrap_t;
+        if (texture->normal_gltex != 0) {
+            glActiveTexture(GL_TEXTURE2 + tile);
+            glBindTexture(GL_TEXTURE_2D, texture->normal_gltex);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                            gfx_opengl_normal_map_min_filter(texture->normal_mipmapped));
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap_s);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap_t);
+            glActiveTexture(GL_TEXTURE0 + tile);
+            glBindTexture(GL_TEXTURE_2D, texture->gltex);
+        }
         gfx_opengl_set_texture_uniforms(opengl_prg, tile);
     }
 }
@@ -1440,6 +1960,8 @@ static void gfx_opengl_init(void) {
         sys_fatal("OpenGL 2.1+ is required.\nReported version: %s%d.%d", is_es ? "ES" : "", vmajor, vminor);
     }
 
+    opengl_enabled_attrib_mask = 0;
+    opengl_attrib_layout_valid = false;
     glGenBuffers(1, &opengl_vbo);
 
     glBindBuffer(GL_ARRAY_BUFFER, opengl_vbo);
@@ -1467,6 +1989,58 @@ bool gfx_opengl_check_compatibility(void) {
 static void gfx_opengl_on_resize(void) {
 }
 
+static void gfx_opengl_sync_normal_maps_state(void) {
+    const bool maps_changed =
+        !opengl_normal_maps_state_valid ||
+        opengl_normal_maps_state != configVrNormalMaps;
+    const bool strength_changed =
+        !opengl_normal_map_strength_state_valid ||
+        opengl_normal_map_strength_state != configVrNormalMapStrength;
+    const bool gloss_changed =
+        !opengl_normal_map_gloss_state_valid ||
+        opengl_normal_map_gloss_state != configVrNormalMapGloss;
+    if (!maps_changed && !strength_changed && !gloss_changed) {
+        return;
+    }
+
+    opengl_normal_maps_state = configVrNormalMaps;
+    opengl_normal_maps_state_valid = true;
+    opengl_normal_map_strength_state = configVrNormalMapStrength;
+    opengl_normal_map_strength_state_valid = true;
+    opengl_normal_map_gloss_state = configVrNormalMapGloss;
+    opengl_normal_map_gloss_state_valid = true;
+
+    if (opengl_prg == NULL) return;
+
+    if (strength_changed) {
+        gfx_opengl_set_normal_map_strength(opengl_prg);
+    }
+
+    if (gloss_changed) {
+        gfx_opengl_set_normal_map_gloss(opengl_prg);
+    }
+    if (!maps_changed) return;
+    for (int tile = 0; tile < 2; tile++) {
+        if (opengl_prg->normal_sampler_location[tile] < 0) continue;
+        // Force the existing texture binding and bool uniform to be sent for
+        // the current program/texture pair. This is only done on a toggle.
+        opengl_prg->normal_uniform_valid[tile] = false;
+        gfx_opengl_set_texture_uniforms(opengl_prg, tile);
+    }
+}
+static void gfx_opengl_sync_color_filter_state(void) {
+    if (!opengl_color_filter_state_valid ||
+        opengl_color_filter_state != configVrColorFilter) {
+        opengl_color_filter_state = configVrColorFilter;
+        opengl_color_filter_state_valid = true;
+        if (opengl_prg != NULL &&
+            opengl_prg->uniform_locations[9] >= 0) {
+            glUniform1i(opengl_prg->uniform_locations[9],
+                        (GLint)configVrColorFilter);
+            opengl_prg->last_vr_color_filter = (int)configVrColorFilter;
+        }
+    }
+}
 static void gfx_opengl_start_frame(void) {
     frame_count++;
 
@@ -1475,6 +2049,8 @@ static void gfx_opengl_start_frame(void) {
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glEnable(GL_SCISSOR_TEST);
+    gfx_opengl_sync_normal_maps_state();
+    gfx_opengl_sync_color_filter_state();
 }
 
 static void gfx_opengl_end_frame(void) {
@@ -1488,6 +2064,9 @@ static const char* gfx_opengl_get_name(void) {
 }
 
 static void gfx_opengl_shutdown(void) {
+    opengl_enabled_attrib_mask = 0;
+    opengl_attrib_layout_valid = false;
+    opengl_color_filter_state_valid = false;
     for (uint16_t i = 0; i < shader_program_pool_size; i++) {
         if (shader_program_pool[i].opengl_program_id != 0) {
             glDeleteProgram(shader_program_pool[i].opengl_program_id);
@@ -1496,6 +2075,9 @@ static void gfx_opengl_shutdown(void) {
     if (num_textures > 0 && tex_cache != NULL) {
         for (int i = 0; i < num_textures; i++) {
             glDeleteTextures(1, &tex_cache[i].gltex);
+            if (tex_cache[i].normal_gltex != 0) {
+                glDeleteTextures(1, &tex_cache[i].normal_gltex);
+            }
         }
     }
     if (opengl_vbo != 0) {
@@ -1540,5 +2122,6 @@ struct GfxRenderingAPI gfx_opengl_api = {
     gfx_opengl_end_frame,
     gfx_opengl_finish_render,
     gfx_opengl_get_name,
-    gfx_opengl_shutdown
+    gfx_opengl_shutdown,
+    gfx_opengl_on_texture_uploaded
 };

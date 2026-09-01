@@ -10,6 +10,7 @@
 #ifdef _WIN32
 
 #include <windows.h>
+#include <tlhelp32.h>
 
 #ifndef GLEW_STATIC
 #define GLEW_STATIC
@@ -234,6 +235,373 @@ static const char* vr_openxr_session_state_name(XrSessionState state) {
     }
 }
 
+#define VR_OPENXR_SYSTEM_RETRY_COUNT 50
+#define VR_OPENXR_SYSTEM_RETRY_DELAY_MS 100
+
+static bool vr_openxr_system_error_is_transient(XrResult result) {
+    return result == XR_ERROR_RUNTIME_UNAVAILABLE ||
+        result == XR_ERROR_RUNTIME_FAILURE ||
+        result == XR_ERROR_FORM_FACTOR_UNAVAILABLE;
+}
+
+#define VR_OPENXR_RUNTIME_PATH_MAX 4096
+
+static bool sRuntimeJsonOverrideActive = false;
+static bool sRuntimeJsonWasSet = false;
+static char sRuntimeJsonPrevious[VR_OPENXR_RUNTIME_PATH_MAX] = { 0 };
+
+static bool vr_openxr_get_environment(
+    const char* name,
+    char* value,
+    size_t valueSize
+) {
+    if (name == NULL || value == NULL || valueSize == 0) {
+        return false;
+    }
+
+    DWORD length = GetEnvironmentVariableA(
+        name,
+        value,
+        (DWORD)valueSize
+    );
+
+    return length > 0 && length < valueSize;
+}
+
+static bool vr_openxr_manifest_from_root(
+    const char* root,
+    char* manifest,
+    size_t manifestSize
+) {
+    if (root == NULL || root[0] == '\0' ||
+        manifest == NULL || manifestSize == 0) {
+        return false;
+    }
+
+    if (strstr(root, ".json") != NULL) {
+        if (snprintf(manifest, manifestSize, "%s", root) <= 0) {
+            return false;
+        }
+    } else if (snprintf(
+        manifest,
+        manifestSize,
+        "%s\\steamxr_win64.json",
+        root
+    ) <= 0) {
+        return false;
+    }
+
+    return GetFileAttributesA(manifest) != INVALID_FILE_ATTRIBUTES;
+}
+
+static bool vr_openxr_steamvr_manifest_from_openvrpaths(
+    char* manifest,
+    size_t manifestSize
+) {
+    char localAppData[VR_OPENXR_RUNTIME_PATH_MAX] = { 0 };
+    if (!vr_openxr_get_environment(
+        "LOCALAPPDATA",
+        localAppData,
+        sizeof(localAppData)
+    )) {
+        return false;
+    }
+
+    char path[VR_OPENXR_RUNTIME_PATH_MAX] = { 0 };
+    if (snprintf(
+        path,
+        sizeof(path),
+        "%s\\openvr\\openvrpaths.vrpath",
+        localAppData
+    ) <= 0) {
+        return false;
+    }
+
+    FILE* file = fopen(path, "rb");
+    if (file == NULL) {
+        return false;
+    }
+
+    char data[16384] = { 0 };
+    size_t length = fread(data, 1, sizeof(data) - 1, file);
+    fclose(file);
+    data[length] = '\0';
+
+    const char* runtimeKey = strstr(data, "\"runtime\"");
+    if (runtimeKey == NULL) {
+        return false;
+    }
+
+    const char* runtimeArray = strchr(runtimeKey, '[');
+    if (runtimeArray == NULL) {
+        return false;
+    }
+
+    const char* quote = strchr(runtimeArray, '\"');
+    if (quote == NULL) {
+        return false;
+    }
+
+    char runtimeRoot[VR_OPENXR_RUNTIME_PATH_MAX] = { 0 };
+    size_t output = 0;
+    for (const char* cursor = quote + 1;
+         *cursor != '\0' && *cursor != '\"';
+         cursor++) {
+        char value = *cursor;
+        if (value == '\\' && cursor[1] != '\0') {
+            cursor++;
+            value = *cursor;
+        }
+        if (output + 1 >= sizeof(runtimeRoot)) {
+            return false;
+        }
+        runtimeRoot[output++] = value;
+    }
+    runtimeRoot[output] = '\0';
+
+    return vr_openxr_manifest_from_root(
+        runtimeRoot,
+        manifest,
+        manifestSize
+    );
+}
+
+static bool vr_openxr_steamvr_manifest_from_registry(
+    char* manifest,
+    size_t manifestSize
+) {
+    HKEY key = NULL;
+    if (RegOpenKeyExA(
+        HKEY_CURRENT_USER,
+        "Software\\Valve\\Steam",
+        0,
+        KEY_QUERY_VALUE,
+        &key
+    ) != ERROR_SUCCESS) {
+        return false;
+    }
+
+    char steamPath[VR_OPENXR_RUNTIME_PATH_MAX] = { 0 };
+    DWORD steamPathSize = sizeof(steamPath);
+    LONG result = RegGetValueA(
+        key,
+        NULL,
+        "SteamPath",
+        RRF_RT_REG_SZ,
+        NULL,
+        steamPath,
+        &steamPathSize
+    );
+    RegCloseKey(key);
+
+    if (result != ERROR_SUCCESS) {
+        return false;
+    }
+
+    char steamVrRoot[VR_OPENXR_RUNTIME_PATH_MAX] = { 0 };
+    if (snprintf(
+        steamVrRoot,
+        sizeof(steamVrRoot),
+        "%s\\steamapps\\common\\SteamVR",
+        steamPath
+    ) <= 0) {
+        return false;
+    }
+
+    return vr_openxr_manifest_from_root(
+        steamVrRoot,
+        manifest,
+        manifestSize
+    );
+}
+
+static bool vr_openxr_find_steamvr_manifest(
+    char* manifest,
+    size_t manifestSize
+) {
+    char explicitManifest[VR_OPENXR_RUNTIME_PATH_MAX] = { 0 };
+    if (vr_openxr_get_environment(
+        "SM64COOPDX_STEAMVR_RUNTIME_JSON",
+        explicitManifest,
+        sizeof(explicitManifest)
+    )) {
+        if (GetFileAttributesA(explicitManifest) != INVALID_FILE_ATTRIBUTES) {
+            snprintf(manifest, manifestSize, "%s", explicitManifest);
+            return true;
+        }
+        printf(
+            "[VR] SM64COOPDX_STEAMVR_RUNTIME_JSON does not exist: %s\n",
+            explicitManifest
+        );
+    }
+
+    if (vr_openxr_steamvr_manifest_from_openvrpaths(manifest, manifestSize)) {
+        return true;
+    }
+
+    if (vr_openxr_steamvr_manifest_from_registry(manifest, manifestSize)) {
+        return true;
+    }
+
+    const char* programFilesVariables[] = {
+        "PROGRAMFILES(X86)",
+        "PROGRAMFILES"
+    };
+    for (size_t index = 0;
+         index < sizeof(programFilesVariables) / sizeof(programFilesVariables[0]);
+         index++) {
+        char programFiles[VR_OPENXR_RUNTIME_PATH_MAX] = { 0 };
+        if (!vr_openxr_get_environment(
+            programFilesVariables[index],
+            programFiles,
+            sizeof(programFiles)
+        )) {
+            continue;
+        }
+
+        char steamRoot[VR_OPENXR_RUNTIME_PATH_MAX] = { 0 };
+        if (snprintf(
+            steamRoot,
+            sizeof(steamRoot),
+            "%s\\Steam\\steamapps\\common\\SteamVR",
+            programFiles
+        ) <= 0) {
+            continue;
+        }
+
+        if (vr_openxr_manifest_from_root(
+            steamRoot,
+            manifest,
+            manifestSize
+        )) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool vr_openxr_steamvr_service_running(void) {
+    HANDLE snapshot = CreateToolhelp32Snapshot(
+        TH32CS_SNAPPROCESS,
+        0
+    );
+    if (snapshot == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    PROCESSENTRY32 entry = { 0 };
+    entry.dwSize = sizeof(entry);
+    bool running = false;
+
+    if (Process32First(snapshot, &entry)) {
+        do {
+            if (_stricmp(entry.szExeFile, "vrserver.exe") == 0 ||
+                _stricmp(entry.szExeFile, "vrmonitor.exe") == 0) {
+                running = true;
+                break;
+            }
+        } while (Process32Next(snapshot, &entry));
+    }
+
+    CloseHandle(snapshot);
+    return running;
+}
+
+static void vr_openxr_restore_runtime_override(void) {
+    if (!sRuntimeJsonOverrideActive) {
+        return;
+    }
+
+    if (sRuntimeJsonWasSet) {
+        SetEnvironmentVariableA(
+            "XR_RUNTIME_JSON",
+            sRuntimeJsonPrevious
+        );
+    } else {
+        SetEnvironmentVariableA("XR_RUNTIME_JSON", NULL);
+    }
+
+    sRuntimeJsonOverrideActive = false;
+    sRuntimeJsonWasSet = false;
+    sRuntimeJsonPrevious[0] = '\0';
+}
+
+static void vr_openxr_select_steamvr_runtime(void) {
+    char configuredRuntime[VR_OPENXR_RUNTIME_PATH_MAX] = { 0 };
+    if (vr_openxr_get_environment(
+        "XR_RUNTIME_JSON",
+        configuredRuntime,
+        sizeof(configuredRuntime)
+    )) {
+        printf(
+            "[VR] Using caller-selected OpenXR runtime: %s\n",
+            configuredRuntime
+        );
+        return;
+    }
+
+    /* Do not force SteamVR (or start it indirectly) during normal startup.
+     * If a user has already started SteamVR, selecting its manifest makes
+     * Steam Link work without changing the machine-wide runtime. An explicit
+     * SM64COOPDX_STEAMVR_RUNTIME_JSON remains an opt-in override for testing.
+     */
+    const bool steamVrServiceRunning = vr_openxr_steamvr_service_running();
+    char explicitManifest[VR_OPENXR_RUNTIME_PATH_MAX] = { 0 };
+    const bool explicitSteamVrRuntime =
+        vr_openxr_get_environment(
+            "SM64COOPDX_STEAMVR_RUNTIME_JSON",
+            explicitManifest,
+            sizeof(explicitManifest)
+        ) && GetFileAttributesA(explicitManifest) != INVALID_FILE_ATTRIBUTES;
+
+    if (!steamVrServiceRunning && !explicitSteamVrRuntime) {
+        printf(
+            "[VR] SteamVR is not running; retaining the default OpenXR "
+            "runtime.\n"
+        );
+        return;
+    }
+
+    char steamVrManifest[VR_OPENXR_RUNTIME_PATH_MAX] = { 0 };
+    if (!vr_openxr_find_steamvr_manifest(
+        steamVrManifest,
+        sizeof(steamVrManifest)
+    )) {
+        printf(
+            "[VR] SteamVR OpenXR runtime manifest was not found; "
+            "retaining the caller/default runtime (SteamVR service %s).\n",
+            steamVrServiceRunning ? "detected" : "not detected"
+        );
+        return;
+    }
+
+    DWORD previousLength = GetEnvironmentVariableA(
+        "XR_RUNTIME_JSON",
+        sRuntimeJsonPrevious,
+        sizeof(sRuntimeJsonPrevious)
+    );
+    sRuntimeJsonWasSet = previousLength > 0 &&
+        previousLength < sizeof(sRuntimeJsonPrevious);
+
+    if (!SetEnvironmentVariableA("XR_RUNTIME_JSON", steamVrManifest)) {
+        printf(
+            "[VR] Could not select SteamVR OpenXR runtime (error %lu).\n",
+            (unsigned long)GetLastError()
+        );
+        sRuntimeJsonWasSet = false;
+        sRuntimeJsonPrevious[0] = '\0';
+        return;
+    }
+
+    sRuntimeJsonOverrideActive = true;
+    printf(
+        "[VR] Selecting SteamVR OpenXR runtime for this process: %s "
+        "(%s).\n",
+        steamVrManifest,
+        explicitSteamVrRuntime ? "explicit override" : "SteamVR service detected"
+    );
+}
 static HMODULE vr_openxr_load_loader(void) {
     HMODULE loader = LoadLibraryA("libopenxr_loader.dll");
     if (loader == NULL) {
@@ -1447,6 +1815,7 @@ bool vr_openxr_startup(void) {
         return true;
     }
 
+    vr_openxr_select_steamvr_runtime();
     sLoader = vr_openxr_load_loader();
 
     if (sLoader == NULL) {
@@ -1545,8 +1914,36 @@ bool vr_openxr_startup(void) {
     systemInfo.type = XR_TYPE_SYSTEM_GET_INFO;
     systemInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
 
-    result =
-        sXr.xrGetSystem(sInstance, &systemInfo, &sSystemId);
+    result = XR_ERROR_FORM_FACTOR_UNAVAILABLE;
+    for (unsigned int attempt = 0;
+         attempt < VR_OPENXR_SYSTEM_RETRY_COUNT;
+         attempt++) {
+        result = sXr.xrGetSystem(sInstance, &systemInfo, &sSystemId);
+        if (XR_SUCCEEDED(result)) {
+            if (attempt > 0) {
+                printf(
+                    "[VR] SteamVR HMD became available after %u retries.\n",
+                    attempt
+                );
+            }
+            break;
+        }
+
+        if (!vr_openxr_system_error_is_transient(result) ||
+            attempt + 1 >= VR_OPENXR_SYSTEM_RETRY_COUNT) {
+            break;
+        }
+
+        if (attempt == 0 || (attempt + 1) % 10 == 0) {
+            printf(
+                "[VR] Waiting for SteamVR HMD registration (%s, retry %u/%u).\n",
+                vr_openxr_result_name(result),
+                attempt + 1,
+                VR_OPENXR_SYSTEM_RETRY_COUNT - 1
+            );
+        }
+        Sleep(VR_OPENXR_SYSTEM_RETRY_DELAY_MS);
+    }
 
     if (XR_FAILED(result)) {
         printf(
@@ -3431,6 +3828,13 @@ bool vr_openxr_begin_frame(void) {
         return true;
     }
 
+    // xrBeginSession transitions the session into the frame-loop-ready state.
+    // Some SteamVR/Steam Link paths leave the last event state at READY while
+    // still accepting xrWaitFrame; gating on a later event leaves the app
+    // permanently flat with no submitted frames. sSessionRunning is the
+    // authoritative lifecycle gate; stopping and exit/loss events are handled
+    // above by vr_openxr_poll_events().
+
     XrFrameWaitInfo waitInfo = { 0 };
     waitInfo.type = XR_TYPE_FRAME_WAIT_INFO;
 
@@ -3767,6 +4171,7 @@ uint32_t vr_openxr_get_tracking_origin_generation(void) {
 void vr_openxr_request_recenter(void) {
     // Keep this pending across instance startup/session creation. It is
     // consumed only after OpenXR supplies a valid pose in the FOCUSED state.
+
     sVrEnterRecenterPending = true;
     sPreserveRecenterHeight = false;
     sHeadOrientationReferenceValid = false;
@@ -3774,6 +4179,7 @@ void vr_openxr_request_recenter(void) {
 }
 
 void vr_openxr_request_horizontal_recenter(void) {
+
     sVrEnterRecenterPending = true;
     sPreserveRecenterHeight = sHeadOrientationReferenceValid;
     sHeadOrientationReferenceValid = false;
@@ -3949,6 +4355,8 @@ void vr_openxr_shutdown(void) {
 
     sLoader = NULL;
     memset(&sXr, 0, sizeof(sXr));
+
+    vr_openxr_restore_runtime_override();
 
     if (hadOpenXR) {
         printf("[VR] OpenXR context shut down.\n");

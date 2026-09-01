@@ -45,6 +45,9 @@
 static u8 sSoftResettingCamera = FALSE;
 static u8 sCCSSChangedByMod = FALSE;
 static u8 sForceRomhackCamera = FALSE;
+// Track the OpenXR reference-space generation consumed by the gameplay camera.
+static u32 sVrCameraTrackingOriginGeneration = 0;
+static bool sVrThirdPersonCameraRecenterPending = false;
 u8 gCameraUseCourseSpecificSettings = TRUE;
 u8 gOverrideFreezeCamera = FALSE;
 u8 gOverrideAllowToxicGasCamera = FALSE;
@@ -901,6 +904,15 @@ s16 look_down_slopes(s16 camYaw) {
  */
 void pan_ahead_of_player(struct Camera *c) {
     if (!c) { return; }
+    // Lakitu's native look-ahead intentionally moves the focus to one side of
+    // Mario. In VR third person that produces an apparent recenter to Mario's
+    // shoulder instead of Mario himself. Keep the VR camera's explicit
+    // recenter target centered while preserving the native behavior everywhere
+    // else (including first person and non-VR cameras).
+    if (vr_is_active() && configVrCameraMode == VR_CAMERA_MODE_THIRD_PERSON) {
+        sPanDistance = 0.0f;
+        return;
+    }
     f32 dist;
     s16 pitch;
     s16 yaw;
@@ -3167,6 +3179,82 @@ void update_lakitu(struct Camera *c) {
 }
 
 extern bool gIsDemoActive;
+static void vr_refresh_third_person_camera_origin(struct Camera *c) {
+    if (vr_is_active() == false || c == NULL || gDjuiInMainMenu ||
+        configVrCameraMode != VR_CAMERA_MODE_THIRD_PERSON ||
+        c->cutscene != 0 ||
+        gMarioStates[0].marioObj == NULL) {
+        return;
+    }
+
+    // Only consume a tracking-origin generation while third person can act on
+    // it. A recenter requested in first person must remain observable when the
+    // player switches to third person. The actual camera snap is deferred until
+    // after the native camera solver has produced this frame's orbit.
+    const u32 generation = vr_get_tracking_origin_generation();
+    if (generation == sVrCameraTrackingOriginGeneration) {
+        return;
+    }
+    sVrCameraTrackingOriginGeneration = generation;
+    sVrThirdPersonCameraRecenterPending = true;
+}
+
+static void vr_apply_third_person_camera_recenter(struct Camera *c) {
+    if (!sVrThirdPersonCameraRecenterPending ||
+        vr_is_active() == false || c == NULL || gDjuiInMainMenu ||
+        configVrCameraMode != VR_CAMERA_MODE_THIRD_PERSON ||
+        c->cutscene != 0 || gMarioStates[0].marioObj == NULL ||
+        sMarioCamState == NULL) {
+        return;
+    }
+    sVrThirdPersonCameraRecenterPending = false;
+
+    // The native camera solver has already handled mode changes, collision,
+    // floor limits, and user orbit input. Preserve that solved orbit, but make
+    // Mario the exact focus point for the one-shot reference-space recenter.
+    Vec3f focus;
+    Vec3f orbit;
+    vec3f_copy(focus, sMarioCamState->pos);
+    vec3f_copy(orbit, gLakituState.pos);
+    vec3f_sub(orbit, gLakituState.focus);
+    f32 orbitLengthSquared =
+        orbit[0] * orbit[0] + orbit[1] * orbit[1] + orbit[2] * orbit[2];
+    if (orbitLengthSquared <= 1.0f) {
+        vec3f_copy(orbit, c->pos);
+        vec3f_sub(orbit, c->focus);
+        orbitLengthSquared =
+            orbit[0] * orbit[0] + orbit[1] * orbit[1] + orbit[2] * orbit[2];
+    }
+    if (orbitLengthSquared <= 1.0f) {
+        orbit[0] = sins(sMarioCamState->faceAngle[1]) * 400.0f;
+        orbit[1] = 125.0f;
+        orbit[2] = coss(sMarioCamState->faceAngle[1]) * 400.0f;
+    }
+
+    Vec3f position = {
+        focus[0] + orbit[0],
+        focus[1] + orbit[1],
+        focus[2] + orbit[2],
+    };
+    vec3f_copy(c->pos, position);
+    vec3f_copy(c->focus, focus);
+    vec3f_copy(gLakituState.curPos, position);
+    vec3f_copy(gLakituState.curFocus, focus);
+    vec3f_copy(gLakituState.goalPos, position);
+    vec3f_copy(gLakituState.goalFocus, focus);
+    vec3f_copy(gLakituState.pos, position);
+    vec3f_copy(gLakituState.focus, focus);
+    gLakituState.yaw = calculate_yaw(focus, position);
+    gLakituState.nextYaw = gLakituState.yaw;
+    c->yaw = gLakituState.yaw;
+    c->nextYaw = gLakituState.yaw;
+    gCameraMovementFlags &= (u16)~CAM_MOVE_INIT_CAMERA;
+    gNewCamera.yawAccel = 0;
+    gNewCamera.tiltAccel = 0;
+    gNewCamera.centering = false;
+    skip_camera_interpolation();
+}
+
 static u8 update_romhack_camera_override(struct Camera *c) {
     if (gRomhackCameraSettings.enable == RCO_NONE) { return FALSE; }
     else if (gRomhackCameraSettings.enable == RCO_DISABLE) {
@@ -3223,6 +3311,11 @@ void update_camera(struct Camera *c) {
         gDjuiInMainMenu ||
         vr_first_person_locks_camera_input()
     );
+
+    // Observe reference-space recentering after newcam_toggle() has restored
+    // the configured third-person camera mode. Apply it after the native
+    // solver below, because that solver owns this frame's orbit.
+    vr_refresh_third_person_camera_origin(c);
 
     if ((gOverrideFreezeCamera || get_first_person_enabled()) && !gDjuiInMainMenu) {
         return;
@@ -3459,6 +3552,7 @@ void update_camera(struct Camera *c) {
     }
 
     update_lakitu(c);
+    vr_apply_third_person_camera_recenter(c);
 
     gLakituState.lastFrameAction = sMarioCamState->action;
 

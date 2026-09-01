@@ -33,6 +33,7 @@ struct GfxRenderingAPI {
     void (*finish_render)(void);
     const char* (*get_name)(void);
     void (*shutdown)(void);
+    void (*on_texture_uploaded)(void);
 };
 
 #endif

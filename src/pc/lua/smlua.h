@@ -4,6 +4,7 @@
 #include <lua.h>
 #include <lualib.h>
 #include <lauxlib.h>
+#include <stdint.h>
 
 #include <stdbool.h>
 #include "types.h"
@@ -19,8 +20,10 @@
 #include "pc/debuglog.h"
 #include "pc/djui/djui_console.h"
 
+bool smlua_consume_suppressed_error_report(void);
+
 #define LOG_LUA(...) { \
-    if (!gSmLuaSuppressErrors) { \
+    if (!smlua_consume_suppressed_error_report() && !gSmLuaSuppressErrors) { \
         printf("[LUA] "); \
         printf(__VA_ARGS__); \
         printf("\n"); \
@@ -32,9 +35,12 @@
 }
 
 #define LOG_LUA_LINE(...) { \
-    LOG_LUA(__VA_ARGS__); \
-    if (!gSmLuaSuppressErrors) { \
-        smlua_logline(); \
+    const bool __suppress_lua_line = smlua_consume_suppressed_error_report(); \
+    if (!__suppress_lua_line) { \
+        LOG_LUA(__VA_ARGS__); \
+        if (!gSmLuaSuppressErrors) { \
+            smlua_logline(); \
+        } \
     } \
 }
 
@@ -78,6 +84,17 @@
 #define LUA_STACK_CHECK_END(state)
 #endif
 
+struct SmLuaDiagnostics {
+    uint64_t error_reports;
+    uint64_t warning_reports;
+    uint64_t protected_call_errors;
+    uint64_t script_load_errors;
+    char last_mod[64];
+    char last_file[128];
+    char last_message[256];
+};
+
+void smlua_get_diagnostics(struct SmLuaDiagnostics *out);
 extern lua_State* gLuaState;
 extern u8 gLuaInitializingScript;
 extern u8 gSmLuaSuppressErrors;

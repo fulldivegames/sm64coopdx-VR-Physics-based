@@ -608,6 +608,35 @@ static bool vr_face_stuck_blackout_active(void) {
         gMarioStates[0].action == ACT_HEAD_STUCK_IN_GROUND;
 }
 
+static s32 sVrCrushedScreenTimer = -1;
+
+static u8 vr_crushed_screen_alpha(void) {
+    const bool crushed = vr_is_active() &&
+        configVrImmersiveCrushedScreen &&
+        gMarioStates[0].action == ACT_SQUISHED;
+    if (!crushed) {
+        sVrCrushedScreenTimer = -1;
+        return 0;
+    }
+
+    if (sVrCrushedScreenTimer < 0) {
+        sVrCrushedScreenTimer = 0;
+    } else if (sVrCrushedScreenTimer < 30) {
+        sVrCrushedScreenTimer++;
+    }
+
+    // Hold the blackout for roughly 0.5 seconds, then fade it out over
+    // the next 0.5 seconds while Mario remains in the crushed action.
+    if (sVrCrushedScreenTimer <= 15) {
+        return 0xFF;
+    }
+    const s32 fadeTimer = sVrCrushedScreenTimer - 15;
+    if (fadeTimer >= 15) {
+        return 0;
+    }
+    return (u8)(0xFF - (fadeTimer * 0xFF) / 15);
+}
+
 static bool vr_underwater_filter_active(void) {
     struct MarioState* mario = &gMarioStates[0];
     Vec3f headsetPosition;
@@ -631,6 +660,27 @@ static void render_vr_underwater_filter(void) {
     vtx[1] = (Vtx) { { {  4096, -4096, 0 }, 0, { 0, 0 }, { 44, 120, 200, 64 } } };
     vtx[2] = (Vtx) { { {  4096,  4096, 0 }, 0, { 0, 0 }, { 44, 120, 200, 64 } } };
     vtx[3] = (Vtx) { { { -4096,  4096, 0 }, 0, { 0, 0 }, { 44, 120, 200, 64 } } };
+    gDPPipeSync(gDisplayListHead++);
+    gSPClearGeometryMode(gDisplayListHead++, G_LIGHTING);
+    gDPSetCombineMode(gDisplayListHead++, G_CC_SHADE, G_CC_SHADE);
+    gDPSetRenderMode(gDisplayListHead++, G_RM_XLU_SURF, G_RM_XLU_SURF2);
+    gSPTexture(gDisplayListHead++, 0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, G_OFF);
+    gSPVertexNonGlobal(gDisplayListHead++, vtx, 4, 0);
+    gSP2Triangles(gDisplayListHead++, 0, 1, 2, 0, 0, 2, 3, 0);
+    gDPPipeSync(gDisplayListHead++);
+}
+
+static void render_vr_crushed_screen(u8 alpha) {
+    Vtx *vtx = alloc_display_list(sizeof(*vtx) * 4);
+    if (vtx == NULL || alpha == 0) {
+        return;
+    }
+    // Use the same oversized per-eye quad as the face-stuck blackout, but
+    // with translucent blending so the view returns smoothly after the hold.
+    vtx[0] = (Vtx) { { { -4096, -4096, 0 }, 0, { 0, 0 }, { 0, 0, 0, alpha } } };
+    vtx[1] = (Vtx) { { {  4096, -4096, 0 }, 0, { 0, 0 }, { 0, 0, 0, alpha } } };
+    vtx[2] = (Vtx) { { {  4096,  4096, 0 }, 0, { 0, 0 }, { 0, 0, 0, alpha } } };
+    vtx[3] = (Vtx) { { { -4096,  4096, 0 }, 0, { 0, 0 }, { 0, 0, 0, alpha } } };
     gDPPipeSync(gDisplayListHead++);
     gSPClearGeometryMode(gDisplayListHead++, G_LIGHTING);
     gDPSetCombineMode(gDisplayListHead++, G_CC_SHADE, G_CC_SHADE);
@@ -892,6 +942,8 @@ void render_hud(void) {
         vr_face_stuck_blackout_active();
     const bool underwaterFilter =
         vr_underwater_filter_active();
+    const u8 crushedScreenAlpha =
+        vr_crushed_screen_alpha();
     const bool cannonHudActive =
         gMarioStates[0].action == ACT_IN_CANNON &&
         gCurrentArea != NULL &&
@@ -909,6 +961,7 @@ void render_hud(void) {
     if (hudDisplayFlags == HUD_DISPLAY_NONE &&
         !faceStuckBlackout &&
         !underwaterFilter &&
+        crushedScreenAlpha == 0 &&
         !cannonHudActive &&
         !vrFpsActive) {
         return;
@@ -1013,6 +1066,10 @@ void render_hud(void) {
 
         if (hudDisplayFlags & HUD_DISPLAY_FLAG_TIMER && showHud) {
             render_hud_timer();
+        }
+
+        if (crushedScreenAlpha > 0) {
+            render_vr_crushed_screen(crushedScreenAlpha);
         }
     }
 }

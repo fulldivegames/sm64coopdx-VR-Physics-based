@@ -13,6 +13,8 @@
 
 #include "update_checker.h"
 #include "pc/djui/djui.h"
+#include "pc/platform.h"
+#include "pc/pc_main.h"
 #include "pc/network/version.h"
 #include "pc/loading.h"
 
@@ -21,7 +23,7 @@
     "https://api.github.com/repos/fulldivegames/sm64coopdx-VR-Standalone-Physics-based/releases?per_page=20"
 #else
 #define VR_UPDATE_API_URL \
-    "https://api.github.com/repos/fulldivegames/sm64coopdx-VR-Standalone-Physics-based/releases/latest"
+    "https://api.github.com/repos/fulldivegames/sm64coopdx-VR-Physics-based/releases/latest"
 #define VR_UPDATE_TAG_PREFIX ""
 #endif
 #define VR_UPDATE_RESPONSE_LIMIT (512 * 1024)
@@ -36,6 +38,9 @@ struct Version {
 static char sVersionUpdateTextBuffer[256] = { 0 };
 static char sRemoteVersionStr[VR_UPDATE_VERSION_MAX] = { 0 };
 static enum VrUpdateStatus sVrUpdateStatus = VR_UPDATE_NOT_CHECKED;
+#if defined(_WIN32)
+static DWORD sVrUpdateExitTick = 0;
+#endif
 
 bool gUpdateMessage = false;
 
@@ -337,6 +342,47 @@ static bool get_version_remote(void) {
     curl_global_cleanup();
     return success;
 }
+#endif
+
+#if defined(_WIN32)
+bool vr_update_install_latest(void) {
+    if (sRemoteVersionStr[0] == '\0') return false;
+    const char* exeDir = sys_exe_path_dir();
+    if (exeDir == NULL || exeDir[0] == '\0') return false;
+
+    char updaterPath[SYS_MAX_PATH] = { 0 };
+    if (snprintf(updaterPath, sizeof(updaterPath), "%s\\Co-op DX VR Updater.exe", exeDir) < 0) {
+        return false;
+    }
+    if (GetFileAttributesA(updaterPath) == INVALID_FILE_ATTRIBUTES) {
+        printf("[VR] Bundled updater not found: %s\n", updaterPath);
+        return false;
+    }
+
+    STARTUPINFOA si = { 0 };
+    PROCESS_INFORMATION pi = { 0 };
+    si.cb = sizeof(si);
+    char command[SYS_MAX_PATH + 4] = { 0 };
+    snprintf(command, sizeof(command), "\"%s\"", updaterPath);
+    if (!CreateProcessA(updaterPath, command, NULL, NULL, FALSE,
+                        CREATE_NEW_CONSOLE, NULL, exeDir, &si, &pi)) {
+        printf("[VR] Could not launch updater (error %lu).\n",
+               (unsigned long)GetLastError());
+        return false;
+    }
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    sVrUpdateExitTick = GetTickCount() + 350;
+    return true;
+}
+
+bool vr_update_should_exit(void) {
+    return sVrUpdateExitTick != 0 &&
+           (LONG)(GetTickCount() - sVrUpdateExitTick) >= 0;
+}
+#else
+bool vr_update_install_latest(void) { return false; }
+bool vr_update_should_exit(void) { return false; }
 #endif
 
 void check_for_updates(void) {

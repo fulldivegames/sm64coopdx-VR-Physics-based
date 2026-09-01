@@ -1,6 +1,7 @@
 #include "quest_game_runtime.h"
 
 #include <android/log.h>
+#include <inttypes.h>
 #include <GLES3/gl3.h>
 #include <stdio.h>
 #include <string.h>
@@ -22,6 +23,7 @@
 #include "pc/gfx/gfx_dummy.h"
 #include "pc/gfx/gfx_opengl.h"
 #include "pc/gfx/gfx_pc.h"
+#include "pc/gfx/gfx_normal_maps.h"
 #include "pc/lua/smlua.h"
 #include "pc/lua/utils/smlua_text_utils.h"
 #include "pc/mods/mods.h"
@@ -91,6 +93,8 @@ static uint32_t sPerfTickCount;
 static uint64_t sPerfEyeTotalNs[2];
 static uint64_t sPerfEyeMaxNs[2];
 static uint32_t sPerfEyeCount[2];
+static uint64_t sPerfEyeGfxRunTotalNs[2];
+static uint64_t sPerfEyeGfxRunMaxNs[2];
 static uint32_t sPerfLastShaderCompiles;
 static uint64_t sPerfLastShaderCompileNs;
 static uint32_t sPerfLastTextureUploads;
@@ -99,6 +103,8 @@ static uint64_t sPerfLastTextureUploadNs;
 static uint64_t sPerfLastDrawCalls;
 static uint64_t sPerfLastTriangles;
 static uint64_t sPerfLastVertexUploadBytes;
+static struct GfxStereoDiagnostics sPerfLastStereo;
+static struct SmLuaDiagnostics sPerfLastLua;
 
 static void quest_patch_before_game_tick(void) {
     patch_mtx_before();
@@ -149,6 +155,114 @@ static int64_t monotonic_ns(void) {
     return (int64_t)now.tv_sec * 1000000000LL + now.tv_nsec;
 }
 
+static uint64_t quest_stereo_delta(uint64_t current, uint64_t previous) {
+    return current >= previous ? current - previous : 0;
+}
+
+static void quest_game_log_stereo_opcode_top(
+    const struct GfxStereoDiagnostics *current,
+    const struct GfxStereoDiagnostics *previous,
+    uint32_t eye
+) {
+    uint64_t top_values[4] = { 0, 0, 0, 0 };
+    uint32_t top_opcodes[4] = { 0, 0, 0, 0 };
+    for (uint32_t opcode = 0; opcode < 256; opcode++) {
+        const uint64_t value = quest_stereo_delta(
+            current->opcode_counts[eye][opcode],
+            previous->opcode_counts[eye][opcode]
+        );
+        for (uint32_t slot = 0; slot < 4; slot++) {
+            if (value > top_values[slot]) {
+                for (uint32_t move = 3; move > slot; move--) {
+                    top_values[move] = top_values[move - 1];
+                    top_opcodes[move] = top_opcodes[move - 1];
+                }
+                top_values[slot] = value;
+                top_opcodes[slot] = opcode;
+                break;
+            }
+        }
+    }
+    LOGI(
+        "PERF_DIAG opcodes eye%u %02x=%llu %02x=%llu %02x=%llu %02x=%llu",
+        eye,
+        (unsigned)top_opcodes[0], (unsigned long long)top_values[0],
+        (unsigned)top_opcodes[1], (unsigned long long)top_values[1],
+        (unsigned)top_opcodes[2], (unsigned long long)top_values[2],
+        (unsigned)top_opcodes[3], (unsigned long long)top_values[3]
+    );
+}
+
+static void quest_game_log_stereo_diagnostics(
+    const struct GfxStereoDiagnostics *current,
+    const struct GfxStereoDiagnostics *previous
+) {
+    LOGI(
+        "PERF_DIAG cache attempts=%llu success=%llu hits=%llu misses=%llu "
+        "no-valid=%llu source=%llu dest=%llu lua=%llu serial=%llu "
+        "overflow=%llu count-mismatch=%llu",
+        (unsigned long long)quest_stereo_delta(current->cache_replay_attempt_frames, previous->cache_replay_attempt_frames),
+        (unsigned long long)quest_stereo_delta(current->cache_replay_success_frames, previous->cache_replay_success_frames),
+        (unsigned long long)quest_stereo_delta(current->cache_hits, previous->cache_hits),
+        (unsigned long long)quest_stereo_delta(current->cache_misses, previous->cache_misses),
+        (unsigned long long)quest_stereo_delta(current->cache_miss_no_valid, previous->cache_miss_no_valid),
+        (unsigned long long)quest_stereo_delta(current->cache_source_mismatches, previous->cache_source_mismatches),
+        (unsigned long long)quest_stereo_delta(current->cache_dest_mismatches, previous->cache_dest_mismatches),
+        (unsigned long long)quest_stereo_delta(current->cache_lua_mismatches, previous->cache_lua_mismatches),
+        (unsigned long long)quest_stereo_delta(current->cache_serial_mismatches, previous->cache_serial_mismatches),
+        (unsigned long long)quest_stereo_delta(current->cache_overflow_frames, previous->cache_overflow_frames),
+        (unsigned long long)quest_stereo_delta(current->cache_count_mismatch_frames, previous->cache_count_mismatch_frames)
+    );
+    for (uint32_t eye = 0; eye < 2; eye++) {
+        LOGI(
+            "PERF_DIAG eye%u runs=%llu cmds=%llu vtxcmd=%llu verts=%llu "
+            "vtxcalls=%llu vtxns=%.2f tri=%llu clip=%llu cull=%llu "
+            "submit=%llu flush=%llu batches=%llu",
+            eye,
+            (unsigned long long)quest_stereo_delta(current->gfx_runs[eye], previous->gfx_runs[eye]),
+            (unsigned long long)quest_stereo_delta(current->display_list_commands[eye], previous->display_list_commands[eye]),
+            (unsigned long long)quest_stereo_delta(current->vertex_commands[eye], previous->vertex_commands[eye]),
+            (unsigned long long)quest_stereo_delta(current->vertex_loads[eye], previous->vertex_loads[eye]),
+            (unsigned long long)quest_stereo_delta(current->vertex_function_calls[eye], previous->vertex_function_calls[eye]),
+            (double)quest_stereo_delta(current->vertex_function_ns[eye], previous->vertex_function_ns[eye]) / 1000000.0,
+            (unsigned long long)quest_stereo_delta(current->triangles[eye], previous->triangles[eye]),
+            (unsigned long long)quest_stereo_delta(current->triangles_clip_rejected[eye], previous->triangles_clip_rejected[eye]),
+            (unsigned long long)quest_stereo_delta(current->triangles_cull_rejected[eye], previous->triangles_cull_rejected[eye]),
+            (unsigned long long)quest_stereo_delta(current->triangles_submitted[eye], previous->triangles_submitted[eye]),
+            (unsigned long long)quest_stereo_delta(current->flush_calls[eye], previous->flush_calls[eye]),
+            (unsigned long long)quest_stereo_delta(current->draw_batches[eye], previous->draw_batches[eye])
+        );
+        LOGI(
+            "PERF_DIAG eye%u flush depth=%llu depthmask=%llu decal=%llu "
+            "viewport=%llu scissor=%llu shader=%llu alpha=%llu "
+            "texture=%llu sampler=%llu full=%llu unknown=%llu",
+            eye,
+            (unsigned long long)quest_stereo_delta(current->flush_reasons[eye][GFX_FLUSH_DEPTH_TEST], previous->flush_reasons[eye][GFX_FLUSH_DEPTH_TEST]),
+            (unsigned long long)quest_stereo_delta(current->flush_reasons[eye][GFX_FLUSH_DEPTH_MASK], previous->flush_reasons[eye][GFX_FLUSH_DEPTH_MASK]),
+            (unsigned long long)quest_stereo_delta(current->flush_reasons[eye][GFX_FLUSH_ZMODE_DECAL], previous->flush_reasons[eye][GFX_FLUSH_ZMODE_DECAL]),
+            (unsigned long long)quest_stereo_delta(current->flush_reasons[eye][GFX_FLUSH_VIEWPORT], previous->flush_reasons[eye][GFX_FLUSH_VIEWPORT]),
+            (unsigned long long)quest_stereo_delta(current->flush_reasons[eye][GFX_FLUSH_SCISSOR], previous->flush_reasons[eye][GFX_FLUSH_SCISSOR]),
+            (unsigned long long)quest_stereo_delta(current->flush_reasons[eye][GFX_FLUSH_SHADER], previous->flush_reasons[eye][GFX_FLUSH_SHADER]),
+            (unsigned long long)quest_stereo_delta(current->flush_reasons[eye][GFX_FLUSH_ALPHA], previous->flush_reasons[eye][GFX_FLUSH_ALPHA]),
+            (unsigned long long)quest_stereo_delta(current->flush_reasons[eye][GFX_FLUSH_TEXTURE], previous->flush_reasons[eye][GFX_FLUSH_TEXTURE]),
+            (unsigned long long)quest_stereo_delta(current->flush_reasons[eye][GFX_FLUSH_SAMPLER], previous->flush_reasons[eye][GFX_FLUSH_SAMPLER]),
+            (unsigned long long)quest_stereo_delta(current->flush_reasons[eye][GFX_FLUSH_BUFFER_FULL], previous->flush_reasons[eye][GFX_FLUSH_BUFFER_FULL]),
+            (unsigned long long)quest_stereo_delta(current->flush_reasons[eye][GFX_FLUSH_UNKNOWN], previous->flush_reasons[eye][GFX_FLUSH_UNKNOWN])
+        );
+        LOGI(
+            "PERF_DIAG eye%u paths lighting=%llu le=%llu texgen=%llu fog=%llu "
+            "fresnel=%llu packed=%llu",
+            eye,
+            (unsigned long long)quest_stereo_delta(current->vertices_lighting[eye], previous->vertices_lighting[eye]),
+            (unsigned long long)quest_stereo_delta(current->vertices_lighting_engine[eye], previous->vertices_lighting_engine[eye]),
+            (unsigned long long)quest_stereo_delta(current->vertices_texture_gen[eye], previous->vertices_texture_gen[eye]),
+            (unsigned long long)quest_stereo_delta(current->vertices_fog[eye], previous->vertices_fog[eye]),
+            (unsigned long long)quest_stereo_delta(current->vertices_fresnel[eye], previous->vertices_fresnel[eye]),
+            (unsigned long long)quest_stereo_delta(current->vertices_packed_normals[eye], previous->vertices_packed_normals[eye])
+        );
+        quest_game_log_stereo_opcode_top(current, previous, eye);
+    }
+}
 static void quest_game_log_performance_if_ready(int64_t now) {
     uint32_t shaderCompiles = 0;
     uint64_t shaderCompileNs = 0;
@@ -158,6 +272,10 @@ static void quest_game_log_performance_if_ready(int64_t now) {
     uint64_t drawCalls = 0;
     uint64_t triangles = 0;
     uint64_t vertexUploadBytes = 0;
+    struct GfxStereoDiagnostics stereoDiagnostics;
+    struct SmLuaDiagnostics luaDiagnostics;
+    gfx_get_stereo_diagnostics(&stereoDiagnostics);
+    smlua_get_diagnostics(&luaDiagnostics);
     gfx_opengl_performance_stats_get(
         &shaderCompiles,
         &shaderCompileNs,
@@ -179,6 +297,8 @@ static void quest_game_log_performance_if_ready(int64_t now) {
         sPerfLastDrawCalls = drawCalls;
         sPerfLastTriangles = triangles;
         sPerfLastVertexUploadBytes = vertexUploadBytes;
+        sPerfLastStereo = stereoDiagnostics;
+        sPerfLastLua = luaDiagnostics;
         return;
     }
     if (now - sPerfWindowStartNs < 1000000000LL) return;
@@ -206,10 +326,19 @@ static void quest_game_log_performance_if_ready(int64_t now) {
     const double rightAverageMs = sPerfEyeCount[1] > 0
         ? (double)sPerfEyeTotalNs[1] / (double)sPerfEyeCount[1] / 1000000.0
         : 0.0;
+    const double leftGfxRunAverageMs = sPerfEyeCount[0] > 0
+        ? (double)sPerfEyeGfxRunTotalNs[0] /
+          (double)sPerfEyeCount[0] / 1000000.0
+        : 0.0;
+    const double rightGfxRunAverageMs = sPerfEyeCount[1] > 0
+        ? (double)sPerfEyeGfxRunTotalNs[1] /
+          (double)sPerfEyeCount[1] / 1000000.0
+        : 0.0;
 
     LOGI(
         "PERF level=%d area=%d | tick %.2f/%.2f ms | eyes "
-        "L %.2f/%.2f R %.2f/%.2f ms | first-use shaders %u/%.2f ms "
+        "L %.2f/%.2f R %.2f/%.2f ms | gfx_run L %.2f/%.2f R %.2f/%.2f ms | "
+        "first-use shaders %u/%.2f ms "
         "textures %u/%.2f MiB/%.2f ms | frames %u | draws %.1f tris %.1f vbo %.3f MiB/eye",
         gCurrLevelNum,
         gCurrAreaIndex,
@@ -219,6 +348,10 @@ static void quest_game_log_performance_if_ready(int64_t now) {
         (double)sPerfEyeMaxNs[0] / 1000000.0,
         rightAverageMs,
         (double)sPerfEyeMaxNs[1] / 1000000.0,
+        leftGfxRunAverageMs,
+        (double)sPerfEyeGfxRunMaxNs[0] / 1000000.0,
+        rightGfxRunAverageMs,
+        (double)sPerfEyeGfxRunMaxNs[1] / 1000000.0,
         newShaders,
         (double)newShaderNs / 1000000.0,
         newTextures,
@@ -241,6 +374,8 @@ static void quest_game_log_performance_if_ready(int64_t now) {
     memset(sPerfEyeTotalNs, 0, sizeof(sPerfEyeTotalNs));
     memset(sPerfEyeMaxNs, 0, sizeof(sPerfEyeMaxNs));
     memset(sPerfEyeCount, 0, sizeof(sPerfEyeCount));
+    memset(sPerfEyeGfxRunTotalNs, 0, sizeof(sPerfEyeGfxRunTotalNs));
+    memset(sPerfEyeGfxRunMaxNs, 0, sizeof(sPerfEyeGfxRunMaxNs));
     sPerfLastShaderCompiles = shaderCompiles;
     sPerfLastShaderCompileNs = shaderCompileNs;
     sPerfLastTextureUploads = textureUploads;
@@ -248,7 +383,30 @@ static void quest_game_log_performance_if_ready(int64_t now) {
     sPerfLastTextureUploadNs = textureUploadNs;
     sPerfLastDrawCalls = drawCalls;
     sPerfLastTriangles = triangles;
+    quest_game_log_stereo_diagnostics(&stereoDiagnostics, &sPerfLastStereo);
+    const uint64_t luaErrors = quest_stereo_delta(
+        luaDiagnostics.error_reports, sPerfLastLua.error_reports);
+    const uint64_t luaWarnings = quest_stereo_delta(
+        luaDiagnostics.warning_reports, sPerfLastLua.warning_reports);
+    const uint64_t luaProtectedErrors = quest_stereo_delta(
+        luaDiagnostics.protected_call_errors, sPerfLastLua.protected_call_errors);
+    const uint64_t luaLoadErrors = quest_stereo_delta(
+        luaDiagnostics.script_load_errors, sPerfLastLua.script_load_errors);
+    LOGI(
+        "PERF_DIAG lua errors=%llu warnings=%llu protected=%llu load=%llu "
+        "last=%s/%s: %s",
+        (unsigned long long)luaErrors,
+        (unsigned long long)luaWarnings,
+        (unsigned long long)luaProtectedErrors,
+        (unsigned long long)luaLoadErrors,
+        luaDiagnostics.last_mod[0] != '\0' ? luaDiagnostics.last_mod : "<none>",
+        luaDiagnostics.last_file[0] != '\0' ? luaDiagnostics.last_file : "<none>",
+        luaDiagnostics.last_message[0] != '\0' ? luaDiagnostics.last_message : "<none>"
+    );
+
     sPerfLastVertexUploadBytes = vertexUploadBytes;
+    sPerfLastStereo = stereoDiagnostics;
+    sPerfLastLua = luaDiagnostics;
 }
 
 void quest_game_load_early_config(void) {
@@ -338,6 +496,7 @@ bool quest_game_initialize(void) {
     enable_queued_dynos_packs();
     sync_objects_init_system();
     rom_assets_load();
+    gfx_normal_maps_on_rom_loaded();
     smlua_text_utils_init();
     mods_init();
     enable_queued_mods();
@@ -446,7 +605,11 @@ bool quest_game_render_eye(uint32_t eye, uint32_t width, uint32_t height) {
         patch_mtx_vr_projection(1.0f, eye);
     }
     patch_mtx_vr_ui_projection(eye);
+    gfx_set_stereo_eye(eye);
+    const int64_t gfxRunStart = monotonic_ns();
     gfx_run(commands);
+    const uint64_t gfxRunNs =
+        (uint64_t)(monotonic_ns() - gfxRunStart);
 #ifdef __ANDROID__
     static bool logged_display_list = false;
     if (!logged_display_list) {
@@ -466,6 +629,10 @@ bool quest_game_render_eye(uint32_t eye, uint32_t width, uint32_t height) {
             sPerfEyeMaxNs[eye] = renderNs;
         }
         sPerfEyeCount[eye]++;
+        sPerfEyeGfxRunTotalNs[eye] += gfxRunNs;
+        if (gfxRunNs > sPerfEyeGfxRunMaxNs[eye]) {
+            sPerfEyeGfxRunMaxNs[eye] = gfxRunNs;
+        }
         if (eye == 1) {
             quest_game_log_performance_if_ready(monotonic_ns());
         }

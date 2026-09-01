@@ -6,6 +6,7 @@
 extern "C" {
 #include "pc/gfx/gfx.h"
 #include "pc/gfx/gfx_rendering_api.h"
+#include "pc/gfx/gfx_normal_maps.h"
 #include "pc/mods/mod_fs.h"
 }
 
@@ -222,7 +223,11 @@ u8 *DynOS_Tex_ConvertToRGBA32(const u8 *aData, u64 aLength, s32 aFormat, s32 aSi
 typedef struct GfxRenderingAPI GRAPI;
 static void DynOS_Tex_Upload(DataNode<TexData> *aNode, GRAPI *aGfxRApi, s32 aTile, s32 aTexId) {
     aGfxRApi->select_texture(aTile, aTexId);
+    gfx_normal_maps_set_pending_texture_name(aNode->mName.begin());
     aGfxRApi->upload_texture(aNode->mData->mRawData.begin(), aNode->mData->mRawWidth, aNode->mData->mRawHeight);
+    if (aGfxRApi->on_texture_uploaded != nullptr) {
+        aGfxRApi->on_texture_uploaded();
+    }
     aNode->mData->mUploaded = true;
 }
 

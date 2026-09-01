@@ -34,6 +34,8 @@
 #include "pc/vr/vr.h"
 
 #include "pc/fs/fs.h"
+#include "data/dynos.c.h"
+#include "pc/gfx/gfx_normal_maps.h"
 
 #include "pc/gfx/gfx_cc.h"
 #include "pc/gfx/gfx_pc.h"
@@ -132,6 +134,41 @@ struct RSP {
 };
 static struct RSP rsp;
 
+// The display list is replayed once per eye. Lighting, texture coordinates,
+// and vertex colors are eye-independent; retain those results from the first
+// pass so the second pass only performs its eye-specific projection work.
+// The source/destination checks make a cache miss fail closed if a nonstandard
+// display list differs between eyes.
+#define MAX_STEREO_VERTEX_CACHE 1048576
+// Keep the diagnostic API available for targeted profiling, but do not run
+// its per-command counters in normal builds; they add hot-path work on
+// every display-list command, vertex load, and triangle.
+#define GFX_STEREO_DIAGNOSTICS 0
+struct StereoVertexCacheEntry {
+    const Vtx *source;
+    uint8_t dest_index;
+    bool lua_vertex_color;
+    int16_t u, v;
+    struct RGBA color;
+    uint8_t world_geometry;
+};
+static struct StereoVertexCacheEntry sStereoVertexCache[MAX_STEREO_VERTEX_CACHE];
+static uint32_t sStereoEye = 2;
+static size_t sStereoVertexSerial = 0;
+static size_t sStereoVertexCount = 0;
+static bool sStereoCacheValid = false;
+static struct GfxStereoDiagnostics sStereoDiagnostics;
+
+#if GFX_STEREO_DIAGNOSTICS
+static inline int gfx_stereo_diagnostic_eye(void) {
+    return sStereoEye < 2 ? (int)sStereoEye : -1;
+}
+#else
+static inline int gfx_stereo_diagnostic_eye(void) {
+    return -1;
+}
+#endif
+
 struct RDP {
     const uint8_t *palette[2];
     struct UnloadedTex texture_to_load;
@@ -206,7 +243,11 @@ bool gShaderFlagsEnabled = true;
 
 // need inverse camera matrix to compute world space for lighting engine
 static Mat4 sInverseCameraMatrix;
+// Cached composition used by the lighting engine. This matrix only changes when
+// the active model-view matrix or inverse camera matrix changes.
+static Mat4 sLocalToWorldMatrix;
 static bool sHasInverseCameraMatrix = false;
+static bool sLocalToWorldMatrixValid = false;
 
 // 4x4 pink-black checkerboard texture to indicate missing textures
 #define MISSING_W 4
@@ -248,12 +289,26 @@ void ext_gfx_run_dl(Gfx* cmd);
     return 0;
 }*/
 
-static void gfx_flush(void) {
+static void gfx_flush_reason(enum GfxFlushReason reason) {
+    const int diagnostic_eye = gfx_stereo_diagnostic_eye();
+    if (diagnostic_eye >= 0) {
+        sStereoDiagnostics.flush_calls[diagnostic_eye]++;
+        if (reason >= 0 && reason < GFX_FLUSH_REASON_COUNT) {
+            sStereoDiagnostics.flush_reasons[diagnostic_eye][reason]++;
+        }
+    }
     if (buf_vbo_len > 0) {
+        if (diagnostic_eye >= 0) {
+            sStereoDiagnostics.draw_batches[diagnostic_eye]++;
+        }
         gfx_rapi->draw_triangles(buf_vbo, buf_vbo_len, buf_vbo_num_tris);
         buf_vbo_len = 0;
         buf_vbo_num_tris = 0;
     }
+}
+
+static void gfx_flush(void) {
+    gfx_flush_reason(GFX_FLUSH_UNKNOWN);
 }
 
 static void combine_mode_update_hash(struct CombineMode* cm) {
@@ -385,6 +440,9 @@ static void gfx_generate_cc(struct ColorCombiner *cc) {
 
     color_combiner_update_hash(cc);
     cc->prg = gfx_lookup_or_create_shader_program(cc);
+    /* Shader metadata is immutable for this cached combiner. Resolve it once
+     * when the program is created instead of once per submitted triangle. */
+    gfx_rapi->shader_get_info(cc->prg, &cc->num_inputs, cc->used_textures);
     gfx_cc_print(cc);
 }
 
@@ -510,13 +568,21 @@ static bool gfx_texture_cache_lookup(int tile, struct TextureHashmapNode **n, co
     #undef CMPADDR
 }
 
+static inline void gfx_upload_texture(const uint8_t *rgba32_buf, int width, int height);
 static void import_texture_rgba32(int tile) {
     tile = tile % MAX_TILES;
     if (!rdp.loaded_texture[tile].addr) { return; }
     uint32_t width = rdp.texture_tile[tile].line_size_bytes / 2;
     uint32_t height = (rdp.loaded_texture[tile].size_bytes / 2) / rdp.texture_tile[tile].line_size_bytes;
-    gfx_rapi->upload_texture(rdp.loaded_texture[tile].addr, width, height);
+    gfx_upload_texture(rdp.loaded_texture[tile].addr, width, height);
 }
+static inline void gfx_upload_texture(const uint8_t *rgba32_buf, int width, int height) {
+    gfx_rapi->upload_texture(rgba32_buf, width, height);
+    if (gfx_rapi->on_texture_uploaded != NULL) {
+        gfx_rapi->on_texture_uploaded();
+    }
+}
+
 
 static void import_texture_rgba16(int tile) {
     tile = tile % MAX_TILES;
@@ -539,7 +605,7 @@ static void import_texture_rgba16(int tile) {
     uint32_t width = rdp.texture_tile[tile].line_size_bytes / 2;
     uint32_t height = rdp.loaded_texture[tile].size_bytes / rdp.texture_tile[tile].line_size_bytes;
 
-    gfx_rapi->upload_texture(rgba32_buf, width, height);
+    gfx_upload_texture(rgba32_buf, width, height);
 }
 
 static void import_texture_ia4(int tile) {
@@ -565,7 +631,7 @@ static void import_texture_ia4(int tile) {
     uint32_t width = rdp.texture_tile[tile].line_size_bytes * 2;
     uint32_t height = rdp.loaded_texture[tile].size_bytes / rdp.texture_tile[tile].line_size_bytes;
 
-    gfx_rapi->upload_texture(rgba32_buf, width, height);
+    gfx_upload_texture(rgba32_buf, width, height);
 }
 
 static void import_texture_ia8(int tile) {
@@ -589,7 +655,7 @@ static void import_texture_ia8(int tile) {
     uint32_t width = rdp.texture_tile[tile].line_size_bytes;
     uint32_t height = rdp.loaded_texture[tile].size_bytes / rdp.texture_tile[tile].line_size_bytes;
 
-    gfx_rapi->upload_texture(rgba32_buf, width, height);
+    gfx_upload_texture(rgba32_buf, width, height);
 }
 
 static void import_texture_ia16(int tile) {
@@ -613,7 +679,7 @@ static void import_texture_ia16(int tile) {
     uint32_t width = rdp.texture_tile[tile].line_size_bytes / 2;
     uint32_t height = rdp.loaded_texture[tile].size_bytes / rdp.texture_tile[tile].line_size_bytes;
 
-    gfx_rapi->upload_texture(rgba32_buf, width, height);
+    gfx_upload_texture(rgba32_buf, width, height);
 }
 
 static void import_texture_i4(int tile) {
@@ -634,7 +700,7 @@ static void import_texture_i4(int tile) {
     uint32_t width = rdp.texture_tile[tile].line_size_bytes * 2;
     uint32_t height = rdp.loaded_texture[tile].size_bytes / rdp.texture_tile[tile].line_size_bytes;
 
-    gfx_rapi->upload_texture(rgba32_buf, width, height);
+    gfx_upload_texture(rgba32_buf, width, height);
 }
 
 static void import_texture_i8(int tile) {
@@ -654,7 +720,7 @@ static void import_texture_i8(int tile) {
     uint32_t width = rdp.texture_tile[tile].line_size_bytes;
     uint32_t height = rdp.loaded_texture[tile].size_bytes / rdp.texture_tile[tile].line_size_bytes;
 
-    gfx_rapi->upload_texture(rgba32_buf, width, height);
+    gfx_upload_texture(rgba32_buf, width, height);
 }
 
 static void import_texture_ci4(int tile) {
@@ -687,7 +753,7 @@ static void import_texture_ci4(int tile) {
     uint32_t width = rdp.texture_tile[tile].line_size_bytes * 2;
     uint32_t height = rdp.loaded_texture[tile].size_bytes / rdp.texture_tile[tile].line_size_bytes;
 
-    gfx_rapi->upload_texture(rgba32_buf, width, height);
+    gfx_upload_texture(rgba32_buf, width, height);
 }
 
 static void import_texture_ci8(int tile) {
@@ -713,13 +779,20 @@ static void import_texture_ci8(int tile) {
     uint32_t width = rdp.texture_tile[tile].line_size_bytes;
     uint32_t height = rdp.loaded_texture[tile].size_bytes / rdp.texture_tile[tile].line_size_bytes;
 
-    gfx_rapi->upload_texture(rgba32_buf, width, height);
+    gfx_upload_texture(rgba32_buf, width, height);
 }
 
 static void import_texture(int tile) {
     tile = tile % MAX_TILES;
+    gfx_normal_maps_clear_pending_texture_name();
     extern s32 dynos_tex_import(void **output, void *ptr, s32 tile, void *grapi, void **hashmap, void *pool, s32 *poolpos, s32 poolsize);
-    if (dynos_tex_import((void **) &rendering_state.textures[tile], (void *) rdp.loaded_texture[tile].addr, tile, gfx_rapi, (void **) gfx_texture_cache.hashmap, (void *) gfx_texture_cache.pool, (int *) &gfx_texture_cache.pool_pos, MAX_CACHED_TEXTURES)) { return; }
+    if (dynos_tex_import((void **) &rendering_state.textures[tile], (void *) rdp.loaded_texture[tile].addr, tile, gfx_rapi, (void **) gfx_texture_cache.hashmap, (void *) gfx_texture_cache.pool, (int *) &gfx_texture_cache.pool_pos, MAX_CACHED_TEXTURES)) {
+        return;
+    }
+    struct TextureInfo texture_info = { 0 };
+    if (dynos_texture_get_from_data((const Texture *) rdp.loaded_texture[tile].addr, &texture_info)) {
+        gfx_normal_maps_set_pending_texture_name(texture_info.name);
+    }
     uint8_t fmt = rdp.texture_tile[tile].fmt;
     uint8_t siz = rdp.texture_tile[tile].siz;
 
@@ -734,6 +807,10 @@ static void import_texture(int tile) {
     }
 
     if (gfx_texture_cache_lookup(tile, &rendering_state.textures[tile], rdp.loaded_texture[tile].addr, fmt, siz)) {
+        // A cache hit does not invoke the upload callback. Consume the
+        // pending name here so it cannot leak into the next texture upload
+        // and associate that texture with the wrong normal map.
+        gfx_normal_maps_clear_pending_texture_name();
         return;
     }
 
@@ -800,7 +877,25 @@ static void calculate_normal_dir(const Light_t *light, Vec3f coeffs, bool applyL
         light_dir[2] += gLightingDir[2];
     }
 
-    gfx_transposed_matrix_mul(coeffs, light_dir, rsp.modelview_matrix_stack[rsp.modelview_matrix_stack_size - 1]);
+    // Directional lighting is defined in world/model space. The old path used
+    // the full camera-relative model-view matrix, so rotating the in-game
+    // camera rotated the light direction and made the scene brighten/darken.
+    // Strip the current camera transform when the scene supplied its inverse;
+    // retain the legacy matrix path for display lists that do not provide one.
+    const Mat4 *lighting_matrix =
+        &rsp.modelview_matrix_stack[rsp.modelview_matrix_stack_size - 1];
+    if (sHasInverseCameraMatrix) {
+        if (!sLocalToWorldMatrixValid) {
+            mtxf_mul(
+                sLocalToWorldMatrix,
+                rsp.modelview_matrix_stack[rsp.modelview_matrix_stack_size - 1],
+                sInverseCameraMatrix
+            );
+            sLocalToWorldMatrixValid = true;
+        }
+        lighting_matrix = &sLocalToWorldMatrix;
+    }
+    gfx_transposed_matrix_mul(coeffs, light_dir, *lighting_matrix);
     vec3f_normalize(coeffs);
 }
 
@@ -813,6 +908,7 @@ static void OPTIMIZE_O3 gfx_sp_matrix(uint8_t parameters, const int32_t *addr) {
         if (addr) {
             memcpy(sInverseCameraMatrix, addr, sizeof(sInverseCameraMatrix));
             sHasInverseCameraMatrix = true;
+            sLocalToWorldMatrixValid = false;
         }
         return;
     }
@@ -851,6 +947,7 @@ static void OPTIMIZE_O3 gfx_sp_matrix(uint8_t parameters, const int32_t *addr) {
         rsp.lights_changed = 1;
     }
     mtxf_mul(rsp.MP_matrix, rsp.modelview_matrix_stack[rsp.modelview_matrix_stack_size - 1], rsp.P_matrix);
+    sLocalToWorldMatrixValid = false;
 }
 
 static void gfx_sp_pop_matrix(uint32_t count) {
@@ -862,6 +959,7 @@ static void gfx_sp_pop_matrix(uint32_t count) {
             }
         }
     }
+    sLocalToWorldMatrixValid = false;
 }
 
 static float gfx_adjust_x_for_aspect_ratio(float x) {
@@ -882,15 +980,21 @@ static float gfx_adjust_x_for_aspect_ratio(float x) {
 static OPTIMIZE_O3 void gfx_local_to_world_space(VEC_OUT Vec3f pos, VEC_OUT Vec3f normal) {
     if (!sHasInverseCameraMatrix) { return; }
 
-    // strip view matrix off of the model-view matrix
-    Mat4 model;
-    mtxf_mul(model, rsp.modelview_matrix_stack[rsp.modelview_matrix_stack_size-1], sInverseCameraMatrix);
+    // Strip the view matrix from the active model-view matrix. The composition
+    // is constant for all vertices until either matrix changes; caching it avoids
+    // rebuilding the same 4x4 product once per vertex on large custom maps.
+    if (!sLocalToWorldMatrixValid) {
+        mtxf_mul(sLocalToWorldMatrix,
+            rsp.modelview_matrix_stack[rsp.modelview_matrix_stack_size - 1],
+            sInverseCameraMatrix);
+        sLocalToWorldMatrixValid = true;
+    }
 
     // transform position to world
     Vec3f worldPos;
-    worldPos[0] = pos[0] * model[0][0] + pos[1] * model[1][0] + pos[2] * model[2][0] + model[3][0];
-    worldPos[1] = pos[0] * model[0][1] + pos[1] * model[1][1] + pos[2] * model[2][1] + model[3][1];
-    worldPos[2] = pos[0] * model[0][2] + pos[1] * model[1][2] + pos[2] * model[2][2] + model[3][2];
+    worldPos[0] = pos[0] * sLocalToWorldMatrix[0][0] + pos[1] * sLocalToWorldMatrix[1][0] + pos[2] * sLocalToWorldMatrix[2][0] + sLocalToWorldMatrix[3][0];
+    worldPos[1] = pos[0] * sLocalToWorldMatrix[0][1] + pos[1] * sLocalToWorldMatrix[1][1] + pos[2] * sLocalToWorldMatrix[2][1] + sLocalToWorldMatrix[3][1];
+    worldPos[2] = pos[0] * sLocalToWorldMatrix[0][2] + pos[1] * sLocalToWorldMatrix[1][2] + pos[2] * sLocalToWorldMatrix[2][2] + sLocalToWorldMatrix[3][2];
 
     pos[0] = worldPos[0];
     pos[1] = worldPos[1];
@@ -899,9 +1003,9 @@ static OPTIMIZE_O3 void gfx_local_to_world_space(VEC_OUT Vec3f pos, VEC_OUT Vec3
     // transform normal to world
     if (normal) {
         Vec3f worldNormal;
-        worldNormal[0] = normal[0] * model[0][0] + normal[1] * model[1][0] + normal[2] * model[2][0];
-        worldNormal[1] = normal[0] * model[0][1] + normal[1] * model[1][1] + normal[2] * model[2][1];
-        worldNormal[2] = normal[0] * model[0][2] + normal[1] * model[1][2] + normal[2] * model[2][2];
+        worldNormal[0] = normal[0] * sLocalToWorldMatrix[0][0] + normal[1] * sLocalToWorldMatrix[1][0] + normal[2] * sLocalToWorldMatrix[2][0];
+        worldNormal[1] = normal[0] * sLocalToWorldMatrix[0][1] + normal[1] * sLocalToWorldMatrix[1][1] + normal[2] * sLocalToWorldMatrix[2][1];
+        worldNormal[2] = normal[0] * sLocalToWorldMatrix[0][2] + normal[1] * sLocalToWorldMatrix[1][2] + normal[2] * sLocalToWorldMatrix[2][2];
 
         normal[0] = worldNormal[0];
         normal[1] = worldNormal[1];
@@ -911,6 +1015,46 @@ static OPTIMIZE_O3 void gfx_local_to_world_space(VEC_OUT Vec3f pos, VEC_OUT Vec3
 
 static void OPTIMIZE_O3 gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *vertices, bool luaVertexColor) {
     if (!vertices) { return; }
+
+    // These values cannot change while one vertex-load command is processed.
+    // Cache them to avoid repeated indirect calls on every vertex.
+    const bool lighting_engine_enabled = le_is_enabled();
+    const enum LEMode lighting_engine_mode = le_get_mode();
+    const bool fog_disabled_for_vr = configVrDisableFog && vr_is_active();
+
+    const int diagnostic_eye = gfx_stereo_diagnostic_eye();
+    if (diagnostic_eye >= 0) {
+        sStereoDiagnostics.vertex_function_calls[diagnostic_eye]++;
+        sStereoDiagnostics.vertex_loads[diagnostic_eye] += n_vertices;
+        if (rsp.geometry_mode & G_LIGHTING) {
+            sStereoDiagnostics.vertices_lighting[diagnostic_eye] += n_vertices;
+        }
+        if (rsp.geometry_mode & G_TEXTURE_GEN) {
+            sStereoDiagnostics.vertices_texture_gen[diagnostic_eye] += n_vertices;
+        }
+        if (!(fog_disabled_for_vr) &&
+            (rsp.geometry_mode & G_FOG)) {
+            sStereoDiagnostics.vertices_fog[diagnostic_eye] += n_vertices;
+        }
+        if (rsp.geometry_mode & (G_FRESNEL_COLOR_EXT | G_FRESNEL_ALPHA_EXT)) {
+            sStereoDiagnostics.vertices_fresnel[diagnostic_eye] += n_vertices;
+        }
+        if (rsp.geometry_mode & G_PACKED_NORMALS_EXT) {
+            sStereoDiagnostics.vertices_packed_normals[diagnostic_eye] += n_vertices;
+        }
+        const bool diagnostic_lighting_engine =
+            lighting_engine_enabled &&
+            ((rsp.geometry_mode & G_LIGHTING) != 0
+                ? luaVertexColor &&
+                  ((lighting_engine_mode != LE_MODE_AFFECT_ONLY_GEOMETRY_MODE) ||
+                   (rsp.geometry_mode & G_LIGHTING_ENGINE_EXT))
+                : !(rsp.geometry_mode & G_LIGHT_MAP_EXT) &&
+                  (luaVertexColor ||
+                   (rsp.geometry_mode & G_LIGHTING_ENGINE_EXT)));
+        if (diagnostic_lighting_engine) {
+            sStereoDiagnostics.vertices_lighting_engine[diagnostic_eye] += n_vertices;
+        }
+    }
 
     Vec3f globalLightCached[2];
     Vec3f vertexColorCached;
@@ -936,10 +1080,57 @@ static void OPTIMIZE_O3 gfx_sp_vertex(size_t n_vertices, size_t dest_index, cons
     __m128 mat3 = _mm_load_ps(rsp.MP_matrix[3]);
 #endif
 
+#ifndef __SSE__
+    /* The Quest path uses the scalar projection below. Cache the matrix once
+     * per vertex-load command; it is immutable for the whole command. */
+    const float m00 = rsp.MP_matrix[0][0], m01 = rsp.MP_matrix[0][1], m02 = rsp.MP_matrix[0][2], m03 = rsp.MP_matrix[0][3];
+    const float m10 = rsp.MP_matrix[1][0], m11 = rsp.MP_matrix[1][1], m12 = rsp.MP_matrix[1][2], m13 = rsp.MP_matrix[1][3];
+    const float m20 = rsp.MP_matrix[2][0], m21 = rsp.MP_matrix[2][1], m22 = rsp.MP_matrix[2][2], m23 = rsp.MP_matrix[2][3];
+    const float m30 = rsp.MP_matrix[3][0], m31 = rsp.MP_matrix[3][1], m32 = rsp.MP_matrix[3][2], m33 = rsp.MP_matrix[3][3];
+#endif
+
     for (size_t i = 0; i < n_vertices; i++, dest_index++) {
         const Vtx_t *v = &vertices[i].v;
         const Vtx_tn *vn = &vertices[i].n;
-        struct GfxVertex *d = &rsp.loaded_vertices[dest_index];
+        const size_t output_index = dest_index;
+        struct GfxVertex *d = &rsp.loaded_vertices[output_index];
+        const size_t stereo_serial = sStereoVertexSerial++;
+        struct StereoVertexCacheEntry *stereo_cache_entry =
+            stereo_serial < MAX_STEREO_VERTEX_CACHE
+                ? &sStereoVertexCache[stereo_serial]
+                : NULL;
+        const bool stereo_cache_reuse =
+            sStereoEye == 1 && sStereoCacheValid &&
+            stereo_cache_entry != NULL && stereo_serial < sStereoVertexCount &&
+            stereo_cache_entry->source == &vertices[i] &&
+            stereo_cache_entry->dest_index == output_index &&
+            stereo_cache_entry->lua_vertex_color == luaVertexColor;
+        if (sStereoEye == 1) {
+#if GFX_STEREO_DIAGNOSTICS
+            if (stereo_cache_reuse) {
+                sStereoDiagnostics.cache_hits++;
+            } else {
+                sStereoDiagnostics.cache_misses++;
+                if (!sStereoCacheValid) {
+                    sStereoDiagnostics.cache_miss_no_valid++;
+                } else if (stereo_cache_entry == NULL ||
+                           stereo_serial >= sStereoVertexCount) {
+                    sStereoDiagnostics.cache_serial_mismatches++;
+                } else if (stereo_cache_entry->source != &vertices[i]) {
+                    sStereoDiagnostics.cache_source_mismatches++;
+                } else if (stereo_cache_entry->dest_index != output_index) {
+                    sStereoDiagnostics.cache_dest_mismatches++;
+                } else if (stereo_cache_entry->lua_vertex_color != luaVertexColor) {
+                    sStereoDiagnostics.cache_lua_mismatches++;
+                }
+            }
+#endif
+            if (!stereo_cache_reuse) {
+                // A miss means the display list did not replay identically.
+                // Fall back to the original path for the entire remaining eye.
+                sStereoCacheValid = false;
+            }
+        }
 
 #ifdef __SSE__
         __m128 ob0 = _mm_set1_ps(v->ob[0]);
@@ -952,19 +1143,55 @@ static void OPTIMIZE_O3 gfx_sp_vertex(size_t n_vertices, size_t dest_index, cons
         float z = pos[2];
         float w = pos[3];
 #else
-        float x = v->ob[0] * rsp.MP_matrix[0][0] + v->ob[1] * rsp.MP_matrix[1][0] + v->ob[2] * rsp.MP_matrix[2][0] + rsp.MP_matrix[3][0];
-        float y = v->ob[0] * rsp.MP_matrix[0][1] + v->ob[1] * rsp.MP_matrix[1][1] + v->ob[2] * rsp.MP_matrix[2][1] + rsp.MP_matrix[3][1];
-        float z = v->ob[0] * rsp.MP_matrix[0][2] + v->ob[1] * rsp.MP_matrix[1][2] + v->ob[2] * rsp.MP_matrix[2][2] + rsp.MP_matrix[3][2];
-        float w = v->ob[0] * rsp.MP_matrix[0][3] + v->ob[1] * rsp.MP_matrix[1][3] + v->ob[2] * rsp.MP_matrix[2][3] + rsp.MP_matrix[3][3];
+        float x = v->ob[0] * m00 + v->ob[1] * m10 + v->ob[2] * m20 + m30;
+        float y = v->ob[0] * m01 + v->ob[1] * m11 + v->ob[2] * m21 + m31;
+        float z = v->ob[0] * m02 + v->ob[1] * m12 + v->ob[2] * m22 + m32;
+        float w = v->ob[0] * m03 + v->ob[1] * m13 + v->ob[2] * m23 + m33;
 #endif
 
         x = gfx_adjust_x_for_aspect_ratio(x);
+
+        if (stereo_cache_reuse) {
+            // Projection, clip rejection, and fog remain eye-specific. Every
+            // other loaded-vertex result is identical for the two eye passes.
+            short U = stereo_cache_entry->u;
+            short V = stereo_cache_entry->v;
+            d->u = U;
+            d->v = V;
+            d->color = stereo_cache_entry->color;
+            d->clip_rej = 0;
+            if (x < -w) d->clip_rej |= 1;
+            if (x > w) d->clip_rej |= 2;
+            if (y < -w) d->clip_rej |= 4;
+            if (y > w) d->clip_rej |= 8;
+            if (z < -w) d->clip_rej |= 16;
+            if (z > w) d->clip_rej |= 32;
+            d->x = x;
+            d->y = y;
+            d->z = z;
+            d->w = w;
+            if (!(fog_disabled_for_vr) &&
+                (rsp.geometry_mode & G_FOG)) {
+                if (fabsf(w) < 0.001f) w = 0.001f;
+                float winv = 1.0f / w;
+                if (winv < 0.0f) winv = 32767.0f;
+                z -= sDepthZSub;
+                z *= sDepthZMult;
+                z += sDepthZAdd;
+                float fog_z = z * winv * rsp.fog_mul * gFogIntensity + rsp.fog_offset;
+                if (fog_z < 0) fog_z = 0;
+                if (fog_z > 255) fog_z = 255;
+                d->fog_z = fog_z;
+            }
+            d->world_geometry = stereo_cache_entry->world_geometry;
+            continue;
+        }
 
         short U = v->tc[0] * rsp.texture_scaling_factor.s >> 16;
         short V = v->tc[1] * rsp.texture_scaling_factor.t >> 16;
 
         // are we on affect all shaded surfaces mode and on a vertex colorable surface
-        bool affectAllVertexColored = (le_get_mode() == LE_MODE_AFFECT_ALL_SHADED_AND_COLORED && luaVertexColor);
+        bool affectAllVertexColored = (lighting_engine_mode == LE_MODE_AFFECT_ALL_SHADED_AND_COLORED && luaVertexColor);
 
         if (rsp.geometry_mode & G_LIGHTING) {
             if (rsp.lights_changed) {
@@ -1093,7 +1320,7 @@ static void OPTIMIZE_O3 gfx_sp_vertex(size_t n_vertices, size_t dest_index, cons
             }
 
             // if lighting engine is enabled and either we want to affect all shaded surfaces or the lighting engine geometry mode is on
-            if (le_is_enabled() && luaVertexColor && ((le_get_mode() != LE_MODE_AFFECT_ONLY_GEOMETRY_MODE) || (rsp.geometry_mode & G_LIGHTING_ENGINE_EXT))) {
+            if (lighting_engine_enabled && luaVertexColor && ((lighting_engine_mode != LE_MODE_AFFECT_ONLY_GEOMETRY_MODE) || (rsp.geometry_mode & G_LIGHTING_ENGINE_EXT))) {
                 Color color = { gLEAmbientColor[0], gLEAmbientColor[1], gLEAmbientColor[2] };
 
                 Vec3f vpos    = { v->ob[0], v->ob[1], v->ob[2] };
@@ -1113,7 +1340,7 @@ static void OPTIMIZE_O3 gfx_sp_vertex(size_t n_vertices, size_t dest_index, cons
                 d->color.b *= color[2] / 255.0f;
             }
         // if lighting engine is enabled and we should affect all vertex colored surfaces or the lighting engine geometry mode is on
-        } else if (le_is_enabled() && !(rsp.geometry_mode & G_LIGHT_MAP_EXT) && (affectAllVertexColored || (rsp.geometry_mode & G_LIGHTING_ENGINE_EXT))) {
+        } else if (lighting_engine_enabled && !(rsp.geometry_mode & G_LIGHT_MAP_EXT) && (affectAllVertexColored || (rsp.geometry_mode & G_LIGHTING_ENGINE_EXT))) {
             Color color = { gLEAmbientColor[0], gLEAmbientColor[1], gLEAmbientColor[2] };
 
             Vec3f vpos = { v->ob[0], v->ob[1], v->ob[2] };
@@ -1180,7 +1407,7 @@ static void OPTIMIZE_O3 gfx_sp_vertex(size_t n_vertices, size_t dest_index, cons
         d->z = z;
         d->w = w;
 
-        if (!(configVrDisableFog && vr_is_active()) &&
+        if (!(fog_disabled_for_vr) &&
             (rsp.geometry_mode & G_FOG)) {
             if (fabsf(w) < 0.001f) {
                 // To avoid division by zero
@@ -1207,10 +1434,23 @@ static void OPTIMIZE_O3 gfx_sp_vertex(size_t n_vertices, size_t dest_index, cons
         }
 
         d->world_geometry = luaVertexColor;
+        if (sStereoEye == 0 && stereo_cache_entry != NULL) {
+            stereo_cache_entry->source = &vertices[i];
+            stereo_cache_entry->dest_index = (uint8_t)output_index;
+            stereo_cache_entry->lua_vertex_color = luaVertexColor;
+            stereo_cache_entry->u = d->u;
+            stereo_cache_entry->v = d->v;
+            stereo_cache_entry->color = d->color;
+            stereo_cache_entry->world_geometry = d->world_geometry;
+        }
     }
 }
 
 static void OPTIMIZE_O3 gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
+    const int diagnostic_eye = gfx_stereo_diagnostic_eye();
+    if (diagnostic_eye >= 0) {
+        sStereoDiagnostics.triangles[diagnostic_eye]++;
+    }
     struct GfxVertex *v1 = &rsp.loaded_vertices[vtx1_idx];
     struct GfxVertex *v2 = &rsp.loaded_vertices[vtx2_idx];
     struct GfxVertex *v3 = &rsp.loaded_vertices[vtx3_idx];
@@ -1218,14 +1458,25 @@ static void OPTIMIZE_O3 gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t 
 
     if (v1->clip_rej & v2->clip_rej & v3->clip_rej) {
         // The whole triangle lies outside the visible area
+        if (diagnostic_eye >= 0) {
+            sStereoDiagnostics.triangles_clip_rejected[diagnostic_eye]++;
+        }
         return;
     }
 
     if ((rsp.geometry_mode & G_CULL_BOTH) != 0) {
-        float dx1 = v1->x / (v1->w) - v2->x / (v2->w);
-        float dy1 = v1->y / (v1->w) - v2->y / (v2->w);
-        float dx2 = v3->x / (v3->w) - v2->x / (v2->w);
-        float dy2 = v3->y / (v3->w) - v2->y / (v2->w);
+        // Compute each projected coordinate once. These are the same divisions
+        // as before, but shared by the four edge expressions below.
+        const float v1x = v1->x / (v1->w);
+        const float v1y = v1->y / (v1->w);
+        const float v2x = v2->x / (v2->w);
+        const float v2y = v2->y / (v2->w);
+        const float v3x = v3->x / (v3->w);
+        const float v3y = v3->y / (v3->w);
+        float dx1 = v1x - v2x;
+        float dy1 = v1y - v2y;
+        float dx2 = v3x - v2x;
+        float dy2 = v3y - v2y;
         float cross = dx1 * dy2 - dy1 * dx2;
 
         if ((v1->w < 0) ^ (v2->w < 0) ^ (v3->w < 0)) {
@@ -1241,10 +1492,20 @@ static void OPTIMIZE_O3 gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t 
 
         switch (rsp.geometry_mode & G_CULL_BOTH) {
             case G_CULL_FRONT:
-                if (cross <= 0) return;
+                if (cross <= 0) {
+                    if (diagnostic_eye >= 0) {
+                        sStereoDiagnostics.triangles_cull_rejected[diagnostic_eye]++;
+                    }
+                    return;
+                }
                 break;
             case G_CULL_BACK:
-                if (cross >= 0) return;
+                if (cross >= 0) {
+                    if (diagnostic_eye >= 0) {
+                        sStereoDiagnostics.triangles_cull_rejected[diagnostic_eye]++;
+                    }
+                    return;
+                }
                 break;
             case G_CULL_BOTH:
                 // Why is this even an option?
@@ -1256,21 +1517,21 @@ static void OPTIMIZE_O3 gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t 
 
     bool depth_test = (rsp.geometry_mode & G_ZBUFFER) == G_ZBUFFER;
     if (depth_test != rendering_state.depth_test) {
-        gfx_flush();
+        gfx_flush_reason(GFX_FLUSH_DEPTH_TEST);
         gfx_rapi->set_depth_test(depth_test);
         rendering_state.depth_test = depth_test;
     }
 
     bool z_upd = (rdp.other_mode_l & Z_UPD) == Z_UPD;
     if (z_upd != rendering_state.depth_mask) {
-        gfx_flush();
+        gfx_flush_reason(GFX_FLUSH_DEPTH_MASK);
         gfx_rapi->set_depth_mask(z_upd);
         rendering_state.depth_mask = z_upd;
     }
 
     bool zmode_decal = (rdp.other_mode_l & ZMODE_DEC) == ZMODE_DEC;
     if (zmode_decal != rendering_state.decal_mode) {
-        gfx_flush();
+        gfx_flush_reason(GFX_FLUSH_ZMODE_DECAL);
         gfx_rapi->set_zmode_decal(zmode_decal);
         rendering_state.decal_mode = zmode_decal;
     }
@@ -1279,13 +1540,13 @@ static void OPTIMIZE_O3 gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t 
         static uint32_t x_adjust_4by3_prev;
         if (memcmp(&rdp.viewport, &rendering_state.viewport, sizeof(rdp.viewport)) != 0
             || x_adjust_4by3_prev != gfx_current_dimensions.x_adjust_4by3) {
-            gfx_flush();
+            gfx_flush_reason(GFX_FLUSH_VIEWPORT);
             gfx_rapi->set_viewport(rdp.viewport.x + gfx_current_dimensions.x_adjust_4by3, rdp.viewport.y, rdp.viewport.width, rdp.viewport.height);
             rendering_state.viewport = rdp.viewport;
         }
         if (memcmp(&rdp.scissor, &rendering_state.scissor, sizeof(rdp.scissor)) != 0
             || x_adjust_4by3_prev != gfx_current_dimensions.x_adjust_4by3) {
-            gfx_flush();
+            gfx_flush_reason(GFX_FLUSH_SCISSOR);
             gfx_rapi->set_scissor(rdp.scissor.x + gfx_current_dimensions.x_adjust_4by3, rdp.scissor.y, rdp.scissor.width, rdp.scissor.height);
             rendering_state.scissor = rdp.scissor;
         }
@@ -1320,24 +1581,23 @@ static void OPTIMIZE_O3 gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t 
 
     struct ShaderProgram *prg = comb->prg;
     if (prg != rendering_state.shader_program) {
-        gfx_flush();
+        gfx_flush_reason(GFX_FLUSH_SHADER);
         gfx_rapi->unload_shader(rendering_state.shader_program);
         gfx_rapi->load_shader(prg);
         rendering_state.shader_program = prg;
     }
     if (cm->use_alpha != rendering_state.alpha_blend) {
-        gfx_flush();
+        gfx_flush_reason(GFX_FLUSH_ALPHA);
         gfx_rapi->set_use_alpha(cm->use_alpha);
         rendering_state.alpha_blend = cm->use_alpha;
     }
-    uint8_t num_inputs;
-    bool used_textures[2];
-    gfx_rapi->shader_get_info(prg, &num_inputs, used_textures);
+    const uint8_t num_inputs = comb->num_inputs;
+    const bool *used_textures = comb->used_textures;
 
     for (int32_t i = 0; i < 2; i++) {
         if (used_textures[i]) {
             if (rdp.textures_changed[i]) {
-                gfx_flush();
+                gfx_flush_reason(GFX_FLUSH_TEXTURE);
                 import_texture(i);
                 rdp.textures_changed[i] = false;
             }
@@ -1345,7 +1605,7 @@ static void OPTIMIZE_O3 gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t 
             struct TextureHashmapNode* tex = rendering_state.textures[i];
             if (tex) {
                 if (linear_filter != tex->linear_filter || rdp.texture_tile[i].cms != tex->cms || rdp.texture_tile[i].cmt != rendering_state.textures[i]->cmt) {
-                    gfx_flush();
+                    gfx_flush_reason(GFX_FLUSH_SAMPLER);
                     gfx_rapi->set_sampler_parameters(i, linear_filter, rdp.texture_tile[i].cms, rdp.texture_tile[i].cmt);
                     tex->linear_filter = linear_filter;
                     tex->cms = rdp.texture_tile[i].cms;
@@ -1356,6 +1616,29 @@ static void OPTIMIZE_O3 gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t 
     }
 
     bool z_is_from_0_to_1 = gfx_rapi->z_is_from_0_to_1();
+
+    /* These values are invariant for every vertex in this triangle. Keep
+     * them out of the inner vertex loop to avoid repeated tile/fog math on
+     * large mod maps without changing draw order or rendered output. */
+    uint32_t tex_width[2] = { 0, 0 };
+    uint32_t tex_height[2] = { 0, 0 };
+    int shifts[2] = { 0, 0 };
+    int shiftt[2] = { 0, 0 };
+    for (int32_t j = 0; j < 2; j++) {
+        if (used_textures[j]) {
+            tex_width[j] = (rdp.texture_tile[j].lrs - rdp.texture_tile[j].uls + 4) / 4;
+            tex_height[j] = (rdp.texture_tile[j].lrt - rdp.texture_tile[j].ult + 4) / 4;
+            shifts[j] = rdp.texture_tile[j].shifts;
+            shiftt[j] = rdp.texture_tile[j].shiftt;
+        }
+    }
+    const bool linear_filtering = configFiltering && ((rdp.other_mode_h & (3U << G_MDSFT_TEXTFILT)) != G_TF_POINT);
+    float fog_r = 0.0f, fog_g = 0.0f, fog_b = 0.0f;
+    if (cm->use_fog) {
+        fog_r = (rdp.fog_color.r / 255.0f) * (gFogColor[0] / 255.0f);
+        fog_g = (rdp.fog_color.g / 255.0f) * (gFogColor[1] / 255.0f);
+        fog_b = (rdp.fog_color.b / 255.0f) * (gFogColor[2] / 255.0f);
+    }
 
     for (int32_t i = 0; i < 3; i++) {
         float z = v_arr[i]->z, w = v_arr[i]->w;
@@ -1368,48 +1651,43 @@ static void OPTIMIZE_O3 gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t 
         buf_vbo[buf_vbo_len++] = w;
         for (int32_t j = 0; j < 2; j++) {
             if (used_textures[j]) {
-                uint32_t tex_width = (rdp.texture_tile[j].lrs - rdp.texture_tile[j].uls + 4) / 4;
-                uint32_t tex_height = (rdp.texture_tile[j].lrt - rdp.texture_tile[j].ult + 4) / 4;
+
                 float u = (v_arr[i]->u - rdp.texture_tile[j].uls * 8) / 32.0f;
                 float v = (v_arr[i]->v - rdp.texture_tile[j].ult * 8) / 32.0f;
 
-                int shifts = rdp.texture_tile[j].shifts;
-                int shiftt = rdp.texture_tile[j].shiftt;
+
                 UNUSED int masks = rdp.texture_tile[j].masks;
                 UNUSED int maskt = rdp.texture_tile[j].maskt;
-                if (shifts != 0) {
-                    if (shifts <= 10) {
-                        u /= 1 << shifts;
+                if (shifts[j] != 0) {
+                    if (shifts[j] <= 10) {
+                        u /= 1 << shifts[j];
                     } else {
-                        u *= 1 << (16 - shifts);
+                        u *= 1 << (16 - shifts[j]);
                     }
                 }
-                if (shiftt != 0) {
-                    if (shiftt <= 10) {
-                        v /= 1 << shiftt;
+                if (shiftt[j] != 0) {
+                    if (shiftt[j] <= 10) {
+                        v /= 1 << shiftt[j];
                     } else {
-                        v *= 1 << (16 - shiftt);
+                        v *= 1 << (16 - shiftt[j]);
                     }
                 }
 
-                if ((rdp.other_mode_h & (3U << G_MDSFT_TEXTFILT)) != G_TF_POINT) {
+                if (linear_filtering) {
                     // Linear filter adds 0.5f to the coordinates (why?)
                     u += 0.5f;
                     v += 0.5f;
                 }
 
-                buf_vbo[buf_vbo_len++] = u / tex_width;
-                buf_vbo[buf_vbo_len++] = v / tex_height;
+                buf_vbo[buf_vbo_len++] = u / tex_width[j];
+                buf_vbo[buf_vbo_len++] = v / tex_height[j];
             }
         }
 
         if (cm->use_fog) {
-            f32 r = gFogColor[0] / 255.0f;
-            f32 g = gFogColor[1] / 255.0f;
-            f32 b = gFogColor[2] / 255.0f;
-            buf_vbo[buf_vbo_len++] = (rdp.fog_color.r / 255.0f) * r;
-            buf_vbo[buf_vbo_len++] = (rdp.fog_color.g / 255.0f) * g;
-            buf_vbo[buf_vbo_len++] = (rdp.fog_color.b / 255.0f) * b;
+            buf_vbo[buf_vbo_len++] = fog_r;
+            buf_vbo[buf_vbo_len++] = fog_g;
+            buf_vbo[buf_vbo_len++] = fog_b;
             buf_vbo[buf_vbo_len++] = v_arr[i]->fog_z / 255.0f; // fog factor (not alpha)
         }
 
@@ -1481,14 +1759,20 @@ static void OPTIMIZE_O3 gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t 
         buf_vbo[buf_vbo_len++] = color->b / 255.0f;
         buf_vbo[buf_vbo_len++] = color->a / 255.0f;*/
     }
+    if (diagnostic_eye >= 0) {
+        sStereoDiagnostics.triangles_submitted[diagnostic_eye]++;
+    }
     if (++buf_vbo_num_tris == MAX_BUFFERED) {
-        gfx_flush();
+        gfx_flush_reason(GFX_FLUSH_BUFFER_FULL);
     }
 }
 
 static void gfx_sp_geometry_mode(uint32_t clear, uint32_t set) {
-    rsp.geometry_mode &= ~clear;
-    rsp.geometry_mode |= set;
+    const uint32_t next_mode = (rsp.geometry_mode & ~clear) | set;
+    if (next_mode == rsp.geometry_mode) {
+        return;
+    }
+    rsp.geometry_mode = next_mode;
 }
 
 static void gfx_calc_and_set_viewport(const Vp_t *viewport) {
@@ -1625,6 +1909,9 @@ static void gfx_sp_moveword(uint8_t index, uint16_t offset, uint32_t data) {
 }
 
 static void gfx_sp_texture(uint16_t sc, uint16_t tc, UNUSED uint8_t level, UNUSED uint8_t tile, UNUSED uint8_t on) {
+    if (rsp.texture_scaling_factor.s == sc && rsp.texture_scaling_factor.t == tc) {
+        return;
+    }
     rsp.texture_scaling_factor.s = sc;
     rsp.texture_scaling_factor.t = tc;
 }
@@ -1644,36 +1931,55 @@ static void gfx_dp_set_scissor(UNUSED uint32_t mode, uint32_t ulx, uint32_t uly,
 }
 
 static void gfx_dp_set_texture_image(UNUSED uint32_t format, uint32_t size, UNUSED uint32_t width, const void* addr) {
+    if (rdp.texture_to_load.addr == addr && rdp.texture_to_load.siz == size) {
+        return;
+    }
     rdp.texture_to_load.addr = addr;
     rdp.texture_to_load.siz = size;
 }
 
 static void gfx_dp_set_tile(uint8_t fmt, uint32_t siz, uint32_t line, uint32_t tmem, uint8_t tile, uint32_t palette, uint32_t cmt, uint32_t maskt, uint32_t shiftt, uint32_t cms, uint32_t masks, uint32_t shifts) {
+    const uint32_t line_size_bytes = line * 8;
+    const uint8_t texture_index = (tile == G_TX_LOADTILE ? tmem / 256 : (tile == G_TX_LOADTILE_6_UNKNOWN ? 1 : 0));
+    struct TextureTile *const current = &rdp.texture_tile[tile];
+    if (current->fmt == fmt && current->siz == siz &&
+        current->cms == cms && current->cmt == cmt &&
+        current->shifts == shifts && current->shiftt == shiftt &&
+        current->masks == masks && current->maskt == maskt &&
+        current->line_size_bytes == line_size_bytes &&
+        current->tmem == tmem && current->palette == palette &&
+        current->index == texture_index) {
+        return;
+    }
     const bool textureInterpretationChanged =
         tile < MAX_TEXTURES &&
-        (rdp.texture_tile[tile].fmt != fmt ||
-         rdp.texture_tile[tile].siz != siz ||
-         rdp.texture_tile[tile].line_size_bytes != line * 8 ||
-         rdp.texture_tile[tile].palette != palette);
-    rdp.texture_tile[tile].fmt = fmt;
-    rdp.texture_tile[tile].siz = siz;
-    rdp.texture_tile[tile].cms = cms;
-    rdp.texture_tile[tile].cmt = cmt;
-    rdp.texture_tile[tile].shifts = shifts;
-    rdp.texture_tile[tile].shiftt = shiftt;
-    rdp.texture_tile[tile].masks = masks;
-    rdp.texture_tile[tile].maskt = maskt;
-    rdp.texture_tile[tile].line_size_bytes = line * 8;
-    rdp.texture_tile[tile].tmem = tmem;
-    rdp.texture_tile[tile].palette = palette;
+        (current->fmt != fmt || current->siz != siz ||
+         current->line_size_bytes != line_size_bytes || current->palette != palette);
+    current->fmt = fmt;
+    current->siz = siz;
+    current->cms = cms;
+    current->cmt = cmt;
+    current->shifts = shifts;
+    current->shiftt = shiftt;
+    current->masks = masks;
+    current->maskt = maskt;
+    current->line_size_bytes = line_size_bytes;
+    current->tmem = tmem;
+    current->palette = palette;
     // For some reason toad player's face breaks without this line, everything else is fine though
-    rdp.texture_tile[tile].index = (tile == G_TX_LOADTILE ? tmem/256 : (tile == G_TX_LOADTILE_6_UNKNOWN ? 1 : 0));
+    current->index = texture_index;
     if (!sOnlyTextureChangeOnAddrChange && textureInterpretationChanged) {
         rdp.textures_changed[tile] = true;
     }
 }
 
 static void gfx_dp_set_tile_size(uint8_t tile, uint16_t uls, uint16_t ult, uint16_t lrs, uint16_t lrt) {
+    if (rdp.texture_tile[tile].uls == uls &&
+        rdp.texture_tile[tile].ult == ult &&
+        rdp.texture_tile[tile].lrs == lrs &&
+        rdp.texture_tile[tile].lrt == lrt) {
+        return;
+    }
     rdp.texture_tile[tile].uls = uls;
     rdp.texture_tile[tile].ult = ult;
     rdp.texture_tile[tile].lrs = lrs;
@@ -1750,6 +2056,13 @@ static void gfx_dp_load_tile(uint8_t tile, uint32_t uls, uint32_t ult, uint32_t 
 
 static void gfx_dp_set_combine_mode(uint32_t rgb1, uint32_t alpha1, uint32_t rgb2, uint32_t alpha2) {
     //printf(">>> combine: %08x %08x %08x %08x\n", rgb1, alpha1, rgb2, alpha2);
+    if (rdp.combine_mode.rgb1 == rgb1 &&
+        rdp.combine_mode.alpha1 == alpha1 &&
+        rdp.combine_mode.rgb2 == rgb2 &&
+        rdp.combine_mode.alpha2 == alpha2 &&
+        rdp.combine_mode.flags == 0) {
+        return;
+    }
     memset(&rdp.combine_mode, 0, sizeof(struct CombineMode));
 
     rdp.combine_mode.rgb1 = rgb1;
@@ -1959,19 +2272,28 @@ static void gfx_dp_fill_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t
 }
 
 static void gfx_dp_set_z_image(void *z_buf_address) {
+    if (rdp.z_buf_address == z_buf_address) {
+        return;
+    }
     rdp.z_buf_address = z_buf_address;
 }
 
 static void gfx_dp_set_color_image(UNUSED uint32_t format, UNUSED uint32_t size, UNUSED uint32_t width, void* address) {
+    if (rdp.color_image_address == address) {
+        return;
+    }
     rdp.color_image_address = address;
 }
 
 static void gfx_sp_set_other_mode(uint32_t shift, uint32_t num_bits, uint64_t mode) {
     uint64_t mask = (((uint64_t)1 << num_bits) - 1) << shift;
     uint64_t om = rdp.other_mode_l | ((uint64_t)rdp.other_mode_h << 32);
-    om = (om & ~mask) | mode;
-    rdp.other_mode_l = (uint32_t)om;
-    rdp.other_mode_h = (uint32_t)(om >> 32);
+    const uint64_t next_mode = (om & ~mask) | mode;
+    if (next_mode == om) {
+        return;
+    }
+    rdp.other_mode_l = (uint32_t)next_mode;
+    rdp.other_mode_h = (uint32_t)(next_mode >> 32);
 }
 
 static inline void *seg_addr(uintptr_t w1) {
@@ -1986,6 +2308,11 @@ static void OPTIMIZE_O3 gfx_run_dl(Gfx* cmd) {
 
     for (;;) {
         uint32_t opcode = cmd->words.w0 >> 24;
+        const int diagnostic_eye = gfx_stereo_diagnostic_eye();
+        if (diagnostic_eye >= 0) {
+            sStereoDiagnostics.display_list_commands[diagnostic_eye]++;
+            sStereoDiagnostics.opcode_counts[diagnostic_eye][opcode]++;
+        }
 
         switch (opcode) {
             // RSP commands:
@@ -2030,6 +2357,9 @@ static void OPTIMIZE_O3 gfx_run_dl(Gfx* cmd) {
 #endif
                 break;
             case G_VTX:
+                if (diagnostic_eye >= 0) {
+                    sStereoDiagnostics.vertex_commands[diagnostic_eye]++;
+                }
 #ifdef F3DEX_GBI_2
                 gfx_sp_vertex(C0(12, 8), C0(1, 7) - C0(12, 8), seg_addr(cmd->words.w1), true);
 #elif defined(F3DEX_GBI) || defined(F3DLP_GBI)
@@ -2039,6 +2369,9 @@ static void OPTIMIZE_O3 gfx_run_dl(Gfx* cmd) {
 #endif
                 break;
             case G_DL:
+                if (diagnostic_eye >= 0) {
+                    sStereoDiagnostics.display_list_calls[diagnostic_eye]++;
+                }
                 if (C0(16, 1) == 0) {
                     // Push return address
                     gfx_run_dl((Gfx *)seg_addr(cmd->words.w1));
@@ -2216,6 +2549,9 @@ static void OPTIMIZE_O3 gfx_run_dl(Gfx* cmd) {
                 gfx_dp_set_color_image(C0(21, 3), C0(19, 2), C0(0, 11), seg_addr(cmd->words.w1));
                 break;
             default:
+                if (diagnostic_eye >= 0) {
+                    sStereoDiagnostics.unknown_commands[diagnostic_eye]++;
+                }
                 ext_gfx_run_dl(cmd);
                 break;
         }
@@ -2223,8 +2559,10 @@ static void OPTIMIZE_O3 gfx_run_dl(Gfx* cmd) {
     }
 }
 
+
 static void gfx_sp_reset(void) {
     rsp.modelview_matrix_stack_size = 1;
+    sLocalToWorldMatrixValid = false;
     rsp.current_num_lights = 2;
     rsp.lights_changed = true;
     num_gfx_states = 0;
@@ -2428,10 +2766,40 @@ void gfx_start_frame(void) {
     gfx_current_dimensions.x_adjust_ratio = (4.0f / 3.0f) / gfx_current_dimensions.aspect_ratio;
 }
 
+void gfx_get_stereo_diagnostics(struct GfxStereoDiagnostics *out) {
+    if (out != NULL) {
+        memcpy(out, &sStereoDiagnostics, sizeof(*out));
+    }
+}
+
+void gfx_set_stereo_eye(uint32_t eye) {
+    sStereoEye = eye;
+    if (eye == 0) {
+        // Begin a new two-eye submission. The first eye repopulates the cache.
+        sStereoVertexSerial = 0;
+        sStereoVertexCount = 0;
+        sStereoCacheValid = true;
+    } else if (eye == 1) {
+        // The second eye must replay the same vertex loads in the same order.
+        sStereoVertexSerial = 0;
+        sStereoCacheValid = sStereoVertexCount > 0 &&
+            sStereoVertexCount <= MAX_STEREO_VERTEX_CACHE;
+    } else {
+        sStereoVertexSerial = 0;
+        sStereoVertexCount = 0;
+        sStereoCacheValid = false;
+    }
+}
+
 void gfx_run(Gfx *commands) {
+    const int diagnostic_eye = gfx_stereo_diagnostic_eye();
+    if (diagnostic_eye >= 0) {
+        sStereoDiagnostics.gfx_runs[diagnostic_eye]++;
+    }
     gfx_sp_reset();
 
     sHasInverseCameraMatrix = false;
+    sLocalToWorldMatrixValid = false;
 
     //puts("New frame");
 
@@ -2444,6 +2812,22 @@ void gfx_run(Gfx *commands) {
     //double t0 = gfx_wapi->get_time();
     gfx_rapi->start_frame();
     gfx_run_dl(commands);
+    if (sStereoEye == 0) {
+        sStereoVertexCount = sStereoVertexSerial;
+        if (sStereoVertexCount > MAX_STEREO_VERTEX_CACHE) {
+            sStereoCacheValid = false;
+            sStereoDiagnostics.cache_overflow_frames++;
+        }
+    } else if (sStereoEye == 1) {
+        sStereoDiagnostics.cache_replay_attempt_frames++;
+        if (sStereoVertexSerial != sStereoVertexCount) {
+            // Never reuse partial results when the two display-list passes differ.
+            sStereoCacheValid = false;
+            sStereoDiagnostics.cache_count_mismatch_frames++;
+        } else if (sStereoCacheValid) {
+            sStereoDiagnostics.cache_replay_success_frames++;
+        }
+    }
 }
 
 void gfx_end_frame_render(void) {
@@ -2714,11 +3098,17 @@ static void gfx_sp_load_or_save_state(uint8_t cmd, uint32_t state) {
         if (state & G_STATE_TEXTURES) {
             rsp.texture_scaling_factor = gfx_state->rsp.texture_scaling_factor;
             rdp.texture_to_load = gfx_state->rdp.texture_to_load;
+            const bool texture_state_changed =
+                memcmp(rdp.palette, gfx_state->rdp.palette, sizeof(rdp.palette)) != 0 ||
+                memcmp(rdp.texture_tile, gfx_state->rdp.texture_tile, sizeof(rdp.texture_tile)) != 0 ||
+                memcmp(rdp.loaded_texture, gfx_state->rdp.loaded_texture, sizeof(rdp.loaded_texture)) != 0;
             memcpy(rdp.palette, gfx_state->rdp.palette, sizeof(rdp.palette));
             memcpy(rdp.texture_tile, gfx_state->rdp.texture_tile, sizeof(rdp.texture_tile));
             memcpy(rdp.loaded_texture, gfx_state->rdp.loaded_texture, sizeof(rdp.loaded_texture));
-            for (s32 i = 0; i != ARRAY_COUNT(rdp.textures_changed); ++i) {
-                rdp.textures_changed[i] = true;
+            if (texture_state_changed) {
+                for (s32 i = 0; i != ARRAY_COUNT(rdp.textures_changed); ++i) {
+                    rdp.textures_changed[i] = true;
+                }
             }
         }
         if (state & G_STATE_LIGHTS) {

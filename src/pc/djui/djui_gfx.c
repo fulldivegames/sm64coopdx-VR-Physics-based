@@ -294,9 +294,8 @@ bool djui_gfx_add_clipping_specific(struct DjuiBase* base, f32 dX, f32 dY, f32 d
     f32 dClipX2 = fmin(fmax((dX - (clipX2 - dW)) / dW, 0), 1);
     f32 dClipY2 = fmin(fmax((dY - (clipY2 - dH)) / dH, 0), 1);
 
-    // Clipping is persistent renderer state. Always update it for every visible
-    // primitive, including the all-zero case, so a fully visible glyph cannot
-    // inherit the partial clipping from the preceding glyph while scrolling.
+    // Texture clipping is renderer state. Always emit the command so a
+    // fully visible glyph clears the previous glyph's clip rectangle.
     gDPSetTextureClippingDjui(
         gDisplayListHead++,
         (u8)(dClipX1 * 255),

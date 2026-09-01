@@ -34,6 +34,7 @@
 #include "pc/network/coopnet/coopnet.h"
 #include "pc/network/packets/packet.h"
 #include "pc/platform.h"
+#include "pc/utils/misc.h"
 #include "pc/vr/vr.h"
 
 static void vr_special_moves_reset_big_hands(void);
@@ -983,6 +984,41 @@ static bool vr_hand_interaction_resolve_big_hands_collision(
     return collided;
 }
 
+bool vr_hand_interaction_resolve_headset_camera_position(
+    Vec3f position
+) {
+    if (position == NULL ||
+        !vr_is_active() ||
+        configVrCameraMode != VR_CAMERA_MODE_FIRST_PERSON) {
+        return false;
+    }
+
+    bool corrected = false;
+    // Keep this guard wall-only. Floor and ceiling resolution belongs to
+    // Mario movement; changing it here would alter crouch and jump height.
+    for (u32 pass = 0; pass < 2; pass++) {
+        Vec3f before;
+        vec3f_copy(before, position);
+        struct WallCollisionData wallData = { 0 };
+        resolve_and_return_wall_collisions_data(
+            position,
+            0.0f,
+            VR_HEADSET_INTERACTION_RADIUS,
+            &wallData
+        );
+        const f32 dx = position[0] - before[0];
+        const f32 dy = position[1] - before[1];
+        const f32 dz = position[2] - before[2];
+        const f32 displacementSquared = dx * dx + dy * dy + dz * dz;
+        if (!isfinite(displacementSquared) ||
+            displacementSquared < 0.01f) {
+            break;
+        }
+        corrected = true;
+    }
+    return corrected;
+}
+
 static void vr_hand_interaction_sync_climb_collider_to_headset(
     struct MarioState* mario
 );
@@ -1496,6 +1532,12 @@ bool vr_hand_interaction_is_hammer_charge_object(
     struct Object* object
 ) {
     return object != NULL && object == sVrHammerChargeObject;
+}
+
+bool vr_hand_interaction_is_hammer_suit_shell_object(
+    struct Object* object
+) {
+    return object != NULL && object == sVrHammerSuitShellObject;
 }
 
 u32 vr_hand_interaction_get_tracked_held_hand(
@@ -4342,16 +4384,24 @@ static void vr_hand_interaction_sync_climb_collider_to_headset(
         headsetDy * headsetDy +
         headsetDz * headsetDz;
     if (isfinite(headsetCorrectionSquared) &&
-        headsetCorrectionSquared > 0.01f &&
-        headsetCorrectionSquared <=
-            VR_CLIMB_MAX_ENVIRONMENT_CORRECTION *
-            VR_CLIMB_MAX_ENVIRONMENT_CORRECTION) {
+        headsetCorrectionSquared > 0.01f) {
+        // A large correction can occur when a headset sample crosses a thin
+        // wall or transitions between differently angled triangles. The old
+        // path discarded corrections over the safety bound, leaving the HMD
+        // inside the surface until release. Apply the bounded portion now and
+        // let the next frame finish the correction without a teleport.
+        const f32 correctionLength = sqrtf(headsetCorrectionSquared);
+        const f32 correctionScale =
+            correctionLength > VR_CLIMB_MAX_ENVIRONMENT_CORRECTION
+                ? VR_CLIMB_MAX_ENVIRONMENT_CORRECTION / correctionLength
+                : 1.0f;
         vr_hand_interaction_prepare_climb_offset_update();
         for (u32 axis = 0; axis < 3; axis++) {
             const f32 correction =
-                correctedHeadsetPosition[axis] - headsetPosition[axis];
+                (correctedHeadsetPosition[axis] - headsetPosition[axis]) *
+                correctionScale;
             sVrPhysicalClimbCameraOffset[axis] += correction;
-            headsetPosition[axis] = correctedHeadsetPosition[axis];
+            headsetPosition[axis] += correction;
         }
     }
 
@@ -6066,6 +6116,11 @@ static void vr_special_moves_reset_sonic_shoes(void) {
     sVrSonicShoesTrailValid = false;
     if (sVrSonicShoesMusic != NULL && sVrSonicShoesMusicFadeTimer == 0) {
         sVrSonicShoesMusicFadeTimer = VR_SONIC_SHOES_MUSIC_FADE_FRAMES;
+    } else if (sVrSonicShoesMusicLowered) {
+        // If the stream failed to load, or a new power-up replaces Shoes
+        // during an existing fade, never leave the stage music muted.
+        set_sequence_player_volume(SEQ_PLAYER_LEVEL, 1.0f);
+        sVrSonicShoesMusicLowered = false;
     }
 }
 
@@ -6653,6 +6708,32 @@ static bool vr_special_moves_spawn_big_hands_pickup(
     return true;
 }
 
+static bool vr_special_moves_spawn_box_reward(
+    enum VrBoxReward reward,
+    struct Object* parent,
+    struct Object* box
+) {
+    if (parent == NULL || box == NULL) {
+        return false;
+    }
+
+    const f32 x = box->oPosX;
+    const f32 y = box->oPosY + 65.0f;
+    const f32 z = box->oPosZ;
+    switch (reward) {
+        case VR_BOX_REWARD_FIRE_FLOWER:
+            return vr_special_moves_spawn_pickup(parent, x, y, z, 20.0f);
+        case VR_BOX_REWARD_HAMMER_SUIT:
+            return vr_special_moves_spawn_hammer_pickup(parent, x, y, z, 20.0f);
+        case VR_BOX_REWARD_SONIC_SHOES:
+            return vr_special_moves_spawn_sonic_shoes_pickup(parent, x, y, z, 20.0f);
+        case VR_BOX_REWARD_BIG_HANDS:
+            return vr_special_moves_spawn_big_hands_pickup(parent, x, y, z, 20.0f);
+        default:
+            return false;
+    }
+}
+
 enum VrBoxReward vr_special_moves_roll_box_reward(
     struct Object* box,
     struct MarioState* owner
@@ -6682,46 +6763,21 @@ enum VrBoxReward vr_special_moves_roll_box_reward(
     if (configVrSpawnPoolSonicShoes) {
         choices[choiceCount++] = VR_BOX_REWARD_SONIC_SHOES;
     }
-    if (configVrSpawnPoolBigHands) {
-        choices[choiceCount++] = VR_BOX_REWARD_BIG_HANDS;
-    }
     enum VrBoxReward choice = VR_BOX_REWARD_ORIGINAL;
-    if (choiceCount > 1 && (random_u16() & 1U) != 0) {
-        choice = choices[1 + random_u16() % (choiceCount - 1)];
-    }
     bool spawned = false;
-    if (choice == VR_BOX_REWARD_FIRE_FLOWER) {
-        spawned = vr_special_moves_spawn_pickup(
-            owner->marioObj,
-            box->oPosX,
-            box->oPosY + 65.0f,
-            box->oPosZ,
-            20.0f
-        );
-    } else if (choice == VR_BOX_REWARD_HAMMER_SUIT) {
-        spawned = vr_special_moves_spawn_hammer_pickup(
-            owner->marioObj,
-            box->oPosX,
-            box->oPosY + 65.0f,
-            box->oPosZ,
-            20.0f
-        );
-    } else if (choice == VR_BOX_REWARD_SONIC_SHOES) {
-        spawned = vr_special_moves_spawn_sonic_shoes_pickup(
-            owner->marioObj,
-            box->oPosX,
-            box->oPosY + 65.0f,
-            box->oPosZ,
-            20.0f
-        );
-    } else if (choice == VR_BOX_REWARD_BIG_HANDS) {
-        spawned = vr_special_moves_spawn_big_hands_pickup(
-            owner->marioObj,
-            box->oPosX,
-            box->oPosY + 65.0f,
-            box->oPosZ,
-            20.0f
-        );
+    if (choiceCount > 1 && (random_u16() & 1U) != 0) {
+        const u32 customCount = choiceCount - 1;
+        const u32 first = random_u16() % customCount;
+        for (u32 attempt = 0; attempt < customCount; attempt++) {
+            const enum VrBoxReward candidate =
+                choices[1 + ((first + attempt) % customCount)];
+            if (vr_special_moves_spawn_box_reward(
+                    candidate, owner->marioObj, box)) {
+                choice = candidate;
+                spawned = true;
+                break;
+            }
+        }
     }
     if (choice == VR_BOX_REWARD_ORIGINAL || spawned) {
         sVrRolledBoxReward = choice;
@@ -7208,14 +7264,19 @@ bool vr_special_moves_grant_sonic_shoes(void) {
     if (sVrSonicShoesMusic == NULL) {
         sVrSonicShoesMusic = audio_stream_load_path(musicPath);
     }
-    if (configVrSpecialFireFlowerMusic &&
-        sVrSonicShoesMusic != NULL) {
-        audio_stream_set_volume(sVrSonicShoesMusic, 1.0f);
+    if (configVrSpecialFireFlowerMusic) {
+        // Mute the stage player independently of the custom stream load. This
+        // keeps the Shoes effect deterministic even if an asset is missing.
         stop_cap_music();
         set_sequence_player_volume(SEQ_PLAYER_LEVEL, 0.0f);
         sVrSonicShoesMusicLowered = true;
-        audio_stream_set_looping(sVrSonicShoesMusic, false);
-        audio_stream_play(sVrSonicShoesMusic, true, 1.0f);
+        if (sVrSonicShoesMusic != NULL) {
+            audio_stream_set_volume(sVrSonicShoesMusic, 1.0f);
+            audio_stream_set_looping(sVrSonicShoesMusic, false);
+            audio_stream_play(sVrSonicShoesMusic, true, 1.0f);
+        } else {
+            LOG_ERROR("Sonic Shoes music asset could not be loaded: %s", musicPath);
+        }
     }
     return true;
 }
@@ -7623,15 +7684,16 @@ static void vr_special_moves_update_hammer_suit_shell(
     // body samples. Copying the shell's own previous transform made it trail
     // Mario by a simulation update and produced the same intermittent jitter
     // that physically held actors used to show in third person.
+    const f32 shellBackOffset = 8.0f;
     const s16 yaw = mario->marioObj->header.gfx.angle[1];
     const s16 previousYaw =
         mario->marioObj->header.gfx.prevAngle[1];
     sVrHammerSuitShellObject->oPosX =
-        mario->marioObj->header.gfx.pos[0] - sins(yaw) * 8.0f;
+        mario->marioObj->header.gfx.pos[0] - sins(yaw) * shellBackOffset;
     sVrHammerSuitShellObject->oPosY =
         mario->marioObj->header.gfx.pos[1] + 68.0f;
     sVrHammerSuitShellObject->oPosZ =
-        mario->marioObj->header.gfx.pos[2] - coss(yaw) * 8.0f;
+        mario->marioObj->header.gfx.pos[2] - coss(yaw) * shellBackOffset;
     sVrHammerSuitShellObject->oFaceAnglePitch = -0x4000;
     sVrHammerSuitShellObject->oFaceAngleYaw = yaw;
     sVrHammerSuitShellObject->oFaceAngleRoll = 0;
@@ -7639,12 +7701,12 @@ static void vr_special_moves_update_hammer_suit_shell(
     obj_update_gfx_pos_and_angle(sVrHammerSuitShellObject);
     sVrHammerSuitShellObject->header.gfx.prevPos[0] =
         mario->marioObj->header.gfx.prevPos[0] -
-        sins(previousYaw) * 8.0f;
+        sins(previousYaw) * shellBackOffset;
     sVrHammerSuitShellObject->header.gfx.prevPos[1] =
         mario->marioObj->header.gfx.prevPos[1] + 68.0f;
     sVrHammerSuitShellObject->header.gfx.prevPos[2] =
         mario->marioObj->header.gfx.prevPos[2] -
-        coss(previousYaw) * 8.0f;
+        coss(previousYaw) * shellBackOffset;
     sVrHammerSuitShellObject->header.gfx.prevAngle[0] = -0x4000;
     sVrHammerSuitShellObject->header.gfx.prevAngle[1] = previousYaw;
     sVrHammerSuitShellObject->header.gfx.prevAngle[2] = 0;

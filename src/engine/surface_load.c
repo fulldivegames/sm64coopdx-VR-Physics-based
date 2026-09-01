@@ -19,6 +19,7 @@
 #include "game/level_update.h"
 #include "game/hardcoded.h"
 #include "pc/network/network.h"
+#include "pc/vr/vr.h"
 #include "pc/lua/smlua_hooks.h"
 
 /**
@@ -1045,7 +1046,8 @@ static void load_object_collision_model_internal(bool isSOC) {
 
     if (!isSOC) {
         f32 marioDist = dist_between_objects(gCurrentObject, gMarioStates[0].marioObj);
-        if (draw_distance_scalar_is_infinite() ||
+        if (vr_is_active() ||
+            draw_distance_scalar_is_infinite() ||
             marioDist < gCurrentObject->oDrawingDistance * draw_distance_scalar()
         ) {
             gCurrentObject->header.gfx.node.flags |= GRAPH_RENDER_ACTIVE;

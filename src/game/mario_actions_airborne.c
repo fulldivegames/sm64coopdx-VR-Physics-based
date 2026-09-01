@@ -296,7 +296,8 @@ void update_air_without_turn(struct MarioState *m) {
 
     if (!check_horizontal_wind(m)) {
         const bool sonicDive =
-            m->action == ACT_DIVE || m->action == ACT_FORWARD_ROLLOUT;
+            m->action == ACT_DIVE || m->action == ACT_FORWARD_ROLLOUT
+            || m->action == ACT_LONG_JUMP;
         const f32 sonicScale = sonicDive
             ? vr_special_moves_sonic_speed_scale()
             : 1.0f;

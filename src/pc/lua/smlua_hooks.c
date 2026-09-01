@@ -43,6 +43,48 @@ struct LuaHookedEvent {
 
 static struct LuaHookedEvent sHookedEvents[HOOK_MAX] = { 0 };
 
+#define LUA_HOOK_FAILURE_THRESHOLD 3
+#define LUA_HOOK_FAILURE_COOLDOWN 120
+#define MAX_LUA_HOOK_FAILURE_STATES 128
+
+/*
+ * A bad map callback must not consume the whole frame forever. Keep this
+ * state separate from ModFile so it never changes mod data or network layout.
+ * Failed callbacks are retried after a short cooldown and are cleared when
+ * hooks are rebuilt.
+ */
+struct LuaHookFailureState {
+    struct Mod *mod;
+    struct ModFile *modFile;
+    const void *callback;
+    u8 consecutiveFailures;
+    u16 cooldown;
+};
+
+static struct LuaHookFailureState sLuaHookFailureStates[MAX_LUA_HOOK_FAILURE_STATES];
+
+static struct LuaHookFailureState *smlua_get_hook_failure_state(
+    struct Mod *mod, struct ModFile *modFile, const void *callback, bool create
+) {
+    struct LuaHookFailureState *freeState = NULL;
+    for (int i = 0; i < MAX_LUA_HOOK_FAILURE_STATES; i++) {
+        struct LuaHookFailureState *state = &sLuaHookFailureStates[i];
+        if (state->mod == mod && state->modFile == modFile && state->callback == callback) {
+            return state;
+        }
+        if (create && freeState == NULL && state->mod == NULL && state->modFile == NULL && state->callback == NULL) {
+            freeState = state;
+        }
+    }
+    if (create && freeState != NULL) {
+        freeState->mod = mod;
+        freeState->modFile = modFile;
+        freeState->callback = callback;
+        return freeState;
+    }
+    return NULL;
+}
+
 static const char* sLuaHookedEventTypeName[] = {
 #define SMLUA_EVENT_HOOK(hookEventType, ...) [hookEventType] = #hookEventType,
 #include "smlua_hook_events.inl"
@@ -51,7 +93,31 @@ static const char* sLuaHookedEventTypeName[] = {
 };
 
 int smlua_call_hook(lua_State* L, int nargs, int nresults, int errfunc, struct Mod* activeMod, struct ModFile* activeModFile) {
-    if (!gGameInited) { return 0; } // Don't call hooks while the game is booting
+    const int callBase = lua_gettop(L) - nargs - 1;
+    if (!gGameInited) {
+        // Keep boot-time callbacks from leaking arguments or stale return values.
+        if (callBase >= 0) {
+            lua_settop(L, callBase);
+            for (int result = 0; result < nresults; result++) {
+                lua_pushnil(L);
+            }
+        }
+        return LUA_OK;
+    }
+    const void *callback = callBase >= 0 && lua_isfunction(L, callBase + 1)
+        ? lua_topointer(L, callBase + 1) : NULL;
+    struct LuaHookFailureState *failureState = activeModFile != NULL
+        ? smlua_get_hook_failure_state(activeMod, activeModFile, callback, true) : NULL;
+    if (failureState != NULL && failureState->cooldown > 0) {
+        failureState->cooldown--;
+        if (callBase >= 0) {
+            lua_settop(L, callBase);
+            for (int result = 0; result < nresults; result++) {
+                lua_pushnil(L);
+            }
+        }
+        return LUA_OK;
+    }
 
     struct Mod* prevActiveMod = gLuaActiveMod;
     struct ModFile* prevActiveModFile = gLuaActiveModFile;
@@ -68,6 +134,19 @@ int smlua_call_hook(lua_State* L, int nargs, int nresults, int errfunc, struct M
     CTX_END(CTX_HOOK);
 
     lua_profiler_stop_counter(activeMod);
+    if (failureState != NULL) {
+        if (rc == LUA_OK) {
+            failureState->consecutiveFailures = 0;
+            failureState->cooldown = 0;
+        } else {
+            if (failureState->consecutiveFailures < 0xFF) {
+                failureState->consecutiveFailures++;
+            }
+            if (failureState->consecutiveFailures >= LUA_HOOK_FAILURE_THRESHOLD) {
+                failureState->cooldown = LUA_HOOK_FAILURE_COOLDOWN;
+            }
+        }
+    }
 
     gLuaActiveMod = prevActiveMod;
     gLuaActiveModFile = prevActiveModFile;
@@ -1907,6 +1986,7 @@ void smlua_hook_replace_function_references(lua_State* L, int oldReference, int 
 }
 
 void smlua_clear_hooks(void) {
+    memset(sLuaHookFailureStates, 0, sizeof(sLuaHookFailureStates));
     for (int i = 0; i < HOOK_MAX; i++) {
         struct LuaHookedEvent* hooked = &sHookedEvents[i];
         for (int j = 0; j < hooked->count; j++) {

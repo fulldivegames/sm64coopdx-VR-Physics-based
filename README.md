@@ -13,7 +13,7 @@
   Native ARM64/OpenXR VR for Meta Quest. No PC is required after installation.
 </p>
 
-> **Current public release: v0.8.3 — Quest First-Run and Updater Fix**
+> **Current public release: v0.8.4 — SteamVR and Controller Binding Fixes**
 
 > [!WARNING]
 > This is an active, vibe-coded, yet fairly polished fan project. The standalone edition has been tested on **Meta Quest 3 only**. It has **not been tested on Quest 2 by me**, and neither edition has been tested across every multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur. If you have any performance issues on default settings in the base game, a reset usually fixes things (You should be getting a stable 120 FPS on Quest 3, on most if not all base game maps)
@@ -52,7 +52,7 @@ The release is a single APK. Players do not need Git, Android Studio, Gradle, AD
 ### Install the APK
 
 1. Open this repository's [latest release](https://github.com/fulldivegames/sm64coopdx-VR-Standalone-Physics-based/releases/latest).
-2. Download `SM64-Co-Op-DX-VR-Quest-v0.8.3.apk` under **Assets**.
+2. Download `SM64-Co-Op-DX-VR-Quest-v0.8.4.apk` under **Assets**.
 3. Connect the Quest to your computer and allow the USB debugging prompt inside the headset.
 4. Open SideQuest and confirm that the headset indicator is connected.
 5. Click **Install APK file from folder** in SideQuest, choose the downloaded APK, and wait for the install-success message.
@@ -80,7 +80,7 @@ The standalone build loads compatible SM64 Co-Op DX mods from this easy-to-acces
 /sdcard/SM64VR/mods/
 ```
 
-1. Install or update to v0.8.3 and launch it once. Android opens the **Allow access to manage all files** page; enable access for **SM64 Co-Op DX VR Standalone**. This permission is used for the shared mod, DynOS, palette, and shader-cache folders.
+1. Install or update to v0.8.4 and launch it once. Android opens the **Allow access to manage all files** page; enable access for **SM64 Co-Op DX VR Standalone**. This permission is used for the shared mod, DynOS, palette, and shader-cache folders.
 2. Close and reopen the game once after granting access. The game creates `/sdcard/SM64VR/mods/` automatically.
 3. Download a mod compatible with SM64 Co-Op DX. The official community browser is [mods.sm64coopdx.com](https://mods.sm64coopdx.com/mods/).
 4. Extract the archive. Copy the **extracted mod folder**, not the `.zip`, into `SM64VR/mods` with SideQuest's file manager. The mod files must be directly inside their own folder rather than inside an extra duplicate folder.
@@ -152,7 +152,7 @@ Known compatibility notes:
 | Close fist / physical grab | Hold that hand's Grip |
 | Optional button punch | Right Trigger; disabled by default |
 
-Open **Settings > VR > Controller Settings** to exchange the movement/camera sticks, remap the listed actions, or disable individual bindings.
+Open **Settings > VR > Controller Bindings** to exchange the movement/camera sticks, remap the listed actions, or disable individual bindings.
 
 ### First-person mode and movement
 
@@ -250,13 +250,13 @@ Painting entries use a short white comfort fade. The optional True First Person 
 | Submenu | Main controls |
 | --- | --- |
 | Camera Settings | Camera mode, height/position, previous Mario body height, FOV, facing source, facing calibration, and standalone color controls |
-| Controller Settings | Motion-controller enablement, stick selection, button mappings, and optional trigger punch |
+| Controller Bindings | Motion-controller enablement, stick selection, button mappings, and optional trigger punch |
 | Motion Control Settings | Punching, grabbing, climbing, dives, jump turning, hit ranges, and Bowser tuning |
 | Model Settings | Body visibility/placement, feet-only, ledge and pole-flip visibility, glove scale, rotation, and position |
 | Performance | Render scale from 10%-100% (80% default), optional FPS counter, 72/90/120 Hz refresh selection, fog control, flame/lava optimization, and Ultra Performance Mode |
 | HUD Settings | HUD opacity and corner spread |
 | Immersion | Default-on comfort, audio, camera, underwater, cannon, and physical-crouch options |
-| Effects | Twirl tornado visual effect |
+| Effects | Twirl tornado visual effect and optional normal maps |
 | Cheats | Level Select, Spawn Menu, climb-any-surface, special-move charge times, flying speed, swimming speed, and running speed |
 | Experimental | True First Person, True Diving, Arms Mode, and original movement options |
 
@@ -273,6 +273,15 @@ Painting entries use a short white comfort fade. The optional True First Person 
 - Large Lua mods, model packs, ROM hacks, and texture packs may exceed standalone memory/performance budgets or rely on desktop-only behavior.
 
 When **WiddlePets** is enabled, Server Settings adds a **Pets** button that opens the mod's own `/wpets` pet-selection menu. Pet choice, spawning, and following behavior remain controlled by WiddlePets itself.
+
+## v0.8.4 — SteamVR and Controller Binding Fixes
+
+- Added reliable SteamVR/OpenXR runtime handoff behavior, including ALVR compatibility through SteamVR, without forcing a particular system runtime.
+- PC and Quest now use their matching GitHub release feeds, so PC VR updates resolve to the PC VR repository while Quest updates remain on the standalone repository.
+- Added controller-binding capture that waits for the next input, supports remapping, and keeps the right-primary menu A action independent from the gameplay Jump binding.
+- Added optional texture-matched normal maps with configurable strength and gloss controls. Normal maps are off by default; PC VR ships with 300% strength and 170% gloss.
+- Stabilized PC first-person camera height/recenter calibration and thumbstick-turn lighting state while keeping Quest tracking behavior unchanged.
+- Kept Sonic Shoes audio and power-up behavior synchronized across the PC VR and Quest builds.
 
 ## v0.8.3 — Quest First-Run and Updater Fix
 
@@ -372,7 +381,7 @@ When **WiddlePets** is enabled, Server Settings adds a **Pets** button that open
 - **Large lobby performance:** many connected players, actors, character packs, or synchronized gameplay mods can reduce standalone performance.
 - **Text chat:** open **Chat** from the pause menu and use the controller keyboard. The microphone button is visible but speech recognition currently does not work and is still being developed.
 - **Poor performance:** lower Render Scale, disable expensive mods, and restart the headset after long development/testing sessions.
-- **Controls feel wrong:** reset Controller Settings and Camera Settings, then recalibrate the selected facing source.
+- **Controls feel wrong:** reset Controller Bindings and Camera Settings, then recalibrate the selected facing source.
 - **Updating fails:** uninstalling removes private app data. Prefer installing the newer APK over the existing package and back up saves first.
 
 ## Building from source

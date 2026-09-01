@@ -1,10 +1,14 @@
 #include <stdbool.h>
+#include <stdio.h>
 
 #include "djui.h"
 #include "djui_panel.h"
 #include "djui_panel_menu.h"
+#include "djui_flow_layout.h"
 
 #include "pc/configfile.h"
+#include "pc/controller/controller_api.h"
+#include "pc/controller/controller_vr.h"
 #include "pc/vr/vr.h"
 #include "pc/network/coopnet/coopnet.h"
 #include "data/dynos.c.h"
@@ -123,6 +127,136 @@ static unsigned int djui_panel_vr_clamp_uint(
     return value;
 }
 
+static unsigned int* sVrBindingTargets[] = {
+    &configVrJumpBinding,
+    &configVrAttackBinding,
+    &configVrCrouchBinding,
+    &configVrLBinding,
+    &configVrRBinding,
+    &configVrPauseBinding,
+    &configVrSpecialBinding
+};
+
+static const char* sVrBindingLabels[] = {
+    "Jump",
+    "Attack / Interact",
+    "Crouch",
+    "L Button",
+    "R Button",
+    "Pause",
+    "Special Button"
+};
+
+static struct DjuiButton* sVrBindingCaptureButton = NULL;
+static unsigned int* sVrBindingCaptureTarget = NULL;
+static struct DjuiText* sVrBindingValueText[
+    sizeof(sVrBindingTargets) / sizeof(sVrBindingTargets[0])
+] = { NULL };
+
+static const char* djui_panel_vr_binding_choice(unsigned int value) {
+    return value < VR_CONTROLLER_BINDING_COUNT
+        ? sVrControllerBindingChoices[value]
+        : sVrControllerBindingChoices[VR_CONTROLLER_BINDING_DISABLED];
+}
+
+static void djui_panel_vr_binding_set_value_text(
+    struct DjuiText* text,
+    unsigned int action,
+    unsigned int value
+) {
+    char message[128];
+    snprintf(
+        message,
+        sizeof(message),
+        "%s: %s",
+        sVrBindingLabels[action],
+        djui_panel_vr_binding_choice(value)
+    );
+    djui_text_set_text(text, message);
+}
+
+static void djui_panel_vr_binding_on_click(struct DjuiBase* caller) {
+    struct DjuiButton* button = (struct DjuiButton*)caller;
+    const unsigned int action = (unsigned int)button->base.tag;
+    if (action >= sizeof(sVrBindingTargets) / sizeof(sVrBindingTargets[0])) {
+        return;
+    }
+
+    sVrBindingCaptureButton = button;
+    sVrBindingCaptureTarget = sVrBindingTargets[action];
+    djui_text_set_text(button->text, "Press a controller button...");
+    // Consume the click that opened the row. The next edge is the binding.
+    controller_get_raw_key();
+    djui_interactable_set_binding(caller);
+}
+
+static void djui_panel_vr_binding_on_bind(struct DjuiBase* caller) {
+    (void)caller;
+    if (sVrBindingCaptureButton == NULL ||
+        sVrBindingCaptureTarget == NULL) {
+        djui_interactable_set_binding(NULL);
+        return;
+    }
+
+    const u32 key = controller_get_raw_key();
+    if (key == VK_INVALID ||
+        key < VK_BASE_VR ||
+        key >= VK_BASE_VR + VR_CONTROLLER_BINDING_COUNT) {
+        return;
+    }
+
+    const unsigned int action = (unsigned int)sVrBindingCaptureButton->base.tag;
+    const unsigned int binding = key - VK_BASE_VR;
+    *sVrBindingCaptureTarget = binding;
+    if (sVrBindingValueText[action] != NULL) {
+        djui_panel_vr_binding_set_value_text(
+            sVrBindingValueText[action], action, binding
+        );
+    }
+    djui_text_set_text(sVrBindingCaptureButton->text, "Bind");
+    sVrBindingCaptureButton = NULL;
+    sVrBindingCaptureTarget = NULL;
+    djui_interactable_set_binding(NULL);
+    controller_reconfigure();
+}
+
+static struct DjuiButton* djui_panel_vr_binding_create(
+    struct DjuiBase* parent,
+    unsigned int action
+) {
+    struct DjuiFlowLayout* row = djui_flow_layout_create(parent);
+    djui_base_set_size_type(&row->base, DJUI_SVT_RELATIVE, DJUI_SVT_ABSOLUTE);
+    djui_base_set_size(&row->base, 1.0f, 52.0f);
+    djui_base_set_color(&row->base, 0, 0, 0, 0);
+    djui_flow_layout_set_flow_direction(row, DJUI_FLOW_DIR_RIGHT);
+    djui_flow_layout_set_margin(row, 4.0f);
+
+    struct DjuiText* valueText = djui_text_create(&row->base, "");
+    djui_base_set_size_type(&valueText->base, DJUI_SVT_RELATIVE, DJUI_SVT_ABSOLUTE);
+    djui_base_set_size(&valueText->base, 0.65f, 52.0f);
+    djui_base_set_color(&valueText->base, 220, 220, 220, 255);
+    djui_base_set_alignment(&valueText->base, DJUI_HALIGN_LEFT, DJUI_VALIGN_CENTER);
+    sVrBindingValueText[action] = valueText;
+    djui_panel_vr_binding_set_value_text(
+        valueText, action, *sVrBindingTargets[action]
+    );
+
+    struct DjuiButton* button = djui_button_create(
+        &row->base,
+        "Bind",
+        DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_binding_on_click
+    );
+    djui_base_set_size_type(&button->base, DJUI_SVT_RELATIVE, DJUI_SVT_ABSOLUTE);
+    djui_base_set_size(&button->base, 0.30f, 52.0f);
+    button->base.tag = (s64)action;
+    djui_interactable_hook_bind(
+        &button->base,
+        djui_panel_vr_binding_on_bind
+    );
+    djui_interactable_set_navigation_axis_free(&button->base, true);
+    return button;
+}
 static void djui_panel_vr_spawn_fire_flower(struct DjuiBase* caller) {
     (void)caller;
     vr_special_moves_spawn_cheat_fire_flower();
@@ -172,8 +306,6 @@ static void djui_panel_vr_spawn_menu_create(struct DjuiBase* caller) {
         djui_panel_vr_spawn_hammer_suit);
     djui_button_create(body, "Sonic Shoes", DJUI_BUTTON_STYLE_NORMAL,
         djui_panel_vr_spawn_sonic_shoes);
-    djui_button_create(body, "Big Hands", DJUI_BUTTON_STYLE_NORMAL,
-        djui_panel_vr_spawn_big_hands);
     djui_button_create(
         body,
         DLANG(MENU, BACK),
@@ -261,7 +393,7 @@ static void djui_panel_vr_controller_defaults(
     configVrRBinding =
         VR_CONTROLLER_BINDING_RIGHT_STICK_CLICK;
     configVrPauseBinding =
-        VR_CONTROLLER_BINDING_LEFT_MENU;
+        VR_CONTROLLER_BINDING_LEFT_STICK_CLICK;
     configVrSpecialBinding =
         VR_CONTROLLER_BINDING_LEFT_SECONDARY;
 }
@@ -356,7 +488,7 @@ static void djui_panel_vr_spawn_pool_defaults(UNUSED struct DjuiBase* caller) {
     configVrSpawnPoolFireFlower = true;
     configVrSpawnPoolHammerSuit = true;
     configVrSpawnPoolSonicShoes = true;
-    configVrSpawnPoolBigHands = true;
+    configVrSpawnPoolBigHands = false;
     configVrSpecialRasengan = true;
 }
 
@@ -365,6 +497,7 @@ static void djui_panel_vr_immersion_defaults(struct DjuiBase* caller) {
 
     configVrImmersiveCameraMotion = true;
     configVrImmersiveFaceStuck = true;
+    configVrImmersiveCrushedScreen = true;
     configVrImmersiveCannonCone = true;
     configVrImmersive3dSound = true;
     configVrImmersiveLedgeCamera = true;
@@ -385,6 +518,13 @@ static void djui_panel_vr_effects_defaults(struct DjuiBase* caller) {
     (void)caller;
 
     configVrTwirlTornadoEffect = true;
+    configVrNormalMaps = false;
+#ifdef __ANDROID__
+    configVrNormalMapStrength = 650;
+#else
+    configVrNormalMapStrength = 300;
+#endif
+    configVrNormalMapGloss = 170;
 }
 
 static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
@@ -706,7 +846,8 @@ static void djui_panel_vr_controller_settings_create(
         &configVrCrouchBinding,
         &configVrLBinding,
         &configVrRBinding,
-        &configVrPauseBinding
+        &configVrPauseBinding,
+        &configVrSpecialBinding
     };
     for (unsigned int i = 0;
          i < sizeof(bindings) / sizeof(bindings[0]);
@@ -719,20 +860,21 @@ static void djui_panel_vr_controller_settings_create(
     }
 
     struct DjuiThreePanel* panel =
-        djui_panel_menu_create("Controller Settings", false);
+        djui_panel_menu_create("Controller Bindings", false);
 
     struct DjuiBase* body =
         djui_three_panel_get_body(panel);
 
     {
-        djui_checkbox_create(
+        struct DjuiCheckbox* motionControllerInput = djui_checkbox_create(
             body,
             "Motion Controller Input",
             &configVrMotionControllerInput,
             NULL
         );
+        djui_interactable_set_navigation_axis_free(&motionControllerInput->base, true);
 
-        djui_selectionbox_create(
+        struct DjuiSelectionbox* movementStick = djui_selectionbox_create(
             body,
             "Movement",
             sVrControllerStickChoices,
@@ -740,8 +882,9 @@ static void djui_panel_vr_controller_settings_create(
             &configVrMoveStick,
             NULL
         );
+        djui_interactable_set_navigation_axis_free(&movementStick->base, true);
 
-        djui_selectionbox_create(
+        struct DjuiSelectionbox* cameraStick = djui_selectionbox_create(
             body,
             "Camera",
             sVrControllerStickChoices,
@@ -749,83 +892,37 @@ static void djui_panel_vr_controller_settings_create(
             &configVrCameraStick,
             NULL
         );
+        djui_interactable_set_navigation_axis_free(&cameraStick->base, true);
 
-        djui_selectionbox_create(
-            body,
-            "Jump",
-            sVrControllerBindingChoices,
-            VR_CONTROLLER_BINDING_COUNT,
-            &configVrJumpBinding,
-            NULL
-        );
+        djui_panel_vr_binding_create(body, 0);
 
-        djui_selectionbox_create(
-            body,
-            "Attack / Interact",
-            sVrControllerBindingChoices,
-            VR_CONTROLLER_BINDING_COUNT,
-            &configVrAttackBinding,
-            NULL
-        );
+        djui_panel_vr_binding_create(body, 1);
 
-        djui_selectionbox_create(
-            body,
-            "Crouch",
-            sVrControllerBindingChoices,
-            VR_CONTROLLER_BINDING_COUNT,
-            &configVrCrouchBinding,
-            NULL
-        );
+        djui_panel_vr_binding_create(body, 2);
 
-        djui_selectionbox_create(
-            body,
-            "L Button",
-            sVrControllerBindingChoices,
-            VR_CONTROLLER_BINDING_COUNT,
-            &configVrLBinding,
-            NULL
-        );
+        djui_panel_vr_binding_create(body, 3);
 
-        djui_selectionbox_create(
-            body,
-            "R Button",
-            sVrControllerBindingChoices,
-            VR_CONTROLLER_BINDING_COUNT,
-            &configVrRBinding,
-            NULL
-        );
+        djui_panel_vr_binding_create(body, 4);
 
-        djui_selectionbox_create(
-            body,
-            "Pause",
-            sVrControllerBindingChoices,
-            VR_CONTROLLER_BINDING_COUNT,
-            &configVrPauseBinding,
-            NULL
-        );
+        djui_panel_vr_binding_create(body, 5);
 
-        djui_selectionbox_create(
-            body,
-            "Special Button",
-            sVrControllerBindingChoices,
-            VR_CONTROLLER_BINDING_COUNT,
-            &configVrSpecialBinding,
-            NULL
-        );
+        djui_panel_vr_binding_create(body, 6);
 
-        djui_button_create(
+        struct DjuiButton* defaultsButton = djui_button_create(
             body,
             "Set to Defaults",
             DJUI_BUTTON_STYLE_NORMAL,
             djui_panel_vr_controller_defaults
         );
+        djui_interactable_set_navigation_axis_free(&defaultsButton->base, true);
 
-        djui_button_create(
+        struct DjuiButton* backButton = djui_button_create(
             body,
             DLANG(MENU, BACK),
             DJUI_BUTTON_STYLE_BACK,
             djui_panel_menu_back
         );
+        djui_interactable_set_navigation_axis_free(&backButton->base, true);
     }
 
     djui_panel_add(caller, panel, NULL);
@@ -1619,12 +1716,6 @@ static void djui_panel_vr_spawn_pool_create(struct DjuiBase* caller) {
     );
     djui_checkbox_create(
         body,
-        "Big Hands",
-        &configVrSpawnPoolBigHands,
-        NULL
-    );
-    djui_checkbox_create(
-        body,
         "Rasengan / Rasen-Shuriken",
         &configVrSpecialRasengan,
         NULL
@@ -1692,23 +1783,10 @@ static void djui_panel_vr_special_moves_create(
         );
         djui_slider_create(
             body,
-            "Sonic Shoes Speed",
+            "Sonic Shoes Speed Multiplier",
             &configVrSonicShoesSpeed,
             VR_SONIC_SHOES_SPEED_MIN,
             VR_SONIC_SHOES_SPEED_MAX,
-            NULL
-        );
-        configVrBigHandsReach = djui_panel_vr_clamp_uint(
-            configVrBigHandsReach,
-            VR_BIG_HANDS_REACH_MIN,
-            VR_BIG_HANDS_REACH_MAX
-        );
-        djui_slider_create(
-            body,
-            "Big Hands Reach (%)",
-            &configVrBigHandsReach,
-            VR_BIG_HANDS_REACH_MIN,
-            VR_BIG_HANDS_REACH_MAX,
             NULL
         );
         djui_button_create(
@@ -1754,6 +1832,12 @@ static void djui_panel_vr_immersion_camera_create(
             body,
             "Face-Stuck Blackout",
             &configVrImmersiveFaceStuck,
+            NULL
+        );
+        djui_checkbox_create(
+            body,
+            "Mario Crushed Screen",
+            &configVrImmersiveCrushedScreen,
             NULL
         );
 
@@ -1927,6 +2011,13 @@ static void djui_panel_vr_effects_create(struct DjuiBase* caller) {
         djui_panel_menu_create("Effects", false);
     struct DjuiBase* body = djui_three_panel_get_body(panel);
 
+    if (configVrNormalMapStrength > 800) {
+        configVrNormalMapStrength = 800;
+    }
+    if (configVrNormalMapGloss > 400) {
+        configVrNormalMapGloss = 400;
+    }
+
     {
         djui_checkbox_create(
             body,
@@ -1934,6 +2025,14 @@ static void djui_panel_vr_effects_create(struct DjuiBase* caller) {
             &configVrTwirlTornadoEffect,
             NULL
         );
+        djui_checkbox_create(
+            body,
+            "Add Normal Maps",
+            &configVrNormalMaps,
+            NULL
+        );
+        djui_slider_create(body, "Normal Map Strength (%)", &configVrNormalMapStrength, 0, 800, NULL);
+        djui_slider_create(body, "Normal Map Gloss (%)", &configVrNormalMapGloss, 0, 400, NULL);
         djui_button_create(
             body,
             "Set to Defaults",
@@ -1985,7 +2084,7 @@ static void djui_panel_vr_tutorial_start(
     djui_panel_vr_tutorial_page(
         caller,
         "Getting Started",
-        "Move with the selected movement stick. Your movement direction can follow the headset or either controller in Camera Settings. Jump, crouch, punch, and pause use the bindings shown in Controller Settings. Turn physically or use your configured camera controls. Recenter from Camera Settings whenever your forward direction or seated height needs correction."
+        "Move with the selected movement stick. Your movement direction can follow the headset or either controller in Camera Settings. Jump, crouch, punch, and pause use the bindings shown in Controller Bindings. Turn physically or use your configured camera controls. Recenter from Camera Settings whenever your forward direction or seated height needs correction."
     );
 }
 
@@ -2145,7 +2244,7 @@ static void djui_panel_vr_setup_create(struct DjuiBase* caller) {
 
     djui_button_create(body, "Camera Settings", DJUI_BUTTON_STYLE_NORMAL,
         djui_panel_vr_camera_settings_create);
-    djui_button_create(body, "Controller Settings", DJUI_BUTTON_STYLE_NORMAL,
+    djui_button_create(body, "Controller Bindings", DJUI_BUTTON_STYLE_NORMAL,
         djui_panel_vr_controller_settings_create);
     djui_button_create(body, "Motion Control Settings", DJUI_BUTTON_STYLE_NORMAL,
         djui_panel_vr_motion_control_settings_create);
@@ -2185,7 +2284,8 @@ static void djui_panel_vr_filters_create(struct DjuiBase* caller) {
     char* filterChoices[VR_COLOR_FILTER_COUNT] = {
         "Off",
         "Virtual Boy",
-        "Game Boy"
+        "Game Boy",
+        "Super Mario Land"
     };
 
     djui_selectionbox_create(

@@ -182,6 +182,13 @@ void djui_interactable_set_binding(struct DjuiBase* base) {
     }
 }
 
+void djui_interactable_set_navigation_axis_free(struct DjuiBase* base, bool enabled) {
+    if (base == NULL || base->interactable == NULL) {
+        return;
+    }
+    base->interactable->navigationAxisFree = enabled;
+}
+
 void djui_interactable_set_input_focus(struct DjuiBase* base) {
     if (gDjuiConsoleFocus && base != &gDjuiConsole->base) {
         return;

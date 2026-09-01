@@ -155,6 +155,18 @@ static int smlua_custom_require(lua_State* L) {
 
     if (rc == LUA_OK) {
         smlua_cache_module_result(L, activeMod, file, prevTop);
+    } else {
+        /*
+         * A failed module must never leave the recursion sentinel in
+         * mod_loaded.  Clear it and return a real nil value so callers do
+         * not receive an unrelated stack item as the module result.
+         */
+        lua_settop(L, prevTop);
+        smlua_get_or_create_mod_loaded_table(L, activeMod);
+        lua_pushnil(L);
+        lua_setfield(L, -2, file->relativePath);
+        lua_pop(L, 1);
+        lua_pushnil(L);
     }
 
     gLuaActiveModFile = prevModFile;

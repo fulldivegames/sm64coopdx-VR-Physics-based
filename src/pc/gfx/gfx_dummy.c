@@ -162,6 +162,9 @@ static void gfx_dummy_renderer_select_texture(UNUSED int tile, UNUSED uint32_t t
 static void gfx_dummy_renderer_upload_texture(UNUSED const uint8_t *rgba32_buf, UNUSED int width, UNUSED int height) {
 }
 
+static void gfx_dummy_renderer_on_texture_uploaded(void) {
+}
+
 static void gfx_dummy_renderer_set_sampler_parameters(UNUSED int tile, UNUSED bool linear_filter, UNUSED uint32_t cms, UNUSED uint32_t cmt) {
 }
 
@@ -256,5 +259,6 @@ struct GfxRenderingAPI gfx_dummy_renderer_api = {
     gfx_dummy_renderer_end_frame,
     gfx_dummy_renderer_finish_render,
     gfx_dummy_renderer_get_name,
-    gfx_dummy_renderer_shutdown
+    gfx_dummy_renderer_shutdown,
+    gfx_dummy_renderer_on_texture_uploaded
 };

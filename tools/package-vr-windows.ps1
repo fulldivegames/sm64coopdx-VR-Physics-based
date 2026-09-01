@@ -17,6 +17,7 @@ $zipPath = Join-Path $outputPath "$packageName.zip"
 
 $requiredFiles = @(
     "sm64coopdx.exe",
+    "coopdx_updater.exe",
     "discord_game_sdk.dll",
     "libopenxr_loader.dll",
     "libgcc_s_seh-1.dll",
@@ -26,14 +27,16 @@ $requiredFiles = @(
     "gcc-COPYING.LIB",
     "gcc-COPYING.RUNTIME",
     "gcc-COPYING3",
-    "libwinpthread-COPYING"
+    "libwinpthread-COPYING",
+    "normal_maps.bin"
 )
 
 $requiredDirectories = @(
     "dynos",
     "lang",
     "mods",
-    "palettes"
+    "palettes",
+    "sonic_shoes"
 )
 
 foreach ($file in $requiredFiles) {
@@ -60,11 +63,13 @@ if (Test-Path -LiteralPath $zipPath) {
 New-Item -ItemType Directory -Path $stagePath | Out-Null
 
 Copy-Item -LiteralPath (Join-Path $buildPath "sm64coopdx.exe") -Destination (Join-Path $stagePath "SM64-Co-Op-DX-VR.exe")
+Copy-Item -LiteralPath (Join-Path $buildPath "coopdx_updater.exe") -Destination (Join-Path $stagePath "Co-op DX VR Updater.exe")
 Copy-Item -LiteralPath (Join-Path $buildPath "discord_game_sdk.dll") -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $buildPath "libopenxr_loader.dll") -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $buildPath "libgcc_s_seh-1.dll") -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $buildPath "libstdc++-6.dll") -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $buildPath "libwinpthread-1.dll") -Destination $stagePath
+Copy-Item -LiteralPath (Join-Path $buildPath "normal_maps.bin") -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $repoRoot "docs/PLAYER-GUIDE.txt") -Destination (Join-Path $stagePath "README.txt")
 
 $licensesPath = Join-Path $stagePath "licenses"
@@ -91,4 +96,4 @@ if ($romFiles.Count -ne 0) {
 Compress-Archive -LiteralPath $stagePath -DestinationPath $zipPath -CompressionLevel Optimal
 
 Write-Host "Created player package: $zipPath"
-Write-Host "The package contains no ROM, updater, map, debug database, or backup executable."
+Write-Host "The package contains no ROM, map, debug database, or backup executable."

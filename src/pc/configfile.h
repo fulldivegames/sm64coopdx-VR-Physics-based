@@ -28,7 +28,8 @@
 #define VR_COLOR_FILTER_NONE        0U
 #define VR_COLOR_FILTER_VIRTUAL_BOY 1U
 #define VR_COLOR_FILTER_GAME_BOY    2U
-#define VR_COLOR_FILTER_COUNT       3U
+#define VR_COLOR_FILTER_SUPER_MARIO_LAND 3U
+#define VR_COLOR_FILTER_COUNT       4U
 
 // Camera height is stored directly in world units above Mario's gameplay
 // anchor, so the value shown in Camera Settings matches the applied height.
@@ -196,6 +197,9 @@ extern unsigned int configVrHudSpread;
 extern unsigned int configVrMenuAnchor;
 extern unsigned int configVrHudAnchor;
 extern unsigned int configVrColorFilter;
+extern bool         configVrNormalMaps;
+extern unsigned int configVrNormalMapStrength;
+extern unsigned int configVrNormalMapGloss;
 extern bool         configVrMotionControllerInput;
 extern unsigned int configVrMoveStick;
 extern unsigned int configVrCameraStick;
@@ -237,6 +241,7 @@ extern unsigned int configVrSwimmingSpeed;
 extern unsigned int configVrRunningSpeed;
 extern bool         configVrImmersiveCameraMotion;
 extern bool         configVrImmersiveFaceStuck;
+extern bool         configVrImmersiveCrushedScreen;
 extern bool         configVrImmersiveCannonCone;
 extern bool         configVrImmersive3dSound;
 extern bool         configVrImmersiveLedgeCamera;

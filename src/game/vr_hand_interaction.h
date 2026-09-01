@@ -26,6 +26,10 @@ bool vr_hand_interaction_recover_from_geometry(
 void vr_hand_interaction_update_headset_collider(
     struct MarioState* mario
 );
+
+bool vr_hand_interaction_resolve_headset_camera_position(
+    Vec3f position
+);
 bool vr_hand_interaction_validate_headset_damage_contact(
     struct MarioState* mario,
     struct Object* object
@@ -59,6 +63,9 @@ bool vr_hand_interaction_is_tracked_held_object(
     struct Object* object
 );
 bool vr_hand_interaction_is_hammer_charge_object(
+    struct Object* object
+);
+bool vr_hand_interaction_is_hammer_suit_shell_object(
     struct Object* object
 );
 u32 vr_hand_interaction_get_tracked_held_hand(

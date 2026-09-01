@@ -92,6 +92,9 @@ struct CombineMode {
 struct ColorCombiner {
     struct CombineMode cm;
     struct ShaderProgram *prg;
+    /* Cached once per combiner; avoids an indirect shader query per triangle. */
+    uint8_t num_inputs;
+    bool used_textures[2];
     union {
         uint8_t shader_input_mapping[16];
         uint64_t shader_input_mapping_as_u64[2];

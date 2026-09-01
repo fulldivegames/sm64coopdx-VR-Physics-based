@@ -532,6 +532,11 @@ static void gfx_d3d11_upload_texture(const uint8_t *rgba32_buf, int width, int h
     ThrowIfFailed(d3d.device->CreateShaderResourceView(texture.Get(), &resource_view_desc, texture_data->resource_view.GetAddressOf()));
 }
 
+// VR selects OpenGL/OpenGL ES. Keep the optional hook a no-op for the flat
+// D3D11 backend until it has an equivalent normal-map shader path.
+static void gfx_d3d11_on_texture_uploaded(void) {
+}
+
 static void gfx_d3d11_set_sampler_parameters(int tile, bool linear_filter, uint32_t cms, uint32_t cmt) {
     D3D11_SAMPLER_DESC sampler_desc;
     ZeroMemory(&sampler_desc, sizeof(D3D11_SAMPLER_DESC));
@@ -796,6 +801,8 @@ struct GfxRenderingAPI gfx_direct3d11_api = {
     gfx_d3d11_end_frame,
     gfx_d3d11_finish_render,
     gfx_d3d11_get_name,
+    nullptr,
+    gfx_d3d11_on_texture_uploaded,
 };
 
 #endif

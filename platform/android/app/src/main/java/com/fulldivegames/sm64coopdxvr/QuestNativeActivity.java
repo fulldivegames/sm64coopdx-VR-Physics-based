@@ -732,6 +732,8 @@ public final class QuestNativeActivity extends NativeActivity {
             Log.i(TAG, "Bundled session mods installed.");
             copyAssetDirectory("sonic_shoes", new File(root, "sonic_shoes"));
             Log.i(TAG, "Bundled Sonic Shoes music installed.");
+            copyAssetFile("normal_maps.bin", new File(root, "normal_maps.bin"));
+            Log.i(TAG, "Bundled normal maps installed.");
         } catch (IOException exception) {
             Log.e(TAG, "Could not install bundled resources.", exception);
         }

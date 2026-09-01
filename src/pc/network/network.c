@@ -75,6 +75,7 @@ u32 gNetworkStartupTimer = 0;
 u32 sNetworkReconnectTimer = 0;
 u32 sNetworkRehostTimer = 0;
 enum NetworkSystemType sNetworkReconnectType = NS_SOCKET;
+static bool sNetworkShutdownInProgress = false;
 
 struct ServerSettings gServerSettings = {
     .playerInteractions = PLAYER_INTERACTIONS_SOLID,
@@ -673,6 +674,11 @@ void network_mod_dev_mode_reload(void) {
 
 
 void network_shutdown(bool sendLeaving, bool exiting, bool popup, bool reconnecting) {
+    if (sNetworkShutdownInProgress) {
+        return;
+    }
+    sNetworkShutdownInProgress = true;
+
     smlua_call_event_hooks(HOOK_ON_EXIT);
 
     if (gDjuiChatBox != NULL) {
@@ -700,7 +706,10 @@ void network_shutdown(bool sendLeaving, bool exiting, bool popup, bool reconnect
         gNetworkType = NT_NONE;
     }
 
-    if (exiting) { return; }
+    if (exiting) {
+        sNetworkShutdownInProgress = false;
+        return;
+    }
 
     dynos_model_clear_pool(MODEL_POOL_SESSION);
 
@@ -807,4 +816,5 @@ void network_shutdown(bool sendLeaving, bool exiting, bool popup, bool reconnect
     packet_ordered_clear_all();
 
     djui_reset_popup_disabled_override();
+    sNetworkShutdownInProgress = false;
 }

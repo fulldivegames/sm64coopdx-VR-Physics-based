@@ -17,6 +17,7 @@
 #include "lua/smlua.h"
 
 #include "rom_assets.h"
+#include "pc/gfx/gfx_normal_maps.h"
 #include "rom_checker.h"
 #include "pc_main.h"
 #include "loading.h"
@@ -252,14 +253,41 @@ static void select_graphics_backend(void) {
         return;
     }
 
-#if defined(_WIN32)
-    if (configGraphicsBackend == GAPI_GL && !gfx_sdl_check_opengl_compatibility()) {
-        configGraphicsBackend = GAPI_D3D11;
-    }
-#endif
     int backend = configGraphicsBackend;
 #if defined(_WIN32)
     if (gCLIOpts.backend != -1) { backend = gCLIOpts.backend; }
+#endif
+
+    /*
+     * The desktop OpenXR bridge currently supplies XR_KHR_opengl_enable and
+     * creates its swapchains from the active OpenGL context. Selecting DX11
+     * before the context is created therefore makes VR activation fail later
+     * with a generic graphics-session error. Keep the override in-memory so
+     * this run is valid without changing Windows' OpenXR default runtime.
+     */
+    const bool vrRequested = configVrAutoStart || vr_is_active();
+    if (vrRequested && backend != GAPI_GL) {
+        printf(
+            "[VR] VR startup requires OpenGL; overriding the selected "
+            "graphics backend for this run.\n"
+        );
+        backend = GAPI_GL;
+        configGraphicsBackend = GAPI_GL;
+    }
+
+#if defined(_WIN32)
+    if (backend == GAPI_GL && !gfx_sdl_check_opengl_compatibility()) {
+        if (vrRequested) {
+            printf(
+                "[VR] OpenGL compatibility check failed while VR was "
+                "requested; keeping OpenGL so the VR failure is reported "
+                "instead of silently switching to DirectX 11.\n"
+            );
+        } else {
+            configGraphicsBackend = GAPI_D3D11;
+            backend = GAPI_D3D11;
+        }
+    }
 #endif
 
     switch (backend) {
@@ -429,6 +457,7 @@ void produce_interpolation_frames_and_delay(void) {
             }
             patch_mtx_vr_ui_projection(eye);
 
+            gfx_set_stereo_eye(eye);
             send_display_list(gGfxSPTask);
             gfx_end_frame_render();
 
@@ -445,6 +474,8 @@ void produce_interpolation_frames_and_delay(void) {
             vr_end_eye(eye);
         }
 
+        // Do not let a completed XR pair affect a later flat-screen render.
+        gfx_set_stereo_eye(2);
         gfx_current_dimensions = desktopDimensions;
 
         if (!renderedVrEye &&
@@ -462,6 +493,7 @@ void produce_interpolation_frames_and_delay(void) {
             if (renderedVrEye) {
                 patch_mtx_vr_ui_projection(2);
             }
+            gfx_set_stereo_eye(2);
             send_display_list(gGfxSPTask);
             gfx_end_frame_render();
         }
@@ -661,6 +693,7 @@ void* main_game_init(UNUSED void* dummy) {
 
     LOADING_SCREEN_MUTEX(loading_screen_set_segment_text("Loading ROM Assets"));
     rom_assets_load();
+    gfx_normal_maps_on_rom_loaded();
     smlua_text_utils_init();
 
     mods_init();

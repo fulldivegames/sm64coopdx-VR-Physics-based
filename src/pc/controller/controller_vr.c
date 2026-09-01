@@ -5,6 +5,10 @@
 
 #include "pc/configfile.h"
 #include "pc/vr/vr.h"
+// The DJUI menu reads the same N64 pad passed to this backend while an
+// interactable panel is active. Keep this menu-only flag separate from the
+// gameplay Jump binding so rebinding Jump cannot remove the A action.
+extern bool gInteractableOverridePad;
 
 #define VR_STICK_DEADZONE 0.18f
 #define VR_TRIGGER_THRESHOLD 0.55f
@@ -31,6 +35,21 @@ static float sVrPunchTravel[VR_CONTROLLER_COUNT] = {
 };
 static bool sVrPhysicalCrouchActive = false;
 static uint32_t sVrPhysicalCrouchTrackingGeneration = 0;
+
+// VR action bindings are exposed to the DJUI binding screen through the
+// controller API raw-key channel. Keep this edge-triggered: a held button
+// must not immediately rebind another action when the user opens a row.
+static bool sVrPreviousBindingDown[VR_CONTROLLER_BINDING_COUNT] = { false };
+static u32 sVrPendingRawKey = VK_INVALID;
+
+static void controller_vr_reset_rawkey_state(void) {
+    for (unsigned int binding = 0;
+         binding < VR_CONTROLLER_BINDING_COUNT;
+         binding++) {
+        sVrPreviousBindingDown[binding] = false;
+    }
+    sVrPendingRawKey = VK_INVALID;
+}
 static bool sVrPhysicalCrouchReferenceValid = false;
 static float sVrPhysicalCrouchReferenceY = 0.0f;
 
@@ -376,6 +395,33 @@ static void controller_vr_reset_physical_punches(void) {
     }
 }
 
+static void controller_vr_update_rawkey_state(
+    bool leftAvailable,
+    const struct VrControllerState* left,
+    bool rightAvailable,
+    const struct VrControllerState* right
+) {
+    for (unsigned int binding = VR_CONTROLLER_BINDING_LEFT_PRIMARY;
+         binding < VR_CONTROLLER_BINDING_COUNT;
+         binding++) {
+        const bool down = controller_vr_binding_down(
+            binding,
+            leftAvailable,
+            left,
+            rightAvailable,
+            right
+        );
+        if (down && !sVrPreviousBindingDown[binding] &&
+            sVrPendingRawKey == VK_INVALID) {
+            // controller_get_raw_key() adds VK_BASE_VR after this callback;
+            // return the logical enum value so the UI maps it to the same
+            // choices used by gameplay.
+            sVrPendingRawKey = binding;
+        }
+        sVrPreviousBindingDown[binding] = down;
+    }
+}
+
 static void controller_vr_init(void) {
 }
 
@@ -384,6 +430,7 @@ static void controller_vr_read(OSContPad* pad) {
         controller_vr_reset_physical_punches();
         sVrPhysicalCrouchActive = false;
         sVrPhysicalCrouchReferenceValid = false;
+        controller_vr_reset_rawkey_state();
         return;
     }
 
@@ -393,6 +440,7 @@ static void controller_vr_read(OSContPad* pad) {
 
     if (!configVrMotionControllerInput) {
         controller_vr_reset_physical_punches();
+        controller_vr_reset_rawkey_state();
         return;
     }
 
@@ -404,6 +452,13 @@ static void controller_vr_read(OSContPad* pad) {
     );
     const bool rightAvailable = vr_get_controller_state(
         VR_CONTROLLER_RIGHT,
+        &right
+    );
+
+    controller_vr_update_rawkey_state(
+        leftAvailable,
+        &left,
+        rightAvailable,
         &right
     );
 
@@ -463,6 +518,12 @@ static void controller_vr_read(OSContPad* pad) {
             rightAvailable,
             &right
         )) {
+        pad->button |= A_BUTTON;
+    }
+
+    if (gInteractableOverridePad &&
+        rightAvailable &&
+        right.primaryButton) {
         pad->button |= A_BUTTON;
     }
     if (controller_vr_binding_down(
@@ -563,7 +624,9 @@ static void controller_vr_read(OSContPad* pad) {
 }
 
 static u32 controller_vr_rawkey(void) {
-    return VK_INVALID;
+    const u32 key = sVrPendingRawKey;
+    sVrPendingRawKey = VK_INVALID;
+    return key;
 }
 
 static void controller_vr_rumble_play(

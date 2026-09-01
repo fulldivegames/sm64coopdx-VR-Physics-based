@@ -15,6 +15,11 @@
 #include "pc/djui/djui.h"
 #include "pc/fs/fmem.h"
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#define SM_LUA_LOG_TAG "SM64CoopDXVR"
+#endif
+
 lua_State* gLuaState = NULL;
 u8 gLuaInitializingScript = 0;
 u8 gSmLuaSuppressErrors = 0;
@@ -23,7 +28,73 @@ struct Mod* gLuaActiveMod = NULL;
 struct ModFile* gLuaActiveModFile = NULL;
 struct Mod* gLuaLastHookMod = NULL;
 
+static struct SmLuaDiagnostics sSmLuaDiagnostics;
+static const struct Mod *sLastErrorMod = NULL;
+static const struct ModFile *sLastErrorFile = NULL;
+static char sLastErrorMessage[256] = { 0 };
+static bool sLastErrorValid = false;
+static bool sSuppressNextErrorReport = false;
+
+/*
+ * Quest routes legacy Lua console output through stdout, which is not
+ * consistently visible in logcat. Record the first occurrence of each error
+ * with its owning mod/file so compatibility failures can be diagnosed without
+ * changing map files or adding extra in-game UI.
+ */
+static void smlua_log_android_error(const char *phase, const char *message) {
+#ifdef __ANDROID__
+    const struct Mod *mod = gLuaActiveMod != NULL ? gLuaActiveMod :
+        (gLuaLoadingMod != NULL ? gLuaLoadingMod : gLuaLastHookMod);
+    const struct ModFile *file = gLuaActiveModFile;
+    __android_log_print(ANDROID_LOG_ERROR, SM_LUA_LOG_TAG,
+        "Lua %s: mod='%s' file='%s': %s",
+        phase != NULL ? phase : "error",
+        mod != NULL ? mod->name : "<engine>",
+        file != NULL ? file->relativePath : "<unknown>",
+        message != NULL ? message : "<non-string Lua error>");
+#else
+    (void) phase;
+    (void) message;
+#endif
+}
+static bool smlua_is_repeated_error(const char *message) {
+    const struct Mod *mod = gLuaActiveMod != NULL ? gLuaActiveMod :
+        (gLuaLoadingMod != NULL ? gLuaLoadingMod : gLuaLastHookMod);
+    const struct ModFile *file = gLuaActiveModFile;
+    const char *errorMessage = message != NULL ? message : "<non-string Lua error>";
+    const bool repeated = sLastErrorValid &&
+        mod == sLastErrorMod &&
+        file == sLastErrorFile &&
+        strcmp(errorMessage, sLastErrorMessage) == 0;
+
+    sLastErrorMod = mod;
+    sLastErrorFile = file;
+    snprintf(sLastErrorMessage, sizeof(sLastErrorMessage), "%s", errorMessage);
+    sLastErrorValid = true;
+    return repeated;
+}
+
+bool smlua_consume_suppressed_error_report(void) {
+    const bool suppress = sSuppressNextErrorReport;
+    sSuppressNextErrorReport = false;
+    return suppress;
+}
+
+static void smlua_capture_error(const char *message) {
+    const struct Mod *mod = gLuaActiveMod != NULL ? gLuaActiveMod :
+        (gLuaLoadingMod != NULL ? gLuaLoadingMod : gLuaLastHookMod);
+    const struct ModFile *file = gLuaActiveModFile;
+    snprintf(sSmLuaDiagnostics.last_mod, sizeof(sSmLuaDiagnostics.last_mod),
+        "%s", mod != NULL ? mod->name : "<engine>");
+    snprintf(sSmLuaDiagnostics.last_file, sizeof(sSmLuaDiagnostics.last_file),
+        "%s", file != NULL ? file->relativePath : "<unknown>");
+    snprintf(sSmLuaDiagnostics.last_message,
+        sizeof(sSmLuaDiagnostics.last_message), "%s",
+        message != NULL ? message : "<non-string Lua error>");
+}
+
 void smlua_mod_error(void) {
+    sSmLuaDiagnostics.error_reports++;
     struct Mod* mod = gLuaActiveMod;
     if (mod == NULL) { mod = gLuaLoadingMod; }
     if (mod == NULL) { mod = gLuaLastHookMod; }
@@ -35,6 +106,7 @@ void smlua_mod_error(void) {
 }
 
 bool smlua_mod_warning(bool once) {
+    // Count warnings that reach this reporting path; ignored/once-suppressed warnings return earlier.
     struct Mod* mod = gLuaActiveMod;
     if (mod == NULL) { mod = gLuaLoadingMod; }
     if (mod == NULL) { mod = gLuaLastHookMod; }
@@ -42,6 +114,7 @@ bool smlua_mod_warning(bool once) {
     if (mod->ignoreScriptWarnings) { return false; }
     if (once && mod->showedScriptWarning) { return false; }
     if (once) { mod->showedScriptWarning = true; }
+    sSmLuaDiagnostics.warning_reports++;
     char txt[255] = { 0 };
     snprintf(txt, 254, "'%s\\#ffe600\\' has script warnings!", mod->name);
     static const struct DjuiColor color = { 255, 230, 0, 255 };
@@ -50,16 +123,37 @@ bool smlua_mod_warning(bool once) {
 }
 
 int smlua_error_handler(lua_State* L) {
-    if (lua_type(L, -1) == LUA_TSTRING) {
+    sSmLuaDiagnostics.protected_call_errors++;
+    const char *message = lua_type(L, -1) == LUA_TSTRING
+        ? lua_tostring(L, -1) : "<non-string Lua error>";
+    const bool repeated = smlua_is_repeated_error(message);
+    smlua_capture_error(message);
+    sSuppressNextErrorReport = repeated;
+    if (!repeated && lua_type(L, -1) == LUA_TSTRING) {
+        smlua_log_android_error("runtime", message);
         LOG_LUA("%s", lua_tostring(L, -1));
+        smlua_logline();
+        smlua_dump_stack();
     }
-    smlua_logline();
-    smlua_dump_stack();
     return 0;
 }
 
+void smlua_get_diagnostics(struct SmLuaDiagnostics *out) {
+    if (out != NULL) {
+        memcpy(out, &sSmLuaDiagnostics, sizeof(*out));
+    }
+}
 int smlua_pcall(lua_State* L, int nargs, int nresults, UNUSED int errfunc) {
     gSmLuaConvertSuccess = true;
+    sSuppressNextErrorReport = false;
+    /*
+     * A failed protected call leaves its error object on the Lua stack.
+     * Hook dispatchers intentionally continue after a callback failure, and
+     * not every generated dispatcher has a caller-side lua_settop() on that
+     * path. Restore the stack here so one incompatible map callback cannot
+     * contaminate subsequent callbacks (or grow the stack once per frame).
+     */
+    const int callBase = lua_gettop(L) - nargs - 1;
     lua_pushcfunction(L, smlua_error_handler);
     int errorHandlerIndex = 1;
     lua_insert(L, errorHandlerIndex);
@@ -67,12 +161,16 @@ int smlua_pcall(lua_State* L, int nargs, int nresults, UNUSED int errfunc) {
     int rc = lua_pcall(L, nargs, nresults, errorHandlerIndex);
 
     lua_remove(L, errorHandlerIndex);
+    if (rc != LUA_OK) {
+        lua_settop(L, callBase);
+    }
     return rc;
 }
 
 void smlua_exec_file(const char* path) {
     lua_State* L = gLuaState;
     if (luaL_dofile(L, path) != LUA_OK) {
+        sSmLuaDiagnostics.script_load_errors++;
         LOG_LUA("Failed to load lua file '%s'.", path);
         LOG_LUA("%s", smlua_to_string(L, lua_gettop(L)));
     }
@@ -82,6 +180,7 @@ void smlua_exec_file(const char* path) {
 void smlua_exec_str(const char* str) {
     lua_State* L = gLuaState;
     if (luaL_dostring(L, str) != LUA_OK) {
+        sSmLuaDiagnostics.script_load_errors++;
         LOG_LUA("Failed to load lua string.");
         LOG_LUA("%s", smlua_to_string(L, lua_gettop(L)));
     }
@@ -200,6 +299,29 @@ static bool smlua_check_binary_header(struct ModFile *file) {
     return false;
 }
 
+/*
+ * Some third-party map packages contain binary assets with a .lua suffix.
+ * Feeding those bytes to luaL_loadbuffer only creates a deterministic syntax
+ * error. Keep genuine Lua text permissive (including UTF-8), but reject
+ * NUL/control-heavy payloads before invoking the parser. Binary .luac files
+ * are validated by smlua_check_binary_header() and do not pass this check.
+ */
+static bool smlua_is_text_source(const void *buffer, size_t length) {
+    const u8 *bytes = (const u8 *) buffer;
+    size_t start = 0;
+    if (length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) {
+        start = 3;
+    }
+    const size_t sampleLength = length < 4096 ? length : 4096;
+    for (size_t i = start; i < sampleLength; i++) {
+        const u8 c = bytes[i];
+        if (c == 0 || (c < 0x09) || (c > 0x0D && c < 0x20)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 int smlua_load_script(struct Mod* mod, struct ModFile* file, u16 remoteIndex, bool isModInit) {
     int rc = LUA_OK;
     if (!smlua_check_binary_header(file)) { return LUA_ERRMEM; }
@@ -240,8 +362,21 @@ int smlua_load_script(struct Mod* mod, struct ModFile* file, u16 remoteIndex, bo
     f_close(f);
     f_delete(f);
 
+    if (path_ends_with(file->relativePath, ".lua") && !smlua_is_text_source(buffer, length)) {
+        smlua_log_android_error("skip", "non-text .lua payload");
+        LOG_INFO("Skipping non-text lua payload: %s", file->cachedPath);
+        gLuaInitializingScript = 0;
+        free(buffer);
+        lua_settop(L, prevTop);
+        return LUA_ERRFILE;
+    }
+
     rc = luaL_loadbuffer(L, buffer, length, file->cachedPath);
     if (rc != LUA_OK) { // only run on success
+        sSmLuaDiagnostics.script_load_errors++;
+        const char *loadError = smlua_to_string(L, lua_gettop(L));
+        smlua_capture_error(loadError);
+        smlua_log_android_error("load", loadError);
         LOG_LUA("Failed to load lua script '%s'.", file->cachedPath);
         LOG_LUA("%s", smlua_to_string(L, lua_gettop(L)));
         gLuaInitializingScript = 0;
@@ -436,4 +571,9 @@ void smlua_shutdown(void) {
     gLuaActiveMod = NULL;
     gLuaActiveModFile = NULL;
     gLuaLastHookMod = NULL;
+    sLastErrorMod = NULL;
+    sLastErrorFile = NULL;
+    sLastErrorMessage[0] = '\0';
+    sLastErrorValid = false;
+    sSuppressNextErrorReport = false;
 }

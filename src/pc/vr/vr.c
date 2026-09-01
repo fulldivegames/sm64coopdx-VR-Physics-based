@@ -7,6 +7,23 @@
 static bool sVrActive = false;
 static bool sGraphicsReady = false;
 static float sRenderTargetAspect = 0.0f;
+/* Session loss is reported from vr_begin_frame, while rendering callbacks
+ * for that frame may still be in flight. Defer object destruction until
+ * vr_end_frame so closing SteamVR cannot invalidate the active frame. */
+static bool sVrShutdownPending = false;
+
+/* SteamVR can accept the OpenXR instance before its scene application is
+ * ready to accept the OpenGL graphics binding. In that window it reports
+ * VRInitError_Init_Retry and no application frames are submitted. Keep the
+ * instance alive and retry the graphics-session handoff for a short,
+ * bounded period instead of dropping back to flat mode immediately. */
+static bool sVrSessionRetryPending = false;
+static unsigned int sVrSessionRetryFrames = 0;
+static unsigned int sVrSessionRetryAttempts = 0;
+
+#define VR_SESSION_RETRY_DELAY_FRAMES 30
+#define VR_SESSION_RETRY_MAX_ATTEMPTS 8
+
 static bool sPhysicalPunchPending[VR_CONTROLLER_COUNT] = {
     false,
     false
@@ -18,6 +35,35 @@ static void vr_clear_physical_punches(void) {
          hand++) {
         sPhysicalPunchPending[hand] = false;
     }
+}
+
+static void vr_clear_session_retry(void) {
+    sVrSessionRetryPending = false;
+    sVrSessionRetryFrames = 0;
+    sVrSessionRetryAttempts = 0;
+}
+
+static bool vr_schedule_session_retry(void) {
+    if (!sGraphicsReady ||
+        configGraphicsBackend != GAPI_GL ||
+        !vr_openxr_is_initialized() ||
+        vr_openxr_has_session() ||
+        sVrSessionRetryAttempts >= VR_SESSION_RETRY_MAX_ATTEMPTS) {
+        return false;
+    }
+
+    sVrSessionRetryPending = true;
+    sVrSessionRetryFrames = VR_SESSION_RETRY_DELAY_FRAMES;
+
+    printf(
+        "[VR] OpenXR graphics-session handoff is not ready; "
+        "retrying in %u frames (attempt %u/%u).\n",
+        sVrSessionRetryFrames,
+        sVrSessionRetryAttempts + 1,
+        VR_SESSION_RETRY_MAX_ATTEMPTS
+    );
+
+    return true;
 }
 
 void vr_init(void) {
@@ -59,6 +105,14 @@ void vr_on_graphics_ready(void) {
     }
 
     if (!vr_start_graphics_session()) {
+        if (vr_schedule_session_retry()) {
+            printf(
+                "[VR] Keeping the OpenXR instance alive while SteamVR "
+                "finishes scene initialization.\n"
+            );
+            return;
+        }
+
         printf(
             "[VR] Could not attach VR to the "
             "game graphics context.\n"
@@ -67,6 +121,8 @@ void vr_on_graphics_ready(void) {
         vr_openxr_shutdown();
 
         sVrActive = false;
+        sVrShutdownPending = false;
+        vr_clear_session_retry();
 
         printf("[VR] VR mode state: OFF\n");
     }
@@ -75,12 +131,14 @@ void vr_on_graphics_ready(void) {
 static void vr_handle_openxr_failure(void) {
     printf(
         "[VR] OpenXR stopped unexpectedly. "
-        "Returning to flat mode.\n"
+        "Returning to flat mode; deferring cleanup until the frame is complete.\n"
     );
 
-    vr_openxr_shutdown();
     sRenderTargetAspect = 0.0f;
     sVrActive = false;
+    sVrShutdownPending = true;
+    vr_clear_session_retry();
+    vr_clear_physical_punches();
 
     printf("[VR] VR mode state: OFF\n");
 }
@@ -95,21 +153,52 @@ void vr_begin_frame(void) {
         return;
     }
 
+    if (sVrSessionRetryPending) {
+        if (sVrSessionRetryFrames > 0) {
+            sVrSessionRetryFrames--;
+            return;
+        }
+
+        sVrSessionRetryAttempts++;
+
+        if (vr_start_graphics_session()) {
+            printf(
+                "[VR] OpenXR graphics-session handoff completed after "
+                "%u attempt(s).\n",
+                sVrSessionRetryAttempts
+            );
+            vr_clear_session_retry();
+        } else if (!vr_schedule_session_retry()) {
+            printf(
+                "[VR] OpenXR graphics-session handoff did not become ready "
+                "within the bounded retry window.\n"
+            );
+            vr_handle_openxr_failure();
+            return;
+        }
+
+        if (sVrSessionRetryPending) {
+            return;
+        }
+    }
+
     if (!vr_openxr_begin_frame()) {
         vr_handle_openxr_failure();
     }
 }
 
 void vr_end_frame(void) {
-    if (!sVrActive) {
-        return;
-    }
-
-    if (!vr_openxr_end_frame()) {
+    if (sVrActive && !vr_openxr_end_frame()) {
         vr_handle_openxr_failure();
     }
-}
 
+    if (sVrShutdownPending) {
+        /* Session-loss cleanup is intentionally delayed until all rendering
+         * callbacks for this frame have returned. */
+        vr_openxr_shutdown();
+        sVrShutdownPending = false;
+    }
+}
 bool vr_begin_eye(
     uint32_t eyeIndex,
     uint32_t* width,
@@ -258,6 +347,8 @@ void vr_shutdown(void) {
     sGraphicsReady = false;
     sRenderTargetAspect = 0.0f;
     sVrActive = false;
+    sVrShutdownPending = false;
+    vr_clear_session_retry();
 
     printf("[VR] VR subsystem shut down.\n");
 }
@@ -273,6 +364,8 @@ bool vr_set_active(bool active) {
         vr_clear_physical_punches();
         sRenderTargetAspect = 0.0f;
         sVrActive = false;
+        sVrShutdownPending = false;
+        vr_clear_session_retry();
 
         printf("[VR] VR mode state: OFF\n");
 
@@ -283,6 +376,13 @@ bool vr_set_active(bool active) {
         printf("[VR] VR mode state: ON\n");
         return true;
     }
+
+    if (sVrShutdownPending) {
+        vr_openxr_shutdown();
+        sVrShutdownPending = false;
+    }
+
+    vr_clear_session_retry();
 
     printf(
         "[VR] Starting persistent "
@@ -303,11 +403,23 @@ bool vr_set_active(bool active) {
     }
 
     sVrActive = true;
+    sVrShutdownPending = false;
 
     if (!vr_start_graphics_session()) {
+        if (vr_schedule_session_retry()) {
+            /* The OpenXR instance is valid, but SteamVR has not finished
+             * accepting the game's OpenGL graphics binding yet. Keep VR
+             * active while vr_begin_frame performs the bounded retry. */
+            vr_request_recenter();
+            printf("[VR] VR mode state: ON (waiting for SteamVR handoff)\n");
+            return true;
+        }
+
         vr_openxr_shutdown();
 
         sVrActive = false;
+        sVrShutdownPending = false;
+        vr_clear_session_retry();
 
         printf(
             "[VR] VR graphics session could "
@@ -315,10 +427,8 @@ bool vr_set_active(bool active) {
         );
 
         printf("[VR] VR mode state: OFF\n");
-
         return false;
     }
-
     // Establish the application's neutral headset height and yaw from the
     // first valid pose after OpenXR reaches FOCUSED. Valid poses can arrive
     // earlier while the headset is still waking, which previously left a

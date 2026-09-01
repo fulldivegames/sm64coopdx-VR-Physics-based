@@ -26,6 +26,7 @@ add_library(
     OBJECT
     ${SM64_ROOT}/src/pc/gfx/gfx_cc.c
     ${SM64_ROOT}/src/pc/gfx/gfx_opengl.c
+    ${SM64_ROOT}/src/pc/gfx/gfx_normal_maps.c
 )
 
 file(GLOB SM64_GAME_CORE_SOURCES CONFIGURE_DEPENDS

@@ -5,7 +5,7 @@
 
 // Public release version for the VR fork. Keep this separate from
 // SM64COOPDX_VERSION because the latter is part of multiplayer compatibility.
-#define SM64COOPDX_VR_VERSION "v0.8.1"
+#define SM64COOPDX_VR_VERSION "v0.8.4"
 
 // internal version
 #define VERSION_TEXT "v"

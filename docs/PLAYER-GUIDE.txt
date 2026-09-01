@@ -69,9 +69,9 @@ L button                Left stick click
 R button                Right stick click
 Pause                   Left Menu
 Close fist / grab       Hold that hand's Grip
-Right Trigger punch     Disabled by default; optional in Controller Settings
+Right Trigger punch     Disabled by default; optional in Controller Bindings
 
-Open Settings > VR > Controller Settings to remap the sticks and buttons.
+Open Settings > VR > Controller Bindings to remap the sticks and buttons.
 A connected gamepad can remain active alongside the VR controllers.
 
 
@@ -122,7 +122,7 @@ Camera Settings
   Camera mode, distance, per-character height, forward/back position,
   movement calibration, and field of view.
 
-Controller Settings
+Controller Bindings
   Motion-controller input, stick selection, button mapping, and optional
   Right Trigger punching.
 
@@ -159,6 +159,8 @@ Immersion
   Climb Up. The climb-up camera option is disabled by default.
 
 Effects
+  Optional Normal Maps are disabled by default. Enable Add Normal Maps to apply
+  matching texture normals; strength and gloss are adjustable in this menu.
   Twirl Tornado Effect is enabled by default. During Shy Guy, Spindrift, and
   Tweester twirls, a small collisionless rotating white tornado remains at the
   character's feet for the full action. It is 25% transparent and scales to

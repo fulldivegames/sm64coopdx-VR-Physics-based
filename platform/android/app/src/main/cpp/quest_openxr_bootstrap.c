@@ -263,7 +263,7 @@ static void handle_app_command(struct android_app *android_app, int32_t command)
 static bool wait_for_android_ready(QuestApp *app) {
     LOGI("Waiting for the Android activity and native window.");
     while (!app->android_app->destroyRequested && !app->exit_requested
-           && !(app->activity_resumed && app->window_ready)) {
+           && !app->window_ready) {
         int events = 0;
         struct android_poll_source *source = NULL;
         const int result =

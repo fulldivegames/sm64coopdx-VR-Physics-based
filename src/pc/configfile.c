@@ -99,7 +99,7 @@ static unsigned int sConfigVrCameraHeightVersion  = 9;
 unsigned int configVrMovementCalibration          = 50;
 unsigned int configVrFacingSource                 = VR_FACING_SOURCE_HEADSET;
 unsigned int configVrFov                          = 100;
-unsigned int configVrBrightness                   = 80;
+unsigned int configVrBrightness                   = 100;
 unsigned int configVrSaturation                   = 112;
 unsigned int configVrContrast                     = 115;
 #ifdef __ANDROID__
@@ -125,7 +125,7 @@ unsigned int configVrRasenShurikenChargeTime       = 20;
 bool         configVrSpawnPoolFireFlower           = true;
 bool         configVrSpawnPoolHammerSuit           = true;
 bool         configVrSpawnPoolSonicShoes           = true;
-bool         configVrSpawnPoolBigHands             = true;
+bool         configVrSpawnPoolBigHands             = false;
 bool         configVrDisableFog                   = true;
 bool         configVrDesktopMirror                = true;
 unsigned int configVrDesktopMirrorFps             = 60;
@@ -134,6 +134,13 @@ unsigned int configVrHudSpread                    = 120;
 unsigned int configVrMenuAnchor                   = VR_UI_ANCHOR_HEADSET;
 unsigned int configVrHudAnchor                    = VR_UI_ANCHOR_HEADSET;
 unsigned int configVrColorFilter                  = VR_COLOR_FILTER_NONE;
+bool         configVrNormalMaps                   = false;
+#ifdef __ANDROID__
+unsigned int configVrNormalMapStrength             = 650;
+#else
+unsigned int configVrNormalMapStrength             = 300;
+#endif
+unsigned int configVrNormalMapGloss                = 170;
 bool         configVrMotionControllerInput        = true;
 unsigned int configVrMoveStick                    = VR_CONTROLLER_STICK_LEFT;
 unsigned int configVrCameraStick                  = VR_CONTROLLER_STICK_RIGHT;
@@ -142,7 +149,7 @@ unsigned int configVrAttackBinding                = VR_CONTROLLER_BINDING_RIGHT_
 unsigned int configVrCrouchBinding                = VR_CONTROLLER_BINDING_LEFT_TRIGGER;
 unsigned int configVrLBinding                     = VR_CONTROLLER_BINDING_LEFT_STICK_CLICK;
 unsigned int configVrRBinding                     = VR_CONTROLLER_BINDING_RIGHT_STICK_CLICK;
-unsigned int configVrPauseBinding                 = VR_CONTROLLER_BINDING_LEFT_MENU;
+unsigned int configVrPauseBinding                 = VR_CONTROLLER_BINDING_LEFT_STICK_CLICK;
 unsigned int configVrSpecialBinding               = VR_CONTROLLER_BINDING_LEFT_SECONDARY;
 bool         configVrPhysicalPunching             = true;
 bool         configVrPhysicalGrabbing             = true;
@@ -160,6 +167,7 @@ unsigned int configVrSwimmingSpeed                = VR_SWIMMING_SPEED_DEFAULT;
 unsigned int configVrRunningSpeed                 = VR_RUNNING_SPEED_DEFAULT;
 bool         configVrImmersiveCameraMotion        = true;
 bool         configVrImmersiveFaceStuck           = true;
+bool         configVrImmersiveCrushedScreen      = true;
 bool         configVrImmersiveCannonCone          = true;
 bool         configVrImmersive3dSound             = true;
 bool         configVrImmersiveLedgeCamera         = true;
@@ -185,6 +193,7 @@ static unsigned int sConfigVrInteractionTuningVersion = 0;
 static unsigned int sConfigVrStarFocusDefaultVersion = 0;
 static unsigned int sConfigVrEffectsDefaultVersion = 0;
 static unsigned int sConfigVrBigHandsReachVersion = 0;
+static unsigned int sConfigVrSpawnPoolVersion = 0;
 unsigned int configVrGloveSize                    = 70;
 unsigned int configVrLeftGloveRotationX           = 180;
 unsigned int configVrLeftGloveRotationY           = 0;
@@ -505,6 +514,9 @@ static const struct ConfigOption options[] = {
     {.name = "vr_menu_anchor",                 .type = CONFIG_TYPE_UINT, .uintValue = &configVrMenuAnchor},
     {.name = "vr_hud_anchor",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrHudAnchor},
     {.name = "vr_color_filter",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrColorFilter},
+    {.name = "vr_normal_maps",                 .type = CONFIG_TYPE_BOOL, .boolValue = &configVrNormalMaps},
+    {.name = "vr_normal_map_strength",           .type = CONFIG_TYPE_UINT, .uintValue = &configVrNormalMapStrength},
+    {.name = "vr_normal_map_gloss",              .type = CONFIG_TYPE_UINT, .uintValue = &configVrNormalMapGloss},
     {.name = "vr_motion_controller_input",     .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControllerInput},
     {.name = "vr_move_stick",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrMoveStick},
     {.name = "vr_camera_stick",                .type = CONFIG_TYPE_UINT, .uintValue = &configVrCameraStick},
@@ -531,6 +543,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_running_speed",               .type = CONFIG_TYPE_UINT, .uintValue = &configVrRunningSpeed},
     {.name = "vr_immersive_camera_motion",      .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveCameraMotion},
     {.name = "vr_immersive_face_stuck",         .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveFaceStuck},
+    {.name = "vr_immersive_crushed_screen",      .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveCrushedScreen},
     {.name = "vr_immersive_cannon_cone",        .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveCannonCone},
     {.name = "vr_immersive_3d_sound",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersive3dSound},
     {.name = "vr_immersive_ledge_camera",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveLedgeCamera},
@@ -555,6 +568,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_star_focus_default_version",  .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrStarFocusDefaultVersion},
     {.name = "vr_effects_default_version",     .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrEffectsDefaultVersion},
     {.name = "vr_big_hands_reach_version",     .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrBigHandsReachVersion},
+    {.name = "vr_spawn_pool_version",            .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrSpawnPoolVersion},
     {.name = "vr_glove_size",                  .type = CONFIG_TYPE_UINT, .uintValue = &configVrGloveSize},
     {.name = "vr_left_glove_rotation_x",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrLeftGloveRotationX},
     {.name = "vr_left_glove_rotation_y",       .type = CONFIG_TYPE_UINT, .uintValue = &configVrLeftGloveRotationY},
@@ -1189,16 +1203,79 @@ static void configfile_migrate_vr_star_focus_default(void) {
     sConfigVrStarFocusDefaultVersion = 1;
 }
 
+static void configfile_migrate_vr_spawn_pool(void) {
+    if (sConfigVrSpawnPoolVersion < 1) {
+        // Big Hands is retained in the engine for future re-enabling, but is
+        // deliberately excluded from random/release spawns until it is ready.
+        configVrSpawnPoolBigHands = false;
+        sConfigVrSpawnPoolVersion = 1;
+    }
+}
 static void configfile_migrate_vr_effect_defaults(void) {
-    if (sConfigVrEffectsDefaultVersion >= 1) {
-        return;
+    if (sConfigVrEffectsDefaultVersion < 1) {
+        // Ultra Performance Mode previously wrote this option to false,
+        // leaving the tornado disabled even after the mode was turned back
+        // off. Repair that old side effect once; subsequent player choices
+        // remain untouched.
+        configVrTwirlTornadoEffect = true;
+        sConfigVrEffectsDefaultVersion = 1;
     }
 
-    // Ultra Performance Mode previously wrote this option to false, leaving
-    // the tornado disabled even after the mode was turned back off. Repair
-    // that old side effect once; subsequent player choices remain untouched.
-    configVrTwirlTornadoEffect = true;
-    sConfigVrEffectsDefaultVersion = 1;
+    if (sConfigVrEffectsDefaultVersion < 2) {
+        // 150 was the shipped normal-map strength before the relief/gloss
+        // controls were separated. Migrate only that old default so a player
+        // who deliberately chose another value keeps their calibration.
+        if (configVrNormalMapStrength == 150U) {
+            configVrNormalMapStrength = 220U;
+        }
+        sConfigVrEffectsDefaultVersion = 2;
+    }
+
+    if (sConfigVrEffectsDefaultVersion < 3) {
+        // Migrate only the previous normal-map defaults. Explicit player
+        // tuning remains unchanged when the new ranges are introduced.
+        if (configVrNormalMapStrength == 220U) {
+            configVrNormalMapStrength = 400U;
+        }
+        if (configVrNormalMapGloss == 25U) {
+            configVrNormalMapGloss = 0U;
+        }
+        sConfigVrEffectsDefaultVersion = 3;
+    }
+    if (sConfigVrEffectsDefaultVersion < 4) {
+        // Move only the previous shipped defaults. Values chosen explicitly
+        // by a player remain unchanged when the new defaults are introduced.
+#ifdef __ANDROID__
+        if (configVrNormalMapStrength == 400U) {
+            configVrNormalMapStrength = 650U;
+        }
+#endif
+        if (configVrNormalMapGloss == 0U) {
+            configVrNormalMapGloss = 250U;
+        }
+        sConfigVrEffectsDefaultVersion = 4;
+    }
+    if (sConfigVrEffectsDefaultVersion < 5) {
+        // Lower the shipped gloss default without overriding an explicit
+        // player calibration.
+        if (configVrNormalMapGloss == 250U) {
+            configVrNormalMapGloss = 180U;
+        }
+        sConfigVrEffectsDefaultVersion = 5;
+    }
+    if (sConfigVrEffectsDefaultVersion < 6) {
+        // Apply the new release defaults only when the saved value still
+        // matches the previous shipped default; explicit tuning remains.
+#ifndef __ANDROID__
+        if (configVrNormalMapStrength == 400U) {
+            configVrNormalMapStrength = 300U;
+        }
+#endif
+        if (configVrNormalMapGloss == 180U) {
+            configVrNormalMapGloss = 170U;
+        }
+        sConfigVrEffectsDefaultVersion = 6;
+    }
 }
 
 #ifndef __ANDROID__
@@ -1235,6 +1312,7 @@ static void configfile_load_internal(const char *filename, bool* error) {
         configfile_migrate_vr_camera_height();
         configfile_migrate_vr_interaction_tuning();
         configfile_migrate_vr_big_hands_reach();
+        configfile_migrate_vr_spawn_pool();
         configfile_migrate_vr_star_focus_default();
         configfile_migrate_vr_effect_defaults();
         configfile_save(filename);
@@ -1353,6 +1431,7 @@ NEXT_OPTION:
     configfile_migrate_vr_camera_height();
     configfile_migrate_vr_interaction_tuning();
     configfile_migrate_vr_big_hands_reach();
+    configfile_migrate_vr_spawn_pool();
     configfile_migrate_vr_star_focus_default();
     configfile_migrate_vr_effect_defaults();
 #ifndef __ANDROID__
