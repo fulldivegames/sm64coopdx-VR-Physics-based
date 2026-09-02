@@ -796,9 +796,8 @@ int main(int argc, char *argv[]) {
 
     show_update_popup();
 
-    if (can_update_game()) {
-        djui_open_update_panel();
-    }
+    // The legacy updater downloads the flat-screen SM64 Co-Op DX package.
+    // VR updates are exposed through the VR-specific main-menu button only.
 
     // initialize network
     if (gCLIOpts.network == NT_CLIENT) {

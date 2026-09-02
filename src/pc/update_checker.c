@@ -172,7 +172,7 @@ static bool get_version_remote(void) {
     sRemoteVersionStr[0] = '\0';
 
     internet = InternetOpenA(
-        "SM64-Co-Op-DX-VR/" SM64COOPDX_VR_VERSION,
+        "SM64-Co-Op-DX-VR/" SM64COOPDX_VR_CLIENT_VERSION,
         INTERNET_OPEN_TYPE_PRECONFIG,
         NULL,
         NULL,
@@ -321,7 +321,7 @@ static bool get_version_remote(void) {
     );
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_USERAGENT,
-                     "SM64-Co-Op-DX-VR/" SM64COOPDX_VR_VERSION);
+                     "SM64-Co-Op-DX-VR/" SM64COOPDX_VR_CLIENT_VERSION);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 3L);
@@ -348,25 +348,112 @@ static bool get_version_remote(void) {
 bool vr_update_install_latest(void) {
     if (sRemoteVersionStr[0] == '\0') return false;
     const char* exeDir = sys_exe_path_dir();
-    if (exeDir == NULL || exeDir[0] == '\0') return false;
-
-    char updaterPath[SYS_MAX_PATH] = { 0 };
-    if (snprintf(updaterPath, sizeof(updaterPath), "%s\\Co-op DX VR Updater.exe", exeDir) < 0) {
+    const char* exePath = sys_exe_path_file();
+    if (exeDir == NULL || exeDir[0] == '\0' ||
+        exePath == NULL || exePath[0] == '\0') {
         return false;
     }
-    if (GetFileAttributesA(updaterPath) == INVALID_FILE_ATTRIBUTES) {
-        printf("[VR] Bundled updater not found: %s\n", updaterPath);
+
+    // The upstream coopdx_updater.exe is hard-coded to the flat-screen
+    // project. Generate a VR-specific updater so this path can only select
+    // the PC VR repository and its VR-named package.
+    char tempPath[SYS_MAX_PATH] = { 0 };
+    if (GetTempPathA(sizeof(tempPath), tempPath) == 0) {
+        return false;
+    }
+    const DWORD nonce = GetTickCount();
+    char scriptPath[SYS_MAX_PATH] = { 0 };
+    char zipPath[SYS_MAX_PATH] = { 0 };
+    char stagePath[SYS_MAX_PATH] = { 0 };
+    if (snprintf(scriptPath, sizeof(scriptPath),
+                 "%ssm64vr-update-%lu.ps1", tempPath,
+                 (unsigned long)nonce) < 0 ||
+        snprintf(zipPath, sizeof(zipPath),
+                 "%ssm64vr-update-%lu.zip", tempPath,
+                 (unsigned long)nonce) < 0 ||
+        snprintf(stagePath, sizeof(stagePath),
+                 "%ssm64vr-stage-%lu", tempPath,
+                 (unsigned long)nonce) < 0) {
+        return false;
+    }
+
+    char escapedExeDir[SYS_MAX_PATH * 2] = { 0 };
+    char escapedExePath[SYS_MAX_PATH * 2] = { 0 };
+    char escapedZipPath[SYS_MAX_PATH * 2] = { 0 };
+    char escapedStagePath[SYS_MAX_PATH * 2] = { 0 };
+    char escapedScriptPath[SYS_MAX_PATH * 2] = { 0 };
+    const char* sourcePaths[] = {
+        exeDir, exePath, zipPath, stagePath, scriptPath
+    };
+    char* escapedPaths[] = {
+        escapedExeDir, escapedExePath, escapedZipPath,
+        escapedStagePath, escapedScriptPath
+    };
+    const size_t escapedCaps[] = {
+        sizeof(escapedExeDir), sizeof(escapedExePath),
+        sizeof(escapedZipPath), sizeof(escapedStagePath),
+        sizeof(escapedScriptPath)
+    };
+    for (size_t pathIndex = 0;
+         pathIndex < sizeof(sourcePaths) / sizeof(sourcePaths[0]);
+         pathIndex++) {
+        size_t outputIndex = 0;
+        for (const char* input = sourcePaths[pathIndex]; *input != '\0'; input++) {
+            if (outputIndex + 2 >= escapedCaps[pathIndex]) {
+                return false;
+            }
+            escapedPaths[pathIndex][outputIndex++] = *input;
+            if (*input == '\'') {
+                escapedPaths[pathIndex][outputIndex++] = '\'';
+            }
+        }
+        escapedPaths[pathIndex][outputIndex] = '\0';
+    }
+
+    FILE* script = fopen(scriptPath, "wb");
+    if (script == NULL) {
+        return false;
+    }
+    const int scriptResult = fprintf(script,
+        "$ErrorActionPreference='Stop';\n"
+        "$api='https://api.github.com/repos/fulldivegames/sm64coopdx-VR-Physics-based/releases/latest';\n"
+        "$headers=@{Accept='application/vnd.github+json';'User-Agent'='SM64-Co-Op-DX-VR-Updater'};\n"
+        "$exeDir='%s'; $exePath='%s'; $zipPath='%s'; $stagePath='%s';\n"
+        "Start-Sleep -Seconds 2;\n"
+        "$release=Invoke-RestMethod -Headers $headers -Uri $api;\n"
+        "if ($null -eq $release -or $release.draft -or $release.prerelease) { throw 'No stable PC VR release is available.' };\n"
+        "$expectedAsset='SM64-Co-Op-DX-VR-Windows-' + $release.tag_name + '.zip';\n"
+        "$asset=@($release.assets | Where-Object { $_.name -eq $expectedAsset }) | Select-Object -First 1;\n"
+        "if ($null -eq $asset) { throw ('PC VR asset not found: ' + $expectedAsset) };\n"
+        "Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri $asset.browser_download_url -OutFile $zipPath;\n"
+        "if (!(Test-Path -LiteralPath $zipPath -PathType Leaf)) { throw 'PC VR package download failed.' };\n"
+        "Expand-Archive -LiteralPath $zipPath -DestinationPath $stagePath -Force;\n"
+        "$payload=Get-ChildItem -LiteralPath $stagePath -Directory | Select-Object -First 1;\n"
+        "if ($null -eq $payload) { $payload=Get-Item -LiteralPath $stagePath };\n"
+        "if (!(Test-Path -LiteralPath (Join-Path $payload.FullName 'SM64-Co-Op-DX-VR.exe') -PathType Leaf)) { throw 'Downloaded asset is not a PC VR package.' };\n"
+        "Get-ChildItem -LiteralPath $payload.FullName -Force | Copy-Item -Destination $exeDir -Recurse -Force;\n"
+        "Start-Process -FilePath $exePath;\n"
+        "Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue;\n"
+        "Remove-Item -LiteralPath $stagePath -Recurse -Force -ErrorAction SilentlyContinue;\n"
+        "Remove-Item -LiteralPath '%s' -Force -ErrorAction SilentlyContinue;\n",
+        escapedExeDir, escapedExePath, escapedZipPath, escapedStagePath,
+        escapedScriptPath);
+    if (scriptResult < 0 || fclose(script) != 0) {
+        DeleteFileA(scriptPath);
         return false;
     }
 
     STARTUPINFOA si = { 0 };
     PROCESS_INFORMATION pi = { 0 };
     si.cb = sizeof(si);
-    char command[SYS_MAX_PATH + 4] = { 0 };
-    snprintf(command, sizeof(command), "\"%s\"", updaterPath);
-    if (!CreateProcessA(updaterPath, command, NULL, NULL, FALSE,
+    char command[SYS_MAX_PATH + 128] = { 0 };
+    if (snprintf(command, sizeof(command),
+                 "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"%s\"",
+                 scriptPath) < 0 ||
+        !CreateProcessA(NULL, command, NULL, NULL, FALSE,
                         CREATE_NEW_CONSOLE, NULL, exeDir, &si, &pi)) {
-        printf("[VR] Could not launch updater (error %lu).\n",
+        DeleteFileA(scriptPath);
+        printf("[VR] Could not launch VR updater (error %lu).\n",
                (unsigned long)GetLastError());
         return false;
     }

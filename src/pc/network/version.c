@@ -17,7 +17,7 @@ const char* get_version(void) {
 }
 
 const char* get_vr_version(void) {
-    return SM64COOPDX_VR_VERSION;
+    return SM64COOPDX_VR_CLIENT_VERSION;
 }
 
 #ifdef COMPILE_TIME

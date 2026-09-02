@@ -17,7 +17,6 @@ $zipPath = Join-Path $outputPath "$packageName.zip"
 
 $requiredFiles = @(
     "sm64coopdx.exe",
-    "coopdx_updater.exe",
     "discord_game_sdk.dll",
     "libopenxr_loader.dll",
     "libgcc_s_seh-1.dll",
@@ -63,7 +62,7 @@ if (Test-Path -LiteralPath $zipPath) {
 New-Item -ItemType Directory -Path $stagePath | Out-Null
 
 Copy-Item -LiteralPath (Join-Path $buildPath "sm64coopdx.exe") -Destination (Join-Path $stagePath "SM64-Co-Op-DX-VR.exe")
-Copy-Item -LiteralPath (Join-Path $buildPath "coopdx_updater.exe") -Destination (Join-Path $stagePath "Co-op DX VR Updater.exe")
+
 Copy-Item -LiteralPath (Join-Path $buildPath "discord_game_sdk.dll") -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $buildPath "libopenxr_loader.dll") -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $buildPath "libgcc_s_seh-1.dll") -Destination $stagePath
