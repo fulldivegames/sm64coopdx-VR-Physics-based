@@ -586,6 +586,12 @@ void *audio_thread(UNUSED void *arg) {
 }
 
 void produce_one_frame(void) {
+    // Let the VR updater replace the executable only after this process exits.
+    if (vr_update_should_exit()) {
+        game_exit();
+        return;
+    }
+
     // Execute native-menu Lua commands at a game-tick boundary, never while
     // DJUI is building a render list or invoking HUD hooks.
     exec_queued_chat_command();
