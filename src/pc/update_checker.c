@@ -432,6 +432,8 @@ bool vr_update_install_latest(void) {
         "if ($null -eq $payload) { $payload=Get-Item -LiteralPath $stagePath };\n"
         "if (!(Test-Path -LiteralPath (Join-Path $payload.FullName 'SM64-Co-Op-DX-VR.exe') -PathType Leaf)) { throw 'Downloaded asset is not a PC VR package.' };\n"
         "Get-ChildItem -LiteralPath $payload.FullName -Force | Copy-Item -Destination $exeDir -Recurse -Force;\n"
+        "Remove-Item -LiteralPath (Join-Path $exeDir 'Co-op DX VR Updater.exe') -Force -ErrorAction SilentlyContinue;\n"
+        "Remove-Item -LiteralPath (Join-Path $exeDir 'coopdx_updater.exe') -Force -ErrorAction SilentlyContinue;\n"
         "Start-Process -FilePath $exePath;\n"
         "Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue;\n"
         "Remove-Item -LiteralPath $stagePath -Recurse -Force -ErrorAction SilentlyContinue;\n"
