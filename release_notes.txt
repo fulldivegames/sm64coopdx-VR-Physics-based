@@ -1,5 +1,6 @@
 ## v0.8.4 — SteamVR and Controller Binding Fixes
 
+- Fixed the physical-climb distance cap that prevented reaching the top of tall poles in Bowser in the Sky.
 - Added reliable SteamVR/OpenXR runtime handoff behavior, including ALVR compatibility through SteamVR, without forcing a particular system runtime.
 - PC and Quest now use their matching GitHub release feeds, so PC VR updates resolve to the PC VR repository while Quest updates remain on the standalone repository.
 - Added controller-binding capture that waits for the next input, supports remapping, and keeps the right-primary menu A action independent from the gameplay Jump binding.

@@ -66,11 +66,13 @@ static void vr_special_moves_reset_big_hands(void);
 #define VR_CLIMB_NATIVE_SWEEP_SAMPLES 4
 #define VR_CLIMB_SURFACE_EXTRA_REACH 20.0f
 #define VR_BIG_HANDS_GROUND_REACH 120.0f
+#define VR_BIG_HANDS_ENABLED 0
 #define VR_CLIMB_SURFACE_HAND_RADIUS_MAX 24.0f
 #define VR_CLIMB_SURFACE_CLEARANCE 12.0f
 #define VR_CLIMB_MAX_SURFACE_CORRECTION 24.0f
 #define VR_CLIMB_MAX_ENVIRONMENT_CORRECTION 32.0f
 #define VR_CLIMB_MAX_CAMERA_OFFSET 360.0f
+#define VR_CLIMB_POLE_OFFSET_MARGIN 160.0f
 #define VR_CLIMB_SURFACE_EDGE_MARGIN 48.0f
 #define VR_CLIMB_SAFE_RELEASE_SAMPLE_FRAMES 3U
 #define VR_CLIMB_LEDGE_MIN_RISE 20.0f
@@ -1170,6 +1172,40 @@ static void vr_hand_interaction_prepare_climb_offset_update(void) {
         sVrPhysicalClimbCameraOffset
     );
     sVrPhysicalClimbOffsetTimestamp = gGlobalTimer;
+}
+
+static f32 vr_hand_interaction_max_climb_camera_offset(
+    const struct MarioState* mario
+) {
+    f32 maxOffset = VR_CLIMB_MAX_CAMERA_OFFSET;
+    if (mario == NULL ||
+        sVrPhysicalClimbType != VR_PHYSICAL_CLIMB_POLE ||
+        sVrPhysicalClimbPole == NULL) {
+        return maxOffset;
+    }
+
+    // A pole grip is allowed to travel for the full height of its native
+    // hitbox. The generic safety cap is intentionally retained for walls and
+    // ceilings, but applying it to poles stops tall poles (such as the first
+    // Bowser-in-the-Sky pole) after roughly 360 units.
+    const f32 poleHeight = fmaxf(
+        sVrPhysicalClimbPole->hitboxHeight,
+        1.0f
+    );
+    const f32 poleTop = sVrPhysicalClimbPole->oPosY +
+        poleHeight - 100.0f;
+    const f32 poleBottom = sVrPhysicalClimbPole->oPosY -
+        sVrPhysicalClimbPole->hitboxDownOffset;
+    const f32 travelToTop = fabsf(poleTop - mario->pos[1]);
+    const f32 travelToBottom = fabsf(poleBottom - mario->pos[1]);
+    const f32 poleTravel = fmaxf(travelToTop, travelToBottom);
+    if (isfinite(poleTravel)) {
+        maxOffset = fmaxf(
+            maxOffset,
+            poleTravel + VR_CLIMB_POLE_OFFSET_MARGIN
+        );
+    }
+    return maxOffset;
 }
 
 bool vr_hand_interaction_get_climb_camera_offset(Vec3f offset) {
@@ -4415,16 +4451,18 @@ static void vr_hand_interaction_sync_climb_collider_to_headset(
             sVrPhysicalClimbCameraOffset[1] +
         sVrPhysicalClimbCameraOffset[2] *
             sVrPhysicalClimbCameraOffset[2];
+    const f32 maxClimbCameraOffset =
+        vr_hand_interaction_max_climb_camera_offset(mario);
     if (!isfinite(climbOffsetSquared) ||
         climbOffsetSquared >
-            VR_CLIMB_MAX_CAMERA_OFFSET * VR_CLIMB_MAX_CAMERA_OFFSET) {
+            maxClimbCameraOffset * maxClimbCameraOffset) {
         const f32 climbOffsetLength = sqrtf(
             fmaxf(0.0f, climbOffsetSquared)
         );
         if (isfinite(climbOffsetLength) &&
             climbOffsetLength > 0.01f) {
             const f32 offsetScale =
-                VR_CLIMB_MAX_CAMERA_OFFSET / climbOffsetLength;
+                maxClimbCameraOffset / climbOffsetLength;
             for (u32 axis = 0; axis < 3; axis++) {
                 sVrPhysicalClimbCameraOffset[axis] *= offsetScale;
             }
@@ -6728,7 +6766,11 @@ static bool vr_special_moves_spawn_box_reward(
         case VR_BOX_REWARD_SONIC_SHOES:
             return vr_special_moves_spawn_sonic_shoes_pickup(parent, x, y, z, 20.0f);
         case VR_BOX_REWARD_BIG_HANDS:
+#if VR_BIG_HANDS_ENABLED
             return vr_special_moves_spawn_big_hands_pickup(parent, x, y, z, 20.0f);
+#else
+            return false;
+#endif
         default:
             return false;
     }
@@ -7298,6 +7340,9 @@ bool vr_special_moves_spawn_cheat_sonic_shoes(void) {
 }
 
 bool vr_special_moves_spawn_cheat_big_hands(void) {
+#if !VR_BIG_HANDS_ENABLED
+    return false;
+#else
     struct MarioState* mario = &gMarioStates[0];
     if (!vr_special_moves_online_allowed() || mario->marioObj == NULL) {
         return false;
@@ -7310,6 +7355,7 @@ bool vr_special_moves_spawn_cheat_big_hands(void) {
         mario->pos[2],
         0.0f
     );
+#endif
 }
 
 Gfx* geo_vr_sonic_shoe(
@@ -11026,6 +11072,9 @@ static u32 vr_special_moves_big_hands_elapsed(void) {
 }
 
 bool vr_special_moves_big_hands_active(void) {
+#if !VR_BIG_HANDS_ENABLED
+    return false;
+#else
     if (!sVrBigHandsPowered) {
         return false;
     }
@@ -11051,6 +11100,7 @@ bool vr_special_moves_big_hands_active(void) {
         sVrBigHandsTimer = (u16)(VR_BIG_HANDS_DURATION_FRAMES - elapsed);
     }
     return true;
+#endif
 }
 
 f32 vr_special_moves_big_hands_scale(void) {
@@ -11078,6 +11128,9 @@ f32 vr_special_moves_big_hands_scale(void) {
 }
 
 bool vr_special_moves_grant_big_hands(void) {
+#if !VR_BIG_HANDS_ENABLED
+    return false;
+#else
     if (!vr_special_moves_online_allowed() ||
         gMarioStates[0].marioObj == NULL) {
         return false;
@@ -11100,4 +11153,5 @@ bool vr_special_moves_grant_big_hands(void) {
         "big_hands_grow.mp3"
     );
     return true;
+#endif
 }

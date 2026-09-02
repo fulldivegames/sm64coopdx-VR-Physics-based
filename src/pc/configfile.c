@@ -125,6 +125,8 @@ unsigned int configVrRasenShurikenChargeTime       = 20;
 bool         configVrSpawnPoolFireFlower           = true;
 bool         configVrSpawnPoolHammerSuit           = true;
 bool         configVrSpawnPoolSonicShoes           = true;
+// Big Hands is retained in the config schema for a future rework, but is
+// disabled and hidden in this release.
 bool         configVrSpawnPoolBigHands             = false;
 bool         configVrDisableFog                   = true;
 bool         configVrDesktopMirror                = true;
@@ -135,11 +137,7 @@ unsigned int configVrMenuAnchor                   = VR_UI_ANCHOR_HEADSET;
 unsigned int configVrHudAnchor                    = VR_UI_ANCHOR_HEADSET;
 unsigned int configVrColorFilter                  = VR_COLOR_FILTER_NONE;
 bool         configVrNormalMaps                   = false;
-#ifdef __ANDROID__
-unsigned int configVrNormalMapStrength             = 650;
-#else
-unsigned int configVrNormalMapStrength             = 300;
-#endif
+unsigned int configVrNormalMapStrength             = 500;
 unsigned int configVrNormalMapGloss                = 170;
 bool         configVrMotionControllerInput        = true;
 unsigned int configVrMoveStick                    = VR_CONTROLLER_STICK_LEFT;
@@ -1203,11 +1201,11 @@ static void configfile_migrate_vr_star_focus_default(void) {
 }
 
 static void configfile_migrate_vr_spawn_pool(void) {
-    if (sConfigVrSpawnPoolVersion < 1) {
-        // Big Hands is retained in the engine for future re-enabling, but is
-        // deliberately excluded from random/release spawns until it is ready.
+    if (sConfigVrSpawnPoolVersion < 3) {
+        // Big Hands is hidden again until its movement and climbing behavior
+        // is reworked. Migrate older saves so it cannot remain enabled.
         configVrSpawnPoolBigHands = false;
-        sConfigVrSpawnPoolVersion = 1;
+        sConfigVrSpawnPoolVersion = 3;
     }
 }
 static void configfile_migrate_vr_effect_defaults(void) {
@@ -1274,6 +1272,16 @@ static void configfile_migrate_vr_effect_defaults(void) {
             configVrNormalMapGloss = 170U;
         }
         sConfigVrEffectsDefaultVersion = 6;
+    }
+
+    if (sConfigVrEffectsDefaultVersion < 7) {
+        // Move the previous platform defaults to the new shared default.
+        // Preserve any value the player calibrated themselves.
+        if (configVrNormalMapStrength == 650U ||
+            configVrNormalMapStrength == 300U) {
+            configVrNormalMapStrength = 500U;
+        }
+        sConfigVrEffectsDefaultVersion = 7;
     }
 }
 
@@ -1440,6 +1448,10 @@ NEXT_OPTION:
     // Motion-controller bindings are always enabled. The former user-facing
     // toggle was removed so an old saved false value cannot disable input.
     configVrMotionControllerInput = true;
+
+    // Big Hands remains in the schema for a later rework, but is completely
+    // disabled in this release even if an older config stored it as enabled.
+    configVrSpawnPoolBigHands = false;
 
     if (configGraphicsBackend < GAPI_GL || configGraphicsBackend > GAPI_MAX) { configGraphicsBackend = GAPI_GL; }
 

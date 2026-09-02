@@ -272,11 +272,6 @@ static void djui_panel_vr_spawn_sonic_shoes(struct DjuiBase* caller) {
     vr_special_moves_spawn_cheat_sonic_shoes();
 }
 
-static void djui_panel_vr_spawn_big_hands(struct DjuiBase* caller) {
-    (void)caller;
-    vr_special_moves_spawn_cheat_big_hands();
-}
-
 static void djui_panel_vr_spawn_wing_cap(UNUSED struct DjuiBase* caller) {
     vr_special_moves_spawn_cheat_cap(VR_CHEAT_SPAWN_WING_CAP);
 }
@@ -488,7 +483,6 @@ static void djui_panel_vr_spawn_pool_defaults(UNUSED struct DjuiBase* caller) {
     configVrSpawnPoolFireFlower = true;
     configVrSpawnPoolHammerSuit = true;
     configVrSpawnPoolSonicShoes = true;
-    configVrSpawnPoolBigHands = false;
     configVrSpecialRasengan = true;
 }
 
@@ -519,11 +513,7 @@ static void djui_panel_vr_effects_defaults(struct DjuiBase* caller) {
 
     configVrTwirlTornadoEffect = true;
     configVrNormalMaps = false;
-#ifdef __ANDROID__
-    configVrNormalMapStrength = 650;
-#else
-    configVrNormalMapStrength = 300;
-#endif
+    configVrNormalMapStrength = 500;
     configVrNormalMapGloss = 170;
 }
 
