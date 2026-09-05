@@ -1,0 +1,22 @@
+SM64 CO-OP DX VR v0.8.9 - LARGE-MAP PERFORMANCE UPDATE
+
+Extract the complete ZIP into its own folder and launch SM64-Co-Op-DX-VR.exe.
+Keep all included DLLs and resource folders beside the executable.
+You must supply your own legally obtained Super Mario 64 US ROM.
+
+Connect your headset using your OpenXR runtime. SteamVR supports Steam Link
+and ALVR. Enable VR in the game's settings. Controller bindings are available
+in VR settings; the default pause input is the left thumbstick click.
+
+This update's main change is batched renderer uploads for large maps. It also
+includes Big Hands in the special spawn pool, with extended hand interactions
+and climbing. Performance gains depend on your map and hardware.
+
+Optional normal maps can be enabled in VR display effects. They are disabled
+by default. Special power-ups remain unavailable in Regular Public Lobbies.
+
+Use the in-game update option for future PC VR releases. A separate upstream
+coopdx_updater.exe is intentionally not included. Do not mix this package
+with a regular flat-screen Co-op DX installation.
+
+Your existing save data and settings are not included in this package.

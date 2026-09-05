@@ -69,7 +69,7 @@ Copy-Item -LiteralPath (Join-Path $buildPath "libgcc_s_seh-1.dll") -Destination 
 Copy-Item -LiteralPath (Join-Path $buildPath "libstdc++-6.dll") -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $buildPath "libwinpthread-1.dll") -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $buildPath "normal_maps.bin") -Destination $stagePath
-Copy-Item -LiteralPath (Join-Path $repoRoot "docs/PLAYER-GUIDE.txt") -Destination (Join-Path $stagePath "README.txt")
+Copy-Item -LiteralPath (Join-Path $repoRoot "docs/PC-VR-PLAYER-GUIDE.txt") -Destination (Join-Path $stagePath "README.txt")
 
 $licensesPath = Join-Path $stagePath "licenses"
 New-Item -ItemType Directory -Path $licensesPath | Out-Null

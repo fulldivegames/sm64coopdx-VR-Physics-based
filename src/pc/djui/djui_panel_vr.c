@@ -272,6 +272,11 @@ static void djui_panel_vr_spawn_sonic_shoes(struct DjuiBase* caller) {
     vr_special_moves_spawn_cheat_sonic_shoes();
 }
 
+static void djui_panel_vr_spawn_big_hands(struct DjuiBase* caller) {
+    (void)caller;
+    vr_special_moves_spawn_cheat_big_hands();
+}
+
 static void djui_panel_vr_spawn_wing_cap(UNUSED struct DjuiBase* caller) {
     vr_special_moves_spawn_cheat_cap(VR_CHEAT_SPAWN_WING_CAP);
 }
@@ -301,6 +306,8 @@ static void djui_panel_vr_spawn_menu_create(struct DjuiBase* caller) {
         djui_panel_vr_spawn_hammer_suit);
     djui_button_create(body, "Sonic Shoes", DJUI_BUTTON_STYLE_NORMAL,
         djui_panel_vr_spawn_sonic_shoes);
+    djui_button_create(body, "Big Hands", DJUI_BUTTON_STYLE_NORMAL,
+        djui_panel_vr_spawn_big_hands);
     djui_button_create(
         body,
         DLANG(MENU, BACK),
@@ -367,6 +374,7 @@ static void djui_panel_vr_experimental_defaults(struct DjuiBase* caller) {
     configVrExperimentalClimbableColliders = false;
     configVrOriginalMarioMovement = false;
     configVrBackpedalSpeed = VR_BACKPEDAL_SPEED_DEFAULT;
+    configVrImmersiveFlipBillboards = false;
 }
 
 static void djui_panel_vr_controller_defaults(
@@ -483,6 +491,7 @@ static void djui_panel_vr_spawn_pool_defaults(UNUSED struct DjuiBase* caller) {
     configVrSpawnPoolFireFlower = true;
     configVrSpawnPoolHammerSuit = true;
     configVrSpawnPoolSonicShoes = true;
+    configVrSpawnPoolBigHands = true;
     configVrSpecialRasengan = true;
 }
 
@@ -789,6 +798,13 @@ static void djui_panel_vr_experimental_create(struct DjuiBase* caller) {
             body,
             "Colliders for Poles, Trees, and Hangables",
             &configVrExperimentalClimbableColliders,
+            NULL
+        );
+
+        djui_checkbox_create(
+            body,
+            "Flip Billboards",
+            &configVrImmersiveFlipBillboards,
             NULL
         );
 
@@ -1694,6 +1710,12 @@ static void djui_panel_vr_spawn_pool_create(struct DjuiBase* caller) {
         body,
         "Sonic Shoes",
         &configVrSpawnPoolSonicShoes,
+        NULL
+    );
+    djui_checkbox_create(
+        body,
+        "Big Hands",
+        &configVrSpawnPoolBigHands,
         NULL
     );
     djui_checkbox_create(

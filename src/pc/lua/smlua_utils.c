@@ -881,6 +881,8 @@ void smlua_dump_table(int index) {
 
 void smlua_logline(void) {
     lua_State* L = gLuaState;
+    // Native callers can report errors after the session's Lua VM closes.
+    if (L == NULL) { return; }
     lua_Debug info;
     int level = 0;
     while (lua_getstack(L, level, &info)) {

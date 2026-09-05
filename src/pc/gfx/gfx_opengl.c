@@ -44,6 +44,7 @@
 #include "gfx_normal_maps.h"
 #include "gfx_rendering_api.h"
 #include "gfx_pc.h"
+#include "gfx_gl_submission.h"
 #include "../vr/vr.h"
 
 #define TEX_CACHE_STEP 512
@@ -327,6 +328,7 @@ void gfx_opengl_shader_cache_get_stats(
 void gfx_opengl_shader_cache_finish_warmup(void) {
     // Linking can be deferred internally by the mobile driver. The dedicated
     // post-ROM boot is the one safe time to pay that cost before gameplay.
+    gfx_gl_queue_flush();
     glFinish();
 }
 
@@ -420,6 +422,7 @@ static struct ShaderProgram *shader_lookup_cache[
     SHADER_LOOKUP_CACHE_SIZE
 ];
 static GLuint opengl_vbo;
+
 static GLuint opengl_vao;
 
 static int tex_cache_size = 0;
@@ -489,13 +492,13 @@ static void gfx_opengl_vertex_array_set_attribs(struct ShaderProgram *prg) {
         if (location >= 0 && location < 32) {
             const uint32_t bit = UINT32_C(1) << (uint32_t)location;
             if ((opengl_enabled_attrib_mask & bit) == 0) {
-                glEnableVertexAttribArray(location);
+                gfx_queue_EnableVertexAttribArray(location);
                 opengl_enabled_attrib_mask |= bit;
             }
         } else if (location >= 0) {
-            glEnableVertexAttribArray(location);
+            gfx_queue_EnableVertexAttribArray(location);
         }
-        glVertexAttribPointer(location, prg->attrib_sizes[i], GL_FLOAT, GL_FALSE, num_floats * sizeof(float), (void *) (pos * sizeof(float)));
+        gfx_queue_VertexAttribPointer(location, prg->attrib_sizes[i], GL_FLOAT, GL_FALSE, num_floats * sizeof(float), (void *) (pos * sizeof(float)));
         opengl_attrib_layout_locations[i] = location;
         opengl_attrib_layout_sizes[i] = prg->attrib_sizes[i];
         pos += prg->attrib_sizes[i];
@@ -509,7 +512,7 @@ static inline void gfx_opengl_set_shader_uniforms(struct ShaderProgram *prg) {
     const bool initialized = prg->uniforms_initialized;
 
     if (prg->used_noise && (!initialized || prg->last_frame_count != frame_count)) {
-        glUniform1f(prg->uniform_locations[4], (float)frame_count);
+        gfx_queue_Uniform1f(prg->uniform_locations[4], (float)frame_count);
         prg->last_frame_count = frame_count;
     }
 
@@ -521,7 +524,7 @@ static inline void gfx_opengl_set_shader_uniforms(struct ShaderProgram *prg) {
         };
         if (!initialized || memcmp(prg->last_lightmap, lightmap,
                                    sizeof(lightmap)) != 0) {
-            glUniform3f(prg->uniform_locations[5],
+            gfx_queue_Uniform3f(prg->uniform_locations[5],
                         lightmap[0], lightmap[1], lightmap[2]);
             memcpy(prg->last_lightmap, lightmap, sizeof(lightmap));
         }
@@ -568,14 +571,14 @@ static inline void gfx_opengl_set_shader_uniforms(struct ShaderProgram *prg) {
         if (!initialized ||
             memcmp(prg->last_shader_flags, shaderFlags,
                    sizeof(shaderFlags)) != 0) {
-            glUniform1iv(prg->uniform_locations[6], SHADER_FLAG_MAX,
+            gfx_queue_Uniform1iv(prg->uniform_locations[6], SHADER_FLAG_MAX,
                          shaderFlags);
             memcpy(prg->last_shader_flags, shaderFlags, sizeof(shaderFlags));
         }
         if (!initialized ||
             memcmp(prg->last_shader_values, shaderValues,
                    sizeof(shaderValues)) != 0) {
-            glUniform1fv(prg->uniform_locations[7], SHADER_FLAG_MAX,
+            gfx_queue_Uniform1fv(prg->uniform_locations[7], SHADER_FLAG_MAX,
                          shaderValues);
             memcpy(prg->last_shader_values, shaderValues, sizeof(shaderValues));
         }
@@ -589,12 +592,12 @@ static inline void gfx_opengl_set_shader_uniforms(struct ShaderProgram *prg) {
             ? 1
             : configFiltering;
     if (!initialized || prg->last_filter != activeFiltering) {
-        glUniform1i(prg->uniform_locations[8], activeFiltering);
+        gfx_queue_Uniform1i(prg->uniform_locations[8], activeFiltering);
         prg->last_filter = activeFiltering;
     }
     if (!initialized ||
         prg->last_vr_color_filter != (int)configVrColorFilter) {
-        glUniform1i(prg->uniform_locations[9], (int)configVrColorFilter);
+        gfx_queue_Uniform1i(prg->uniform_locations[9], (int)configVrColorFilter);
         prg->last_vr_color_filter = (int)configVrColorFilter;
     }
 
@@ -663,21 +666,21 @@ static inline void gfx_opengl_set_texture_uniforms(struct ShaderProgram *prg, co
         if (!texture->sampler_initialized ||
             texture->sampler_linear != samplerLinear) {
             const GLenum filter = samplerLinear ? GL_LINEAR : GL_NEAREST;
-            glActiveTexture(GL_TEXTURE0 + tile);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+            gfx_queue_ActiveTexture(GL_TEXTURE0 + tile);
+            gfx_queue_TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+            gfx_queue_TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
             if (texture->normal_gltex != 0) {
-                glActiveTexture(GL_TEXTURE2 + tile);
-                glBindTexture(GL_TEXTURE_2D, texture->normal_gltex);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                gfx_queue_ActiveTexture(GL_TEXTURE2 + tile);
+                gfx_queue_BindTexture(GL_TEXTURE_2D, texture->normal_gltex);
+                gfx_queue_TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
                                 gfx_opengl_normal_map_min_filter(texture->normal_mipmapped));
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
+                gfx_queue_TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                gfx_queue_TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
                                 gfx_opengl_normal_map_wrap(texture->wrap_s != 0 ? texture->wrap_s : GL_REPEAT, texture->normal_clamp_edges));
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
+                gfx_queue_TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
                                 gfx_opengl_normal_map_wrap(texture->wrap_t != 0 ? texture->wrap_t : GL_REPEAT, texture->normal_clamp_edges));
-                glActiveTexture(GL_TEXTURE0 + tile);
-                glBindTexture(GL_TEXTURE_2D, texture->gltex);
+                gfx_queue_ActiveTexture(GL_TEXTURE0 + tile);
+                gfx_queue_BindTexture(GL_TEXTURE_2D, texture->gltex);
             }
             texture->sampler_initialized = true;
             texture->sampler_linear = samplerLinear;
@@ -690,9 +693,9 @@ static inline void gfx_opengl_set_texture_uniforms(struct ShaderProgram *prg, co
             prg->last_texture_size[tile][1] != texture->size[1] ||
             prg->last_texture_filter[tile] != texture->filter;
         if (uniformChanged) {
-            glUniform2f(prg->uniform_locations[tile*2 + 0],
+            gfx_queue_Uniform2f(prg->uniform_locations[tile*2 + 0],
                         texture->size[0], texture->size[1]);
-            glUniform1i(prg->uniform_locations[tile*2 + 1], texture->filter);
+            gfx_queue_Uniform1i(prg->uniform_locations[tile*2 + 1], texture->filter);
             prg->texture_uniform_valid[tile] = true;
             prg->last_texture_id[tile] = texture->gltex;
             prg->last_texture_size[tile][0] = texture->size[0];
@@ -709,10 +712,10 @@ static inline void gfx_opengl_set_texture_uniforms(struct ShaderProgram *prg, co
                 normal_enabled ? texture->normal_gltex : 0;
             if (!prg->normal_uniform_valid[tile] ||
                 prg->last_normal_texture_id[tile] != desired_normal_texture) {
-                glActiveTexture(GL_TEXTURE2 + tile);
-                glBindTexture(GL_TEXTURE_2D, desired_normal_texture);
-                glActiveTexture(GL_TEXTURE0 + tile);
-                glBindTexture(GL_TEXTURE_2D, texture->gltex);
+                gfx_queue_ActiveTexture(GL_TEXTURE2 + tile);
+                gfx_queue_BindTexture(GL_TEXTURE_2D, desired_normal_texture);
+                gfx_queue_ActiveTexture(GL_TEXTURE0 + tile);
+                gfx_queue_BindTexture(GL_TEXTURE_2D, texture->gltex);
                 // Cache the texture that is actually bound. This matters when
                 // the checkbox toggles: disabled binds 0, enabled rebinds the
                 // resident normal texture even though its GL id is unchanged.
@@ -720,7 +723,7 @@ static inline void gfx_opengl_set_texture_uniforms(struct ShaderProgram *prg, co
             }
             if (!prg->normal_uniform_valid[tile] ||
                 prg->last_normal_enabled[tile] != normal_enabled) {
-                glUniform1i(prg->normal_enabled_location[tile],
+                gfx_queue_Uniform1i(prg->normal_enabled_location[tile],
                             normal_enabled ? 1 : 0);
                 prg->normal_uniform_valid[tile] = true;
                 prg->last_normal_enabled[tile] = normal_enabled;
@@ -752,20 +755,20 @@ static inline GLfloat gfx_opengl_normal_map_strength_value(void) {
 
 static inline void gfx_opengl_set_normal_map_strength(struct ShaderProgram *prg) {
     if (prg != NULL && prg->normal_strength_location >= 0) {
-        glUniform1f(prg->normal_strength_location,
+        gfx_queue_Uniform1f(prg->normal_strength_location,
                     gfx_opengl_normal_map_strength_value());
     }
 }
 static inline void gfx_opengl_set_normal_map_gloss(struct ShaderProgram *prg) {
     if (prg != NULL && prg->normal_gloss_location >= 0) {
-        glUniform1f(prg->normal_gloss_location,
+        gfx_queue_Uniform1f(prg->normal_gloss_location,
                     (GLfloat)configVrNormalMapGloss / 400.0f);
     }
 }
 
 static void gfx_opengl_load_shader(struct ShaderProgram *new_prg) {
     opengl_prg = new_prg;
-    glUseProgram(new_prg->opengl_program_id);
+    gfx_queue_UseProgram(new_prg->opengl_program_id);
     // The settings menu can change strength while no program is bound at
     // frame start. Refresh it whenever a program becomes active so every
     // cached combiner observes the current slider value.
@@ -948,6 +951,7 @@ static void append_formula(char *buf, size_t *len, uint8_t* cmd, bool do_single,
 }
 
 static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorCombiner* cc) {
+    gfx_gl_queue_flush();
     struct CCFeatures ccf = { 0 };
     gfx_cc_get_features(cc, &ccf);
 
@@ -1535,7 +1539,7 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
         prg->last_normal_enabled[t] = false;
     }
 
-    glUseProgram(shader_program);
+    gfx_queue_UseProgram(shader_program);
     for (int t = 0; t < 2; t++) {
         if (ccf.used_textures[t]) {
             char name[16];
@@ -1545,7 +1549,7 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
             prg->uniform_locations[t * 2] = glGetUniformLocation(shader_program, name);
             sprintf(name, "uTex%dFilter", t);
             prg->uniform_locations[t * 2 + 1] = glGetUniformLocation(shader_program, name);
-            glUniform1i(sampler_location, t);
+            gfx_queue_Uniform1i(sampler_location, t);
         }
     }
     if (use_normal_map) {
@@ -1558,19 +1562,19 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
                 snprintf(name, sizeof(name), "uNormalMap%d", t);
                 prg->normal_enabled_location[t] =
                     glGetUniformLocation(shader_program, name);
-                glUniform1i(prg->normal_sampler_location[t], 2 + t);
+                gfx_queue_Uniform1i(prg->normal_sampler_location[t], 2 + t);
             }
         }
         prg->normal_strength_location =
             glGetUniformLocation(shader_program, "uNormalMapStrength");
         if (prg->normal_strength_location >= 0) {
-            glUniform1f(prg->normal_strength_location,
+            gfx_queue_Uniform1f(prg->normal_strength_location,
                         gfx_opengl_normal_map_strength_value());
         }
         prg->normal_gloss_location =
             glGetUniformLocation(shader_program, "uNormalMapGloss");
         if (prg->normal_gloss_location >= 0) {
-            glUniform1f(prg->normal_gloss_location,
+            gfx_queue_Uniform1f(prg->normal_gloss_location,
                         (GLfloat)configVrNormalMapGloss / 400.0f);
         }
     }
@@ -1654,8 +1658,8 @@ static GLuint gfx_opengl_new_texture(void) {
 static void gfx_opengl_select_texture(int tile, GLuint texture_id) {
     opengl_tex[tile] = tex_cache + texture_id;
     opengl_curtex = tile;
-    glActiveTexture(GL_TEXTURE0 + tile);
-    glBindTexture(GL_TEXTURE_2D, opengl_tex[tile]->gltex);
+    gfx_queue_ActiveTexture(GL_TEXTURE0 + tile);
+    gfx_queue_BindTexture(GL_TEXTURE_2D, opengl_tex[tile]->gltex);
     gfx_opengl_set_texture_uniforms(opengl_prg, tile);
 }
 
@@ -1663,6 +1667,7 @@ static void gfx_opengl_upload_texture(const uint8_t *rgba32_buf, int width, int 
 #if defined(__ANDROID__)
     const uint64_t upload_start = gfx_opengl_monotonic_ns();
 #endif
+    gfx_gl_queue_flush();
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba32_buf);
 #if defined(__ANDROID__)
     sTextureUploadCount++;
@@ -1684,6 +1689,7 @@ static void gfx_opengl_on_texture_uploaded(void) {
             &normal_rgba, &normal_width, &normal_height,
             (int)texture->size[0], (int)texture->size[1])) {
         if (texture->normal_gltex != 0) {
+            gfx_gl_queue_flush();
             glDeleteTextures(1, &texture->normal_gltex);
             texture->normal_gltex = 0;
         }
@@ -1702,12 +1708,13 @@ static void gfx_opengl_on_texture_uploaded(void) {
     texture->normal_clamp_edges = gfx_opengl_normal_map_has_discontinuous_edges(
         normal_rgba, normal_width, normal_height
     );
-    glActiveTexture(GL_TEXTURE2 + opengl_curtex);
-    glBindTexture(GL_TEXTURE_2D, texture->normal_gltex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
+    gfx_queue_ActiveTexture(GL_TEXTURE2 + opengl_curtex);
+    gfx_queue_BindTexture(GL_TEXTURE_2D, texture->normal_gltex);
+    gfx_queue_TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
                     gfx_opengl_normal_map_wrap(texture->wrap_s != 0 ? texture->wrap_s : GL_REPEAT, texture->normal_clamp_edges));
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
+    gfx_queue_TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
                     gfx_opengl_normal_map_wrap(texture->wrap_t != 0 ? texture->wrap_t : GL_REPEAT, texture->normal_clamp_edges));
+    gfx_gl_queue_flush();
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, normal_width, normal_height, 0,
                  GL_RGBA, GL_UNSIGNED_BYTE, normal_rgba);
     // Normal-map samples need mip levels when a low-resolution texture is
@@ -1719,15 +1726,16 @@ static void gfx_opengl_on_texture_uploaded(void) {
         (normal_width & (normal_width - 1)) == 0 &&
         (normal_height & (normal_height - 1)) == 0;
     if (texture->normal_mipmapped) {
+        gfx_gl_queue_flush();
         glGenerateMipmap(GL_TEXTURE_2D);
     }
     const GLenum normal_filter = gfx_opengl_normal_map_min_filter(texture->normal_mipmapped);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, normal_filter);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gfx_queue_TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, normal_filter);
+    gfx_queue_TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     free(normal_rgba);
     texture->has_normal = true;
-    glActiveTexture(GL_TEXTURE0 + opengl_curtex);
-    glBindTexture(GL_TEXTURE_2D, texture->gltex);
+    gfx_queue_ActiveTexture(GL_TEXTURE0 + opengl_curtex);
+    gfx_queue_BindTexture(GL_TEXTURE_2D, texture->gltex);
     if (opengl_prg != NULL) {
         gfx_opengl_set_texture_uniforms(opengl_prg, opengl_curtex);
     }
@@ -1744,11 +1752,11 @@ static void gfx_opengl_set_sampler_parameters(int tile, bool linear_filter, uint
     const GLenum filter = samplerLinear ? GL_LINEAR : GL_NEAREST;
     const GLenum wrap_s = gfx_cm_to_opengl(cms);
     const GLenum wrap_t = gfx_cm_to_opengl(cmt);
-    glActiveTexture(GL_TEXTURE0 + tile);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap_s);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap_t);
+    gfx_queue_ActiveTexture(GL_TEXTURE0 + tile);
+    gfx_queue_TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+    gfx_queue_TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+    gfx_queue_TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap_s);
+    gfx_queue_TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap_t);
     opengl_curtex = tile;
     if (opengl_tex[tile]) {
         struct GLTexture *texture = opengl_tex[tile];
@@ -1758,15 +1766,15 @@ static void gfx_opengl_set_sampler_parameters(int tile, bool linear_filter, uint
         texture->wrap_s = wrap_s;
         texture->wrap_t = wrap_t;
         if (texture->normal_gltex != 0) {
-            glActiveTexture(GL_TEXTURE2 + tile);
-            glBindTexture(GL_TEXTURE_2D, texture->normal_gltex);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+            gfx_queue_ActiveTexture(GL_TEXTURE2 + tile);
+            gfx_queue_BindTexture(GL_TEXTURE_2D, texture->normal_gltex);
+            gfx_queue_TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
                             gfx_opengl_normal_map_min_filter(texture->normal_mipmapped));
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap_s);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap_t);
-            glActiveTexture(GL_TEXTURE0 + tile);
-            glBindTexture(GL_TEXTURE_2D, texture->gltex);
+            gfx_queue_TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            gfx_queue_TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap_s);
+            gfx_queue_TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap_t);
+            gfx_queue_ActiveTexture(GL_TEXTURE0 + tile);
+            gfx_queue_BindTexture(GL_TEXTURE_2D, texture->gltex);
         }
         gfx_opengl_set_texture_uniforms(opengl_prg, tile);
     }
@@ -1774,23 +1782,23 @@ static void gfx_opengl_set_sampler_parameters(int tile, bool linear_filter, uint
 
 static void gfx_opengl_set_depth_test(bool depth_test) {
     if (depth_test) {
-        glEnable(GL_DEPTH_TEST);
+        gfx_queue_Enable(GL_DEPTH_TEST);
     } else {
-        glDisable(GL_DEPTH_TEST);
+        gfx_queue_Disable(GL_DEPTH_TEST);
     }
 }
 
 static void gfx_opengl_set_depth_mask(bool z_upd) {
-    glDepthMask(z_upd ? GL_TRUE : GL_FALSE);
+    gfx_queue_DepthMask(z_upd ? GL_TRUE : GL_FALSE);
 }
 
 static void gfx_opengl_set_zmode_decal(bool zmode_decal) {
     if (zmode_decal) {
-        glPolygonOffset(-2, -2);
-        glEnable(GL_POLYGON_OFFSET_FILL);
+        gfx_queue_PolygonOffset(-2, -2);
+        gfx_queue_Enable(GL_POLYGON_OFFSET_FILL);
     } else {
-        glPolygonOffset(0, 0);
-        glDisable(GL_POLYGON_OFFSET_FILL);
+        gfx_queue_PolygonOffset(0, 0);
+        gfx_queue_Disable(GL_POLYGON_OFFSET_FILL);
     }
 }
 
@@ -1805,7 +1813,7 @@ static void gfx_opengl_set_viewport(int x, int y, int width, int height) {
         return;
     }
 #endif
-    glViewport(x, y, width, height);
+    gfx_queue_Viewport(x, y, width, height);
 #ifdef __ANDROID__
     static bool logged = false;
     if (!logged) {
@@ -1819,7 +1827,7 @@ static void gfx_opengl_set_viewport(int x, int y, int width, int height) {
 }
 
 static void gfx_opengl_set_scissor(int x, int y, int width, int height) {
-    glScissor(x, y, width, height);
+    gfx_queue_Scissor(x, y, width, height);
 #ifdef __ANDROID__
     static bool logged = false;
     if (!logged) {
@@ -1834,13 +1842,14 @@ static void gfx_opengl_set_scissor(int x, int y, int width, int height) {
 
 static void gfx_opengl_set_use_alpha(bool use_alpha) {
     if (use_alpha) {
-        glEnable(GL_BLEND);
+        gfx_queue_Enable(GL_BLEND);
     } else {
-        glDisable(GL_BLEND);
+        gfx_queue_Disable(GL_BLEND);
     }
 }
 
 static void gfx_opengl_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
+    if (buf_vbo_len == 0 || opengl_prg == NULL || opengl_prg->num_floats == 0) return;
     //printf("flushing %d tris\n", buf_vbo_num_tris);
 #ifdef __ANDROID__
     static bool logged_world = false;
@@ -1876,43 +1885,12 @@ static void gfx_opengl_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_
     }
 #endif
 #ifdef __ANDROID__
-    static bool completed_draw_diagnostics = false;
-    if (!completed_draw_diagnostics) {
-        const GLenum pending_error = glGetError();
-        if (pending_error != GL_NO_ERROR) {
-            __android_log_print(ANDROID_LOG_ERROR, "SM64CoopDXVR",
-                                "GLES error before vertex upload: 0x%04x.", pending_error);
-        }
-    }
-#endif
-#ifdef __ANDROID__
     sDrawCallCount++;
     sTriangleCount += buf_vbo_num_tris;
     sVertexUploadBytes += sizeof(float) * buf_vbo_len;
 #endif
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * buf_vbo_len,
-                 buf_vbo, GL_STREAM_DRAW);
-#ifdef __ANDROID__
-    if (!completed_draw_diagnostics) {
-        const GLenum upload_error = glGetError();
-        if (upload_error != GL_NO_ERROR) {
-            __android_log_print(ANDROID_LOG_ERROR, "SM64CoopDXVR",
-                                "GLES vertex upload error: 0x%04x (%zu floats).",
-                                upload_error, buf_vbo_len);
-        }
-    }
-#endif
-    glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
-#ifdef __ANDROID__
-    if (!completed_draw_diagnostics) {
-        const GLenum error = glGetError();
-        if (error != GL_NO_ERROR) {
-            __android_log_print(ANDROID_LOG_ERROR, "SM64CoopDXVR",
-                                "First GLES draw error: 0x%04x.", error);
-        }
-        completed_draw_diagnostics = true;
-    }
-#endif
+    gfx_gl_queue_draw(buf_vbo, sizeof(float)*buf_vbo_len,
+                      opengl_prg->num_floats*sizeof(float), buf_vbo_num_tris);
 }
 
 static inline bool gl_version_is_supported(int major, int minor, bool is_es) {
@@ -2035,28 +2013,32 @@ static void gfx_opengl_sync_color_filter_state(void) {
         opengl_color_filter_state_valid = true;
         if (opengl_prg != NULL &&
             opengl_prg->uniform_locations[9] >= 0) {
-            glUniform1i(opengl_prg->uniform_locations[9],
+            gfx_queue_Uniform1i(opengl_prg->uniform_locations[9],
                         (GLint)configVrColorFilter);
             opengl_prg->last_vr_color_filter = (int)configVrColorFilter;
         }
     }
 }
 static void gfx_opengl_start_frame(void) {
+    gfx_gl_queue_end();
     frame_count++;
 
-    glDisable(GL_SCISSOR_TEST);
-    glDepthMask(GL_TRUE); // Must be set to clear Z-buffer
+    gfx_queue_Disable(GL_SCISSOR_TEST);
+    gfx_queue_DepthMask(GL_TRUE); // Must be set to clear Z-buffer
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glEnable(GL_SCISSOR_TEST);
+    gfx_queue_Enable(GL_SCISSOR_TEST);
     gfx_opengl_sync_normal_maps_state();
     gfx_opengl_sync_color_filter_state();
+    gfx_gl_queue_begin();
 }
 
 static void gfx_opengl_end_frame(void) {
+    gfx_gl_queue_end();
 }
 
 static void gfx_opengl_finish_render(void) {
+    gfx_gl_queue_end();
 }
 
 static const char* gfx_opengl_get_name(void) {
@@ -2064,6 +2046,7 @@ static const char* gfx_opengl_get_name(void) {
 }
 
 static void gfx_opengl_shutdown(void) {
+    gfx_gl_queue_shutdown();
     opengl_enabled_attrib_mask = 0;
     opengl_attrib_layout_valid = false;
     opengl_color_filter_state_valid = false;
@@ -2074,9 +2057,11 @@ static void gfx_opengl_shutdown(void) {
     }
     if (num_textures > 0 && tex_cache != NULL) {
         for (int i = 0; i < num_textures; i++) {
+            gfx_gl_queue_flush();
             glDeleteTextures(1, &tex_cache[i].gltex);
             if (tex_cache[i].normal_gltex != 0) {
-                glDeleteTextures(1, &tex_cache[i].normal_gltex);
+                gfx_gl_queue_flush();
+            glDeleteTextures(1, &tex_cache[i].normal_gltex);
             }
         }
     }

@@ -252,6 +252,7 @@ extern bool         configVrImmersiveCarrySpeed;
 extern bool         configVrImmersiveStarSpawnFocus;
 extern bool         configVrImmersiveGhostPunchArm;
 extern bool         configVrImmersiveMatchMarioHeight;
+extern bool         configVrImmersiveFlipBillboards;
 extern bool         configVrMovementOverhaul;
 extern bool         configVrMarioPunchSound;
 extern bool         configVrMotionControlledDive;

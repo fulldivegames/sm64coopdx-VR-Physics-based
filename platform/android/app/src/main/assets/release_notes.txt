@@ -1,3 +1,11 @@
+## v0.8.9 — Large-Map Performance Update
+
+- Major shared PC VR/Quest rendering optimization: batch vertex uploads while preserving draw order, textures, and render state. Dramatically improved the tested Sonic Adventure DX map on Quest; benefits apply to other maps using the same rendering path and vary by workload.
+- Added the first public Big Hands power-up to the special spawn pool, with extended hand-based grabbing, punching, and surface climbing. Increased reach by 1.5x and retained independent hand attachments.
+- Tightened nearby-surface grab detection. The first-person body stays hidden after a grab until Mario lands.
+- Fixed stale special-move audio handles during session shutdown, addressing a stop-hosting crash.
+- Preserved the VR-specific updater and existing controller bindings, normal maps, and filters.
+
 ## v0.8.4 — SteamVR and Controller Binding Fixes
 
 - Added reliable SteamVR/OpenXR runtime handoff behavior, including ALVR compatibility through SteamVR, without forcing a particular system runtime.

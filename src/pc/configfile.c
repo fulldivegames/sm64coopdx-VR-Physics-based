@@ -125,9 +125,7 @@ unsigned int configVrRasenShurikenChargeTime       = 20;
 bool         configVrSpawnPoolFireFlower           = true;
 bool         configVrSpawnPoolHammerSuit           = true;
 bool         configVrSpawnPoolSonicShoes           = true;
-// Big Hands is retained in the config schema for a future rework, but is
-// disabled and hidden in this release.
-bool         configVrSpawnPoolBigHands             = false;
+bool         configVrSpawnPoolBigHands             = true;
 bool         configVrDisableFog                   = true;
 bool         configVrDesktopMirror                = true;
 unsigned int configVrDesktopMirrorFps             = 60;
@@ -176,6 +174,7 @@ bool         configVrImmersiveCarrySpeed          = false;
 bool         configVrImmersiveStarSpawnFocus       = false;
 bool         configVrImmersiveGhostPunchArm        = true;
 bool         configVrImmersiveMatchMarioHeight     = false;
+bool         configVrImmersiveFlipBillboards       = false;
 bool         configVrMovementOverhaul             = false;
 bool         configVrMarioPunchSound              = true;
 bool         configVrMotionControlledDive         = true;
@@ -551,6 +550,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_immersive_star_spawn_focus",    .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveStarSpawnFocus},
     {.name = "vr_immersive_ghost_punch_arm",     .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveGhostPunchArm},
     {.name = "vr_immersive_match_mario_height",  .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveMatchMarioHeight},
+    {.name = "vr_immersive_flip_billboards",     .type = CONFIG_TYPE_BOOL, .boolValue = &configVrImmersiveFlipBillboards},
     {.name = "vr_mario_punch_sound",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMarioPunchSound},
     {.name = "vr_motion_controlled_dive",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControlledDive},
     {.name = "vr_motion_controlled_ground_dive",.type = CONFIG_TYPE_BOOL, .boolValue = &configVrMotionControlledGroundDive},
@@ -1201,11 +1201,11 @@ static void configfile_migrate_vr_star_focus_default(void) {
 }
 
 static void configfile_migrate_vr_spawn_pool(void) {
-    if (sConfigVrSpawnPoolVersion < 3) {
-        // Big Hands is hidden again until its movement and climbing behavior
-        // is reworked. Migrate older saves so it cannot remain enabled.
-        configVrSpawnPoolBigHands = false;
-        sConfigVrSpawnPoolVersion = 3;
+    if (sConfigVrSpawnPoolVersion < 4) {
+        // The previous public build forcibly saved this as disabled. Enable
+        // the first public Big Hands release once, then respect user choices.
+        configVrSpawnPoolBigHands = true;
+        sConfigVrSpawnPoolVersion = 4;
     }
 }
 static void configfile_migrate_vr_effect_defaults(void) {
@@ -1448,10 +1448,6 @@ NEXT_OPTION:
     // Motion-controller bindings are always enabled. The former user-facing
     // toggle was removed so an old saved false value cannot disable input.
     configVrMotionControllerInput = true;
-
-    // Big Hands remains in the schema for a later rework, but is completely
-    // disabled in this release even if an older config stored it as enabled.
-    configVrSpawnPoolBigHands = false;
 
     if (configGraphicsBackend < GAPI_GL || configGraphicsBackend > GAPI_MAX) { configGraphicsBackend = GAPI_GL; }
 

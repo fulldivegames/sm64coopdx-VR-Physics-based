@@ -1553,6 +1553,9 @@ static void vr_patch_controller_hand_matrices(uint32_t eyeIndex) {
             ) && sVrControllerCameraInverseValid) {
             // Keep raw tracking separate from the Big Hands visual target.
             const bool bigHandsActive = vr_special_moves_big_hands_active();
+            // Extend the late-latched visual pose just like the interaction
+            // target. Apply only the existing contact-plane projection here;
+            // never advance the gameplay sweep history from the render loop.
             if (bigHandsActive) {
                 Vec3f reachWorldPosition;
                 if (vr_get_controller_world_fist_reach_target_from_state(
@@ -3184,15 +3187,13 @@ static f32 vr_big_hands_reach_scale(void) {
         VR_BIG_HANDS_REACH_MIN,
         VR_BIG_HANDS_REACH_MAX
     );
-    // Reach increases with the slider. Zero is the unextended controller
-    // distance, 150 is the requested 5x default, and 300 is the requested
-    // 10x maximum. The two halves remain linear so every slider value has a
-    // predictable physical effect.
+    // Preserve the slider curve with 1.5x greater reach in every direction:
+    // 150 now gives 7.5x and 300 gives 15x. The distance cap below scales too.
     if (setting <= 150U) {
-        return 1.0f + (f32)setting * 4.0f / 150.0f;
+        return 1.5f * (1.0f + (f32)setting * 4.0f / 150.0f);
     }
-    return 5.0f +
-        ((f32)setting - 150.0f) * 5.0f / 150.0f;
+    return 1.5f * (5.0f +
+        ((f32)setting - 150.0f) * 5.0f / 150.0f);
 }
 
 /*
@@ -4015,6 +4016,11 @@ static void patch_mtx_vr_billboards(uint32_t eyeIndex) {
         }
     }
 
+    Mat4 billboardFlipRotation;
+    mtxf_identity(billboardFlipRotation);
+    billboardFlipRotation[0][0] = -1.0f;
+    billboardFlipRotation[2][2] = -1.0f;
+
     for (struct MtxInterp* interp = sVrBillboardHead;
          interp != NULL;
          interp = interp->nextVrBillboard) {
@@ -4040,6 +4046,21 @@ static void patch_mtx_vr_billboards(uint32_t eyeIndex) {
                 interp->vrBase.m,
                 inverseFullFacingRotation
             );
+        }
+
+        if (configVrImmersiveFlipBillboards) {
+            /*
+             * Rotate the already camera-facing billboard basis 180 degrees
+             * around its local up axis. This selects the reverse face while
+             * retaining the existing full/cylindrical HMD-facing transform.
+             */
+            Mat4 flipped;
+            mtxf_mul(
+                flipped,
+                adjusted,
+                billboardFlipRotation
+            );
+            mtxf_copy(adjusted, flipped);
         }
 
         // The inverse rotation is for the billboard's axes only. Its center
@@ -5586,7 +5607,29 @@ static void geo_process_master_list_sub(struct GraphNodeMasterList *node) {
                 gSPMatrix(gDisplayListHead++, VIRTUAL_TO_PHYSICAL(currList->transformPrev),
                           G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_NOPUSH);
 
+                /*
+                 * A 180-degree billboard rotation presents the reverse face.
+                 * Allow either face for this draw only; restoring back-face
+                 * culling keeps subsequent ordinary geometry unchanged and
+                 * avoids a global culling/performance change.
+                 */
+                const bool flipBillboardFace =
+                    vr_is_active() &&
+                    configVrImmersiveFlipBillboards &&
+                    currList->billboard != VR_BILLBOARD_NONE;
+                if (flipBillboardFace) {
+                    gSPClearGeometryMode(
+                        gDisplayListHead++,
+                        G_CULL_BOTH
+                    );
+                }
                 gSPDisplayList(gDisplayListHead++, currList->displayList);
+                if (flipBillboardFace) {
+                    gSPSetGeometryMode(
+                        gDisplayListHead++,
+                        G_CULL_BACK
+                    );
+                }
 
                 currList = currList->next;
             }
@@ -5637,7 +5680,7 @@ static bool vr_hide_local_first_person_mario_part(void) {
          action == ACT_CRAWLING ||
          action == ACT_STOP_CRAWLING);
     const bool hidePhysicalClimbBody =
-        vr_hand_interaction_is_physical_climb_active(&gMarioStates[0]);
+        vr_hand_interaction_should_hide_body(&gMarioStates[0]);
     const bool hideTrueFirstPersonFlipBody =
         configVrExperimentalTrueFirstPerson &&
         (action == ACT_BACKFLIP ||
@@ -7376,7 +7419,7 @@ static void geo_process_object(struct Object *node) {
         node == gMarioStates[0].marioObj;
     const bool hidePhysicalClimbBody =
         localMarioInVrFirstPerson &&
-        vr_hand_interaction_is_physical_climb_active(&gMarioStates[0]);
+        vr_hand_interaction_should_hide_body(&gMarioStates[0]);
     const bool processLocalMarioVrSkeleton =
         localMarioInVrFirstPerson &&
         (((configVrFirstPersonBody || configVrFeetOnlyBody) &&

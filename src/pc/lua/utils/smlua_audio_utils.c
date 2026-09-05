@@ -2,6 +2,7 @@
 #include "seq_ids.h"
 #include "audio/external.h"
 #include "game/camera.h"
+#include "game/vr_hand_interaction.h"
 #include "engine/math_util.h"
 #include "pc/mods/mods.h"
 #include "pc/mods/mod_fs.h"
@@ -795,6 +796,7 @@ void audio_custom_update_volume(void) {
 }
 
 void audio_custom_shutdown(void) {
+    vr_hand_interaction_audio_shutdown();
     if (!sModAudioPool) { return; }
 
     audio_sample_destroy_pending_copies();

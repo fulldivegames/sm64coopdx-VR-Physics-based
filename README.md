@@ -13,7 +13,15 @@
   Native ARM64/OpenXR VR for Meta Quest. No PC is required after installation.
 </p>
 
-> **Current public release: v0.8.4 — SteamVR and Controller Binding Fixes**
+> **Current release: v0.8.9 — Large-Map Performance Update**
+
+### What's new
+
+- Shared PC VR/Quest renderer now batches vertex uploads while preserving draw order and render state. This greatly improved the tested Sonic Adventure DX map on Quest and applies to other maps using the same renderer; gains depend on the map and hardware.
+- First public Big Hands power-up, included in the special spawn pool: extended grabbing, punching, and terrain climbing, with independent hand contacts and 1.5x increased reach.
+- Tightened Big Hands surface-grab proximity and kept the first-person body hidden after attachment until landing.
+- Fixed a stop-hosting crash caused by stale special-move audio handles during session teardown.
+- Retained the VR-specific updater, controller bindings, optional normal maps, and existing filters.
 
 > [!WARNING]
 > This is an active, vibe-coded, yet fairly polished fan project. The standalone edition has been tested on **Meta Quest 3 only**. It has **not been tested on Quest 2 by me**, and neither edition has been tested across every multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur. If you have any performance issues on default settings in the base game, a reset usually fixes things (You should be getting a stable 120 FPS on Quest 3, on most if not all base game maps)
