@@ -249,6 +249,9 @@ bool         configVrTwirlTornadoEffect           = true;
 bool         configVrPhysicalCrouching             = true;
 unsigned int configVrPhysicalCrouchDepth           = 10;
 bool         configVrPhysicalJumping               = true;
+bool         configVrDisablePunchSound             = false;
+bool         configVrSpeedRunningMode              = false;
+bool         configVrVanillaMovement               = false;
 bool         configVrJumpUseTriggers               = false;
 bool         configVrPhysicalSwimming              = true;
 bool         configVrOriginalMarioMovement        = false;
@@ -652,6 +655,9 @@ static const struct ConfigOption options[] = {
     {.name = "vr_physical_crouching",           .type = CONFIG_TYPE_BOOL, .boolValue = &configVrPhysicalCrouching},
     {.name = "vr_physical_crouch_depth", .type = CONFIG_TYPE_UINT, .uintValue = &configVrPhysicalCrouchDepth},
     {.name = "vr_physical_jumping", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrPhysicalJumping},
+    {.name = "vr_disable_punch_sound", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrDisablePunchSound},
+    {.name = "vr_speed_running_mode", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrSpeedRunningMode},
+    {.name = "vr_vanilla_movement", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrVanillaMovement},
     {.name = "vr_jump_use_triggers", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrJumpUseTriggers},
     {.name = "vr_physical_swimming", .type = CONFIG_TYPE_BOOL, .boolValue = &configVrPhysicalSwimming},
     {.name = "vr_original_mario_movement",       .type = CONFIG_TYPE_BOOL, .boolValue = &configVrOriginalMarioMovement},

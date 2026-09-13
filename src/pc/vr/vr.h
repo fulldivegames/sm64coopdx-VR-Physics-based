@@ -6,6 +6,10 @@
 
 #define VR_CONTROLLER_COUNT 2
 
+// Effective local gameplay policy; never rewrites saved cheat preferences.
+// Network/voice eligibility continues to use its separate CoopNet policy.
+bool vr_gameplay_modifiers_allowed(void);
+
 enum VrControllerHand {
     VR_CONTROLLER_LEFT = 0,
     VR_CONTROLLER_RIGHT = 1

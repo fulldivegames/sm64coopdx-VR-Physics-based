@@ -3,6 +3,11 @@
 #include "pc/configfile.h"
 #include "pc/vr/vr.h"
 #include "pc/vr/vr_openxr.h"
+#include "pc/network/coopnet/coopnet.h"
+
+bool vr_gameplay_modifiers_allowed(void) {
+    return !configVrSpeedRunningMode && ns_coopnet_vr_gameplay_allowed();
+}
 
 static bool sVrActive = false;
 static bool sGraphicsReady = false;

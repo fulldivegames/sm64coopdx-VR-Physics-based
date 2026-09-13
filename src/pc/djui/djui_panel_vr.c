@@ -56,7 +56,7 @@ static bool sVrMode = false;
     X(ending, "Ending / Credits", LEVEL_ENDING)
 
 static void djui_panel_vr_warp_to_level(s32 level) {
-    if (!ns_coopnet_vr_gameplay_allowed()) {
+    if (!vr_gameplay_modifiers_allowed()) {
         return;
     }
     djui_panel_shutdown();
@@ -391,6 +391,9 @@ static void djui_panel_vr_experimental_defaults(struct DjuiBase* caller) {
     configVrExperimentalArmsMode = false;
     configVrExperimentalClimbableColliders = false;
     configVrOriginalMarioMovement = false;
+    configVrDisablePunchSound = false;
+    configVrSpeedRunningMode = false;
+    configVrVanillaMovement = false;
     configVrBackpedalSpeed = VR_BACKPEDAL_SPEED_DEFAULT;
     configVrImmersiveFlipBillboards = false;
 }
@@ -1590,6 +1593,9 @@ static void djui_panel_vr_timer_create(struct DjuiBase* caller) {
     configVrSpeedrunSegments = vr_speedrun_total();
     struct DjuiThreePanel* panel = djui_panel_menu_create("Speedrunning", false);
     struct DjuiBase* body = djui_three_panel_get_body(panel);
+    djui_checkbox_create(body, "Speed Running Mode (Vanilla Game)", &configVrSpeedRunningMode, NULL);
+    djui_checkbox_create(body, "Vanilla Movement (Restrictive Jumps)", &configVrVanillaMovement, NULL);
+    djui_vr_timer_help(body, "Vanilla Game overrides VR cheats, extra power-ups and speed multipliers without changing saved options. VR controls and normal caps remain. Restrictive Jumps disables instant landing turns independently. Other mods are not disabled.", 120);
     configVrSpeedrunScale = djui_panel_vr_clamp_uint(configVrSpeedrunScale, 50, 200);
     configVrSpeedrunX = djui_panel_vr_clamp_uint(configVrSpeedrunX, 0, 600);
     configVrSpeedrunY = djui_panel_vr_clamp_uint(configVrSpeedrunY, 0, 210);
@@ -1718,10 +1724,12 @@ static void djui_panel_vr_cheats_create(struct DjuiBase* caller) {
             &configVrSpecialMovesEnabled,
             NULL
         );
-        if (!ns_coopnet_vr_gameplay_allowed()) {
+        if (!vr_gameplay_modifiers_allowed()) {
             struct DjuiText* warning = djui_text_create(
                 body,
-                "Cheats and power-ups are disabled in Standard Public Lobbies for compatibility and fair play."
+                configVrSpeedRunningMode
+                    ? "Speed Running Mode overrides cheats and extra power-ups. Your saved options are unchanged."
+                    : "Cheats and power-ups are disabled in Standard Public Lobbies for compatibility and fair play."
             );
             djui_base_set_size_type(
                 &warning->base,
@@ -1966,10 +1974,12 @@ static void djui_panel_vr_special_moves_create(
     struct DjuiBase* body = djui_three_panel_get_body(panel);
 
     {
-        if (!ns_coopnet_vr_gameplay_allowed()) {
+        if (!vr_gameplay_modifiers_allowed()) {
             struct DjuiText* warning = djui_text_create(
                 body,
-                "Special Moves are disabled in Standard Public Lobbies for compatibility and fair play."
+                configVrSpeedRunningMode
+                    ? "Speed Running Mode overrides Special Moves. Your saved options are unchanged."
+                    : "Special Moves are disabled in Standard Public Lobbies for compatibility and fair play."
             );
             djui_base_set_size_type(
                 &warning->base,
@@ -2147,6 +2157,7 @@ static void djui_panel_vr_immersion_movement_create(
     configVrPhysicalCrouchDepth = djui_panel_vr_clamp_uint(configVrPhysicalCrouchDepth, 10U, 50U);
     djui_slider_create(body, "Physical Crouch Depth", &configVrPhysicalCrouchDepth, 10, 50, NULL);
     djui_checkbox_create(body, "Physical Jumping", &configVrPhysicalJumping, NULL);
+    djui_checkbox_create(body, "Disable Punch Sound", &configVrDisablePunchSound, NULL);
     djui_checkbox_create(body, "Use Triggers Instead of Grips", &configVrJumpUseTriggers, NULL);
     djui_vr_timer_help(body, "Must change crouch binding when enabled.", 32);
     djui_checkbox_create(body, "Physical Swimming", &configVrPhysicalSwimming, NULL);

@@ -7,6 +7,8 @@ While Mario is on land, hold grip on either controller and punch straight
 upward toward/above head height. Trigger is not required. Keep that hand raised
 to hold jump; pull it back down or release grip for a shorter jump.
 The normal jump binding continues to work independently.
+Disable Punch Sound, directly under Physical Jumping, mutes only the physical
+punch voice. Jump and jump-kick sounds are unchanged. It is off by default.
 Use Triggers Instead of Grips switches this gesture to triggers, including
 wall kicks. It is off by default; change your crouch binding before enabling.
 Grabbing and physical punching continue to use grips.

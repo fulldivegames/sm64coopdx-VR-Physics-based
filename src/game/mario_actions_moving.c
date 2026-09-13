@@ -190,7 +190,7 @@ static f32 vr_running_speed_scale(void) {
         return 1.0f;
     }
     const f32 configuredScale = (f32)clamp(
-        ns_coopnet_vr_gameplay_allowed()
+        vr_gameplay_modifiers_allowed()
             ? configVrRunningSpeed
             : VR_RUNNING_SPEED_DEFAULT,
         VR_RUNNING_SPEED_MIN,

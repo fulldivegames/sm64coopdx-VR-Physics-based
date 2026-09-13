@@ -403,7 +403,7 @@ static void vr_update_painting_exit_hat_shake(
     const Vec3f velocity
 ) {
     if (sVrPaintingExitHatWingCap || sVrHeldCapFlags != 0 ||
-        !ns_coopnet_vr_gameplay_allowed() ||
+        !vr_gameplay_modifiers_allowed() ||
         !configVrCheatShakingHatWingCap ||
         !configVrImmersiveRemovableCap ||
         velocity == NULL ||

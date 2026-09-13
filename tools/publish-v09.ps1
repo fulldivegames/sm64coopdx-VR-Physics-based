@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param([Parameter(Mandatory=$true)][string]$Commit,
-      [Parameter(Mandatory=$true)][ValidateSet('v0.9.2')][string]$Version)
+      [Parameter(Mandatory=$true)][ValidateSet('v0.9.2','v0.9.21')][string]$Version)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 if ($Commit -notmatch '^[0-9a-f]{40}$') { throw 'Expected a complete release commit.' }

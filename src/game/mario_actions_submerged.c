@@ -86,7 +86,7 @@ static void vr_physical_swim_step(struct MarioState* m, Vec3f step) {
         sPhysicalSwim.tick=gGlobalTimer; sPhysicalSwim.origin=origin;
         sPhysicalSwim.area=m->area; sPhysicalSwim.time=now;
         vec3f_copy(sPhysicalSwim.lastPosition,m->pos);
-        float scale=(float)clamp(ns_coopnet_vr_gameplay_allowed() ? configVrSwimmingSpeed :
+        float scale=(float)clamp(vr_gameplay_modifiers_allowed() ? configVrSwimmingSpeed :
             VR_SWIMMING_SPEED_DEFAULT, VR_SWIMMING_SPEED_MIN, VR_SWIMMING_SPEED_MAX)/100.0f;
         for (int i=0;i<3;i++) sPhysicalSwim.drift[i]*=0.92f;
         Mat4 trackingBasis;
@@ -388,7 +388,7 @@ static void update_swimming_speed(struct MarioState *m, f32 decelThreshold) {
     f32 buoyancy = get_buoyancy(m);
     const f32 speedScale = vr_is_active()
         ? (f32)clamp(
-            ns_coopnet_vr_gameplay_allowed()
+            vr_gameplay_modifiers_allowed()
                 ? configVrSwimmingSpeed
                 : VR_SWIMMING_SPEED_DEFAULT,
             VR_SWIMMING_SPEED_MIN,

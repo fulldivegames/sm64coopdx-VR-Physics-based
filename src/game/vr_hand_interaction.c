@@ -1339,7 +1339,7 @@ static void vr_hand_interaction_reset(void) {
 static void vr_hand_interaction_update_punch_sound(
     struct MarioState* mario
 ) {
-    if (!configVrMarioPunchSound || (mario->action & ACT_FLAG_AIR) ||
+    if (configVrDisablePunchSound || !configVrMarioPunchSound || (mario->action & ACT_FLAG_AIR) ||
         (mario->input & INPUT_A_PRESSED) || vr_jump_gesture_has_priority() ||
         !mario->floor || fabsf(mario->pos[1]-mario->floorHeight)>5.0f) {
         sVrPunchSoundComboStep = 0;
@@ -3922,7 +3922,7 @@ static bool vr_hand_interaction_try_physical_climb(
     f32 ceilingHeight = 0.0f;
     Vec3f ceilingContactPosition;
     const bool allowCheatSurface =
-        ns_coopnet_vr_gameplay_allowed() &&
+        vr_gameplay_modifiers_allowed() &&
         (configVrCheatSurfaceClimbing ||
          vr_special_moves_big_hands_active()) &&
         allowCheatContact;
@@ -4126,7 +4126,7 @@ static bool vr_hand_interaction_try_add_physical_climb_hand(
         return false;
     }
 
-    if (ns_coopnet_vr_gameplay_allowed() &&
+    if (vr_gameplay_modifiers_allowed() &&
         (configVrCheatSurfaceClimbing || vr_special_moves_big_hands_active())) {
         return vr_hand_interaction_try_flexible_climb_hand(
             mario, hand, handPosition, climbPosition, allowCheatContact);
@@ -4948,7 +4948,7 @@ static void vr_hand_interaction_maintain_physical_climb(
               VR_PHYSICAL_CLIMB_CHEAT_CEILING ||
           sVrPhysicalClimbType ==
               VR_PHYSICAL_CLIMB_CHEAT_WALL) &&
-         (!ns_coopnet_vr_gameplay_allowed() ||
+         (!vr_gameplay_modifiers_allowed() ||
           (!configVrCheatSurfaceClimbing && !bigHandsClimbEverything))) ||
         (sVrPhysicalClimbType == VR_PHYSICAL_CLIMB_POLE &&
          (sVrPhysicalClimbPole == NULL ||
@@ -5672,7 +5672,7 @@ static bool vr_hand_interaction_attack_object(
 
     if ((mario->action & ACT_FLAG_SWIMMING) != 0 &&
         (object->oInteractType & INTERACT_BREAKABLE) != 0 &&
-        (!ns_coopnet_vr_gameplay_allowed() ||
+        (!vr_gameplay_modifiers_allowed() ||
          !configVrCheatUnderwaterBoxPunching)) {
         return false;
     }
@@ -6401,7 +6401,7 @@ static bool vr_special_moves_online_allowed(void) {
     // the isolated VR-public channel remain supported.
     return configVrSpecialMovesEnabled &&
         !gDjuiInMainMenu &&
-        ns_coopnet_vr_gameplay_allowed() &&
+        vr_gameplay_modifiers_allowed() &&
         gCurrentArea != NULL &&
         gMarioStates[0].marioObj != NULL &&
         is_player_active(&gMarioStates[0]);
@@ -10586,7 +10586,7 @@ void vr_hand_interaction_update(struct MarioState* mario) {
     vr_special_moves_update_fire_flower_music(mario);
     vr_special_moves_update_hammer_suit_music(mario);
     if (sVrFireFlowerPowered &&
-        (!ns_coopnet_vr_gameplay_allowed() ||
+        (!vr_gameplay_modifiers_allowed() ||
          !configVrCheatNoFireFlowerTimer) &&
         sVrFireFlowerTimer > 0 &&
         --sVrFireFlowerTimer == 0) {

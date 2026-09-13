@@ -17,6 +17,7 @@ static float handHeight=-.4f;
 bool vr_get_head_rotation(float out[4]) { memcpy(out,headPose,sizeof(headPose)); return true; }
 f64 clock_elapsed_f64(void) { return testTime; }
 bool vr_is_active(void) { return true; }
+bool vr_gameplay_modifiers_allowed(void) { return true; }
 u32 vr_get_tracking_origin_generation(void) { return testOrigin; }
 bool vr_get_head_translation(float out[3]) { memset(out,0,12); return true; }
 bool vr_get_controller_state(u32 hand,struct VrControllerState* out) {

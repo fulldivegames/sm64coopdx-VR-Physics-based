@@ -13,9 +13,13 @@
   Native ARM64/OpenXR VR for Meta Quest. No PC is required after installation.
 </p>
 
-> **Current release: v0.9.2 — Physical Gestures and New Power-Ups**
+> **Current release: v0.9.21 — Physical Gestures and New Power-Ups**
 
 ### What's new
+
+v0.9.21 adds temporary Speed Running Mode overrides, optional Restrictive
+Jumps, and a physical-punch-only Disable Punch Sound option. Saved preferences
+and jump/jump-kick sounds are preserved.
 
 v0.9.2 adds **Propeller Mushroom** and **Power Star**, physical jumping and
 swimming, customizable spawn weights, and expanded gesture tutorials. It also

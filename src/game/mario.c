@@ -828,7 +828,7 @@ static void vr_turn_toward_headset_on_jump_landing(
     Vec3f headsetDirection;
 
     if (m == NULL ||
-        !configVrTurnDuringJumps ||
+        !configVrTurnDuringJumps || configVrVanillaMovement ||
         !(m->action & ACT_FLAG_AIR) ||
         !vr_is_normal_jump_landing_action(landingAction) ||
         !vr_get_first_person_aim_direction(m, headsetDirection)) {

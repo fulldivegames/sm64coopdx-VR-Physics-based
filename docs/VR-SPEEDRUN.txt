@@ -1,6 +1,15 @@
 VR SPEEDRUN TIMER / COUNTER - PREVIEW
 
 VR Settings -> Speedrunning.
+Speed Running Mode (Vanilla Game) temporarily overrides this build's custom
+power-ups, VR cheats and speed multipliers. Saved options are retained; turning
+the mode off restores those preferences, not previously active power-up timers.
+Normal game caps, VR movement and voice chat are unchanged. Other mods are not
+unloaded, so this is not certification for a particular speedrun ruleset.
+Vanilla Movement (Restrictive Jumps) is independent: it suppresses instant
+headset-facing turns on jump landings without changing the saved turning option.
+Both options are off by default.
+
 Choose Split Count, then press Confirm directly below it. Confirm applies the
 count and resets the timer; changing the slider alone does not change a run.
 Existing names are kept when changing the count. Name Your Splits opens editable
