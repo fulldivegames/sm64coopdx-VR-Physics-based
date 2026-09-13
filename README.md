@@ -14,13 +14,15 @@
 </p>
 
 > [!IMPORTANT]
-> The current public release is **v0.9.2**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur.
+> The current public release is **v0.9.21**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur.
 
 SM64 Co-Op DX VR currently targets 64-bit Windows, OpenGL, and OpenXR. It keeps the original game's flat-screen mode and multiplayer foundation while adding native stereoscopic rendering, 6DoF tracking, VR-aware cameras, remappable motion-controller input, physical interactions, comfort options, and extensive calibration settings.
 
 Solo hosting has received the most testing. Online co-op, different OpenXR runtimes, ROM hacks, Lua mods, character models, and texture packs may work, but compatibility still varies.
 
-### New in v0.9.2 — Physical Gestures and New Power-Ups
+### New in v0.9.21 — Physical Gestures and New Power-Ups
+
+- Added Speed Running Mode (Vanilla Game), optional Vanilla Movement (Restrictive Jumps), and Disable Punch Sound for physical punches only; saved preferences and jump/jump-kick sounds are preserved.
 
 - Added Propeller Mushroom: a 60-second power-up with an airborne burst, slow glide, crouch-controlled spinning descent, stomp rebounds, and a customizable propeller helmet.
 - Added Power Star: 30 seconds of enemy-contact invincibility, 1.5x running speed and jump height, rainbow shimmer, torso sparkles, and dedicated music with a four-second expiry fade. Its bouncing pickup floats on water surfaces.
@@ -40,7 +42,7 @@ Fixes and refinements
 
 PC: extract the complete ZIP, including speech and music assets. No ROM is supplied. PC speech under Wine/Proton and untested GPU/runtime combinations are not certified.
 
-See the [v0.9.2 release](https://github.com/fulldivegames/sm64coopdx-VR-Physics-based/releases/tag/v0.9.2) for downloads. No ROM is included.
+See the [v0.9.21 release](https://github.com/fulldivegames/sm64coopdx-VR-Physics-based/releases/tag/v0.9.21) for downloads. No ROM is included.
 
 ### Multiplayer and public-lobby safety
 
