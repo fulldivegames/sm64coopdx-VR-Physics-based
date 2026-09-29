@@ -5296,6 +5296,14 @@ void patch_mtx_vr_ui_projection(uint32_t eyeIndex) {
     patch_mtx_vr_ui(eyeIndex);
 }
 
+// The pre-game setup has no game tick to clear per-frame matrix references.
+void reset_mtx_vr_setup_ui(void) {
+    sVrUiMatrixCount = 0;
+    sVrHudMatrixCount = 0;
+    sVrCharacterMenuCount = 0;
+    sVrWorldLabelMatrixCount = 0;
+}
+
 void patch_mtx_interpolated(f32 delta) {
     // Matrix interpolation below immediately replaces every model matrix.
     // Avoid walking all billboards here; eye-specific patching happens after

@@ -1,4 +1,4 @@
-SM64 CO-OP DX VR v0.9.22 - SIMPLE HOTFIX
+SM64 CO-OP DX VR v0.9.23 - HEADSET ROM SETUP HOTFIX
 
 The first 0.9.2 launch enables physical jumping, swimming, punching, grabbing,
 climbing, swing release and ground/air motion dives once. Crouching and bindings
@@ -11,9 +11,16 @@ This VR build always uses OpenGL, including flat-screen startup. Old DirectX 11
 settings and renderer command-line overrides are ignored. This does not change
 Windows, SteamVR or Virtual Desktop settings; DirectX-only hardware is unsupported.
 You must supply your own legally obtained Super Mario 64 US ROM.
-If no valid ROM is found, a file browser opens automatically. Select your
-Super Mario 64 (U) [!].z64 file. After canceling, click the setup screen or
-press Enter to browse again. Drag-and-drop remains supported.
+If no valid ROM is found, an in-game folder browser opens and attempts to
+start OpenXR so setup can appear in your connected headset before gameplay.
+Use either thumbstick to move, A or trigger to open, B to go back, and the
+menu/view button to return to locations. Select your US Super Mario 64 .z64.
+The browser lists Downloads, Home, the game folder, and available drives.
+On Proton, Z: provides access to the host filesystem if your ROM is elsewhere.
+For PC streaming, select the ROM on the PC; for local Proton, select it on
+the headset filesystem. Steam Frame hardware has not been tested.
+Gamepad A/B and D-pad also work. Keyboard fallback: arrows, Enter, Backspace,
+Escape (locations). Drag-and-drop remains supported. No Windows dialog is used.
 The game can reuse your previously supplied ROM from its user-data folder
 (normally AppData/Roaming/sm64coopdx), so updates do not require another copy.
 

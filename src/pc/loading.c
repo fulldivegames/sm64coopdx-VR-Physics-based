@@ -9,6 +9,7 @@
 #include "pc/utils/misc.h"
 #include "pc/cliopts.h"
 #include "rom_checker.h"
+#include "vr/vr.h"
 
 extern ALIGNED8 u8 texture_coopdx_logo[];
 
@@ -50,6 +51,23 @@ static bool loading_screen_on_render(struct DjuiBase* base) {
     f32 scale = djui_gfx_get_scale();
     windowWidth /= scale;
     windowHeight /= scale;
+
+    if (gRomSetupActive) {
+        djui_base_set_size(base, windowWidth, windowHeight);
+        if (sLoading->splashImage) djui_base_set_visible(&sLoading->splashImage->base, false);
+        if (sLoading->splashText) djui_base_set_visible(&sLoading->splashText->base, false);
+        djui_base_set_visible(&sLoading->loadingBar->base, false);
+        djui_text_set_font_scale(sLoading->loadingDesc, windowHeight / 22.0f);
+        djui_text_set_alignment(sLoading->loadingDesc, DJUI_HALIGN_LEFT, DJUI_VALIGN_TOP);
+        djui_base_set_location_type(&sLoading->loadingDesc->base, DJUI_SVT_ABSOLUTE, DJUI_SVT_ABSOLUTE);
+        djui_base_set_size_type(&sLoading->loadingDesc->base, DJUI_SVT_ABSOLUTE, DJUI_SVT_ABSOLUTE);
+        djui_base_set_location(&sLoading->loadingDesc->base, windowWidth * 0.08f, windowHeight * 0.08f);
+        djui_base_set_size(&sLoading->loadingDesc->base, windowWidth * 0.84f, windowHeight * 0.84f);
+        djui_text_set_text(sLoading->loadingDesc, rom_browser_text());
+        djui_base_compute(base);
+        MUTEX_UNLOCK(gLoadingThread);
+        return true;
+    }
 
     f32 loadingDescY1 = windowHeight * 0.5f - sLoading->loadingDesc->base.height.value * 0.5f;
     f32 loadingDescY2 = windowHeight * 0.5f + sLoading->loadingDesc->base.height.value * 0.5f;
@@ -188,15 +206,16 @@ void render_loading_screen(void) {
 void render_rom_setup_screen(void) {
     if (!sLoading) { init_loading_screen(); }
 
-#if defined(_WIN32)
-    loading_screen_set_segment_text("Select Super Mario 64 (U) [!].z64 in the file browser.\nClick this screen or press Enter to browse again. Drag & drop also works.");
-#else
-    loading_screen_set_segment_text("No rom detected, drag & drop Super Mario 64 (U) [!].z64 on to this screen");
-#endif
-
     gRomSetupActive = true;
+    rom_browser_begin();
+    // Setup must be reachable before the player can enable VR in settings.
+    // This is session-only: do not overwrite the saved launch preference.
+    if (!vr_is_active()) vr_set_active(true);
     while (!gRomIsValid) {
         gWindowApi->main_loop(loading_screen_produce_one_frame);
     }
+    rom_browser_end();
     gRomSetupActive = false;
+    djui_base_destroy(&sLoading->base);
+    sLoading = NULL;
 }

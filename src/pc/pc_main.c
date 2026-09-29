@@ -31,6 +31,7 @@
 
 #include "game/display.h" // for gGlobalTimer
 #include "game/game_init.h"
+#include "game/rendering_graph_node.h"
 #include "game/main.h"
 #include "game/rumble_init.h"
 
@@ -621,6 +622,12 @@ void produce_one_dummy_frame(void (*callback)(), u8 clearColorR, u8 clearColorG,
 
     // start frame
     gfx_start_frame();
+    const bool setupVrFrame = !gGameInited && vr_is_active();
+    if (setupVrFrame) {
+        vr_begin_frame();
+        reset_mtx_vr_setup_ui();
+    }
+    if (gRomSetupActive) rom_browser_update();
     config_gfx_pool();
     init_render_image();
     create_dl_ortho_matrix();
@@ -644,6 +651,40 @@ void produce_one_dummy_frame(void (*callback)(), u8 clearColorR, u8 clearColorG,
     djui_gfx_displaylist_end();
     end_master_display_list();
     alloc_display_list(0);
+    if (setupVrFrame) {
+        const struct GfxDimensions desktop = gfx_current_dimensions;
+        bool mirrored = false;
+        bool renderedEye = false;
+        for (uint32_t eye = 0; eye < 2; ++eye) {
+            uint32_t width = 0, height = 0;
+            if (!vr_begin_eye(eye, &width, &height)) continue;
+            renderedEye = true;
+            gfx_current_dimensions.width = width;
+            gfx_current_dimensions.height = height;
+            gfx_current_dimensions.aspect_ratio = (float)width / height;
+            gfx_current_dimensions.x_adjust_ratio = 1.0f;
+            gfx_current_dimensions.x_adjust_4by3 = 0;
+            patch_mtx_vr_ui_projection(eye);
+            gfx_set_stereo_eye(eye);
+            gfx_run((Gfx*)gGfxSPTask->task.t.data_ptr);
+            gfx_end_frame_render();
+            if (eye == 0) mirrored = vr_mirror_eye(eye, desktop.width, desktop.height);
+            vr_end_eye(eye);
+        }
+        gfx_set_stereo_eye(2);
+        gfx_current_dimensions = desktop;
+        patch_mtx_vr_ui_projection(2);
+        if (!mirrored) {
+            gfx_run((Gfx*)gGfxSPTask->task.t.data_ptr);
+            gfx_end_frame_render();
+        }
+        vr_end_frame();
+        gfx_display_frame();
+        display_and_vsync();
+        reset_mtx_vr_setup_ui();
+        if (!renderedEye) gWindowApi->delay(10);
+        return;
+    }
     gfx_run((Gfx*) gGfxSPTask->task.t.data_ptr); // send_display_list
     display_and_vsync();
 

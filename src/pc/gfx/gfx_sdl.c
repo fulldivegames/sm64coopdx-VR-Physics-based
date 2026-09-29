@@ -8,8 +8,6 @@
 
 #if defined(_WIN32)
 #include <windows.h>
-#include <commdlg.h>
-#include <SDL2/SDL_syswm.h>
 #endif
 
 #if FOR_WINDOWS
@@ -273,38 +271,7 @@ static void gfx_sdl_ondropfile(char* path) {
 #endif
 }
 
-#if defined(_WIN32)
-static void gfx_sdl_browse_rom(void) {
-    wchar_t selected[SYS_MAX_PATH] = { 0 };
-    char portable[SYS_MAX_PATH];
-    SDL_SysWMinfo info;
-    SDL_VERSION(&info.version);
-    OPENFILENAMEW dialog = { 0 };
-    dialog.lStructSize = sizeof(dialog);
-    if (SDL_GetWindowWMInfo(wnd, &info) && info.subsystem == SDL_SYSWM_WINDOWS) {
-        dialog.hwndOwner = info.info.win.window;
-    }
-    dialog.lpstrTitle = L"Select Super Mario 64 (U) [!].z64";
-    dialog.lpstrFilter = L"Nintendo 64 ROM (*.z64)\0*.z64\0All files (*.*)\0*.*\0\0";
-    dialog.lpstrFile = selected;
-    dialog.nMaxFile = SYS_MAX_PATH;
-    dialog.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST |
-                   OFN_NOCHANGEDIR | OFN_DONTADDTORECENT;
-    const int cursor = SDL_ShowCursor(SDL_QUERY);
-    SDL_ShowCursor(SDL_ENABLE);
-    if (GetOpenFileNameW(&dialog) &&
-        sys_windows_short_path_from_wcs(portable, sizeof(portable), selected)) {
-        rom_on_drop_file(portable);
-    }
-    SDL_ShowCursor(cursor);
-}
-#endif
-
 static void gfx_sdl_handle_events(void) {
-#if defined(_WIN32)
-    static bool romPickerShown = false;
-    bool browseRom = gRomSetupActive && !gRomIsValid && !romPickerShown;
-#endif
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         switch (event.type) {
@@ -315,23 +282,20 @@ static void gfx_sdl_handle_events(void) {
                 kb_text_editing(event.edit.text,event.edit.start);
                 break;
             case SDL_KEYDOWN:
-#if defined(_WIN32)
-                if (gRomSetupActive && !event.key.repeat &&
-                    (event.key.keysym.scancode == SDL_SCANCODE_RETURN ||
-                     event.key.keysym.scancode == SDL_SCANCODE_KP_ENTER)) {
-                    browseRom = true;
+                if (gRomSetupActive) {
+                    switch (event.key.keysym.scancode) {
+                        case SDL_SCANCODE_UP: rom_browser_action(-1); break;
+                        case SDL_SCANCODE_DOWN: rom_browser_action(1); break;
+                        case SDL_SCANCODE_RETURN:
+                        case SDL_SCANCODE_KP_ENTER: if (!event.key.repeat) rom_browser_action(2); break;
+                        case SDL_SCANCODE_BACKSPACE: if (!event.key.repeat) rom_browser_action(3); break;
+                        case SDL_SCANCODE_ESCAPE: if (!event.key.repeat) rom_browser_action(4); break;
+                        default: break;
+                    }
                     break;
                 }
-#endif
                 gfx_sdl_onkeydown(event.key.keysym.scancode);
                 break;
-#if defined(_WIN32)
-            case SDL_MOUSEBUTTONDOWN:
-                if (gRomSetupActive && event.button.button == SDL_BUTTON_LEFT) {
-                    browseRom = true;
-                }
-                break;
-#endif
             case SDL_KEYUP:
                 gfx_sdl_onkeyup(event.key.keysym.scancode);
                 break;
@@ -363,14 +327,6 @@ static void gfx_sdl_handle_events(void) {
         }
     }
 
-#if defined(_WIN32)
-    // Only during missing-ROM setup, after queued drops/quit events are handled.
-    // Cancel leaves setup running; the picker never repeatedly opens by itself.
-    if (browseRom && gRomSetupActive && !gRomIsValid) {
-        romPickerShown = true;
-        gfx_sdl_browse_rom();
-    }
-#endif
     if (configWindow.settings_changed) {
         gfx_sdl_set_fullscreen();
         gfx_sdl_reset_dimension_and_pos();

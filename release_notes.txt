@@ -1,3 +1,7 @@
+## v0.9.23 — Headset ROM Setup Hotfix
+
+- Replaced the blocking Windows ROM dialog with an in-game folder browser. Missing-ROM setup starts OpenXR before gameplay, renders the browser in the headset, and accepts thumbstick, A/trigger, and B navigation. Gamepad and keyboard navigation remain available. Steam Frame hardware has not been tested; Quest APK is unchanged.
+
 ## v0.9.22 — Simple Hotfix
 
 - Added an automatic ROM file picker to the Windows/OpenGL startup screen, including for the Windows build running through Proton. Click or press Enter to retry; drag-and-drop still works. Quest ROM selection is unchanged. Steam Frame hardware has not been tested.

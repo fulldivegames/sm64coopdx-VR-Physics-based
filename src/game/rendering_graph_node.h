@@ -137,4 +137,5 @@ void vr_set_character_menu_render(bool enabled);
 bool vr_character_menu_capture_active(void);
 void vr_finish_character_menu_capture(void);
 bool register_mtx_vr_character_panel(Mtx *matrix);
+void reset_mtx_vr_setup_ui(void);
 #endif // RENDERING_GRAPH_NODE_H
