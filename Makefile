@@ -719,7 +719,7 @@ BACKEND_LDFLAGS :=
 # D3D11 flags
 ifeq ($(WINDOWS_BUILD),1)
   DXBITS := `cat $(ENDIAN_BITWIDTH) | tr ' ' '\n' | tail -1`
-  BACKEND_LDFLAGS += -ld3dcompiler -ldxgi -ldxguid
+  BACKEND_LDFLAGS += -ld3dcompiler -ldxgi -ldxguid -lcomdlg32
   BACKEND_LDFLAGS += -lsetupapi -ldinput8 -luser32 -lgdi32 -limm32 -lole32 -loleaut32 -lsapi -lshell32 -lwinmm -lversion -luuid -static
 endif
 

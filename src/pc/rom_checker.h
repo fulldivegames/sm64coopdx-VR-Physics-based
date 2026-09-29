@@ -1,6 +1,7 @@
 #include "types.h"
 
 extern bool gRomIsValid;
+extern bool gRomSetupActive;
 extern char gRomFilename[];
 
 void legacy_folder_handler(void);

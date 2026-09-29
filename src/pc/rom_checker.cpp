@@ -20,6 +20,7 @@ extern "C" {
 namespace fs = std::filesystem;
 
 bool gRomIsValid = false;
+bool gRomSetupActive = false;
 char gRomFilename[SYS_MAX_PATH] = "";
 
 struct VanillaMD5 {

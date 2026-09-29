@@ -188,9 +188,15 @@ void render_loading_screen(void) {
 void render_rom_setup_screen(void) {
     if (!sLoading) { init_loading_screen(); }
 
+#if defined(_WIN32)
+    loading_screen_set_segment_text("Select Super Mario 64 (U) [!].z64 in the file browser.\nClick this screen or press Enter to browse again. Drag & drop also works.");
+#else
     loading_screen_set_segment_text("No rom detected, drag & drop Super Mario 64 (U) [!].z64 on to this screen");
+#endif
 
+    gRomSetupActive = true;
     while (!gRomIsValid) {
         gWindowApi->main_loop(loading_screen_produce_one_frame);
     }
+    gRomSetupActive = false;
 }

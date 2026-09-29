@@ -1,3 +1,7 @@
+## v0.9.22 — Simple Hotfix
+
+- Added an automatic ROM file picker to the Windows/OpenGL startup screen, including for the Windows build running through Proton. Click or press Enter to retry; drag-and-drop still works. Quest ROM selection is unchanged. Steam Frame hardware has not been tested.
+
 ## v0.9.21 — Physical Gestures and New Power-Ups
 
 - Added Speed Running Mode (Vanilla Game), optional Vanilla Movement (Restrictive Jumps), and Disable Punch Sound for physical punches only; saved preferences and jump/jump-kick sounds are preserved.
