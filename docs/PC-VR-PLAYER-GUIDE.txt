@@ -1,4 +1,9 @@
-SM64 CO-OP DX VR v0.9.2 - PHYSICAL GESTURES AND NEW POWER-UPS
+SM64 CO-OP DX VR v0.9.24 - ORIGINAL COLOR AND DISPLAY CONTROLS HOTFIX
+
+Brightness and contrast are now together under VR > Display > Effects. The
+update applies the neutral 100% / 100% color baseline once, then keeps the
+settings you choose afterward. PC red tones receive a small correction to
+better match the standalone build.
 
 The first 0.9.2 launch enables physical jumping, swimming, punching, grabbing,
 climbing, swing release and ground/air motion dives once. Crouching and bindings

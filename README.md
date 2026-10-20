@@ -7,15 +7,22 @@
   &nbsp;|&nbsp; <strong>Quest standalone edition</strong>
 </p>
 
-<h1 align="center">sm64coopdx-VR-Standalone (Physics-based)</h1>
+<h1 align="center">SM64 Co-Op DX VR — Quest Standalone</h1>
 
 <p align="center">
   Native ARM64/OpenXR VR for Meta Quest. No PC is required after installation.
 </p>
 
-> **Current release: v0.9.21 — Physical Gestures and New Power-Ups**
+> **Current standalone release: v0.9.22 — Color and Display Controls Hotfix**
 
 ### What's new
+
+v0.9.22 restores the neutral SM64 color baseline and makes the VR brightness and
+contrast controls affect the world image reliably. Both sliders are under
+**VR > Display > Effects**. Existing installs receive the 100% brightness,
+100% contrast, and no-filter baseline once; later changes are saved normally.
+The separate Steam Frame APK asset is **Untested Alpha** and has not been run on
+Steam Frame hardware.
 
 v0.9.21 adds temporary Speed Running Mode overrides, optional Restrictive
 Jumps, and a physical-punch-only Disable Punch Sound option. Saved preferences

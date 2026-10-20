@@ -378,7 +378,7 @@ struct ShaderProgram {
     bool used_textures[2];
     uint8_t num_floats;
     GLint attrib_locations[OPENGL_MAX_SHADER_ATTRIBUTES];
-    GLint uniform_locations[10];
+    GLint uniform_locations[13];
     uint8_t attrib_sizes[OPENGL_MAX_SHADER_ATTRIBUTES];
     uint8_t num_attribs;
     bool used_noise;
@@ -539,39 +539,9 @@ static inline void gfx_opengl_set_shader_uniforms(struct ShaderProgram *prg) {
     if (prg->world_geometry) {
         int shaderFlags[SHADER_FLAG_MAX];
         GLfloat shaderValues[SHADER_FLAG_MAX];
-        if (vr_is_active() && (configVrBrightness != 100U
-                              || configVrSaturation != 100U
-                              || configVrContrast != 100U)) {
-            for (int i = 0; i < SHADER_FLAG_MAX; ++i) {
-                shaderFlags[i] = gShaderFlags[i];
-                shaderValues[i] = gShaderFlagValues[i];
-            }
-            shaderFlags[SHADER_FLAG_BRIGHTNESS] = 1;
-            const float baseBrightness =
-                gShaderFlags[SHADER_FLAG_BRIGHTNESS]
-                    ? gShaderFlagValues[SHADER_FLAG_BRIGHTNESS]
-                    : 1.0f;
-            shaderValues[SHADER_FLAG_BRIGHTNESS] =
-                baseBrightness * (float)configVrBrightness / 100.0f;
-            shaderFlags[SHADER_FLAG_SATURATION] = 1;
-            const float baseSaturation =
-                gShaderFlags[SHADER_FLAG_SATURATION]
-                    ? gShaderFlagValues[SHADER_FLAG_SATURATION]
-                    : 1.0f;
-            shaderValues[SHADER_FLAG_SATURATION] =
-                baseSaturation * (float)configVrSaturation / 100.0f;
-            shaderFlags[SHADER_FLAG_CONTRAST] = 1;
-            const float baseContrast =
-                gShaderFlags[SHADER_FLAG_CONTRAST]
-                    ? gShaderFlagValues[SHADER_FLAG_CONTRAST]
-                    : 1.0f;
-            shaderValues[SHADER_FLAG_CONTRAST] =
-                baseContrast * (float)configVrContrast / 100.0f;
-        } else {
-            for (int i = 0; i < SHADER_FLAG_MAX; ++i) {
-                shaderFlags[i] = gShaderFlags[i];
-                shaderValues[i] = gShaderFlagValues[i];
-            }
+        for (int i = 0; i < SHADER_FLAG_MAX; ++i) {
+            shaderFlags[i] = gShaderFlags[i];
+            shaderValues[i] = gShaderFlagValues[i];
         }
 
         if (!initialized ||
@@ -588,6 +558,16 @@ static inline void gfx_opengl_set_shader_uniforms(struct ShaderProgram *prg) {
                          shaderValues);
             memcpy(prg->last_shader_values, shaderValues, sizeof(shaderValues));
         }
+        const float vrBrightness = vr_is_active()
+            ? (float)configVrBrightness / 100.0f
+            : 1.0f;
+        const float vrContrast = vr_is_active()
+            ? (float)configVrContrast / 100.0f
+            : 1.0f;
+        const float vrPcColorAdjust = vr_is_active() ? 1.0f : 0.0f;
+        gfx_queue_Uniform1f(prg->uniform_locations[10], vrBrightness);
+        gfx_queue_Uniform1f(prg->uniform_locations[11], vrContrast);
+        gfx_queue_Uniform1f(prg->uniform_locations[12], vrPcColorAdjust);
     }
 
     // Three-point N64 filtering performs three texture samples for most
@@ -1169,6 +1149,9 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     if (world_geometry) {
         fs_len += sprintf(fs_buf + fs_len, "uniform int uShaderFlags[%d];\n", SHADER_FLAG_MAX);
         fs_len += sprintf(fs_buf + fs_len, "uniform float uShaderFlagValues[%d];\n", SHADER_FLAG_MAX);
+        append_line(fs_buf, &fs_len, "uniform float uVrBrightness;");
+        append_line(fs_buf, &fs_len, "uniform float uVrContrast;");
+        append_line(fs_buf, &fs_len, "uniform float uVrPcColorAdjust;");
     }
 
     append_line(fs_buf, &fs_len, "uniform int uFilter;");
@@ -1318,6 +1301,25 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
         append_line(fs_buf, &fs_len, "texel.rgb -= scan * uShaderFlagValues[7];");
         append_line(fs_buf, &fs_len, "}");
     }
+
+    if (world_geometry) {
+        append_line(fs_buf, &fs_len, "texel.rgb = (texel.rgb - vec3(0.5)) * uVrContrast + vec3(0.5);");
+        append_line(fs_buf, &fs_len, "texel.rgb *= uVrBrightness;");
+        append_line(fs_buf, &fs_len, "texel.rgb = clamp(texel.rgb, 0.0, 1.0);");
+    }
+
+#if !defined(__ANDROID__)
+    // Slightly temper desktop-only red oversaturation seen against the
+    // standalone reference without shifting the rest of the game palette.
+    if (world_geometry) {
+        append_line(fs_buf, &fs_len, "vec3 pcColorHsv = rgb2hsv(texel.rgb);");
+        append_line(fs_buf, &fs_len, "float pcRedDistance = min(pcColorHsv.x, 1.0 - pcColorHsv.x);");
+        append_line(fs_buf, &fs_len, "float pcRedMask = (1.0 - smoothstep(0.035, 0.12, pcRedDistance)) * uVrPcColorAdjust;");
+        append_line(fs_buf, &fs_len, "pcColorHsv.x = fract(pcColorHsv.x + 0.008 * pcRedMask);");
+        append_line(fs_buf, &fs_len, "pcColorHsv.y *= 1.0 - 0.03 * pcRedMask;");
+        append_line(fs_buf, &fs_len, "texel.rgb = hsv2rgb(pcColorHsv);");
+    }
+#endif
 
     if (opt_fog) {
         if (opt_alpha) {
@@ -1618,6 +1620,9 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     if (world_geometry) {
         prg->uniform_locations[6] = glGetUniformLocation(shader_program, "uShaderFlags");
         prg->uniform_locations[7] = glGetUniformLocation(shader_program, "uShaderFlagValues");
+        prg->uniform_locations[10] = glGetUniformLocation(shader_program, "uVrBrightness");
+        prg->uniform_locations[11] = glGetUniformLocation(shader_program, "uVrContrast");
+        prg->uniform_locations[12] = glGetUniformLocation(shader_program, "uVrPcColorAdjust");
         prg->world_geometry = true;
     } else {
         prg->world_geometry = false;
@@ -1937,6 +1942,37 @@ static inline bool gl_get_version(int *major, int *minor, bool *is_es) {
     return (sscanf(vstr, "%d.%d", major, minor) == 2);
 }
 
+#if defined(__ANDROID__)
+static bool gfx_opengl_has_extension(const char *extension, int major, bool is_es) {
+    if (is_es && major >= 3) {
+        GLint count = 0;
+        glGetIntegerv(GL_NUM_EXTENSIONS, &count);
+        for (GLint i = 0; i < count; ++i) {
+            const char *candidate = (const char *)glGetStringi(GL_EXTENSIONS, (GLuint)i);
+            if (candidate != NULL && strcmp(candidate, extension) == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    const char *extensions = (const char *)glGetString(GL_EXTENSIONS);
+    if (extensions == NULL || extension == NULL || extension[0] == '\0') {
+        return false;
+    }
+    const size_t length = strlen(extension);
+    const char *candidate = extensions;
+    while ((candidate = strstr(candidate, extension)) != NULL) {
+        if ((candidate == extensions || candidate[-1] == ' ') &&
+            (candidate[length] == ' ' || candidate[length] == '\0')) {
+            return true;
+        }
+        candidate += length;
+    }
+    return false;
+}
+#endif
+
 static void gfx_opengl_init(void) {
 #if FOR_WINDOWS || defined(OSX_BUILD)
     GLenum err;
@@ -1959,6 +1995,15 @@ static void gfx_opengl_init(void) {
     if (!gl_get_version(&vmajor, &vminor, &is_es) || !gl_version_is_supported(vmajor, vminor, is_es)) {
         sys_fatal("OpenGL 2.1+ is required.\nReported version: %s%d.%d", is_es ? "ES" : "", vmajor, vminor);
     }
+
+#if defined(__ANDROID__)
+    // Quest's optional sRGB write conversion can encode legacy N64 colors a
+    // second time before OpenXR composition. Disable only when the driver
+    // explicitly advertises the extension; otherwise leave its default alone.
+    if (is_es && gfx_opengl_has_extension("GL_EXT_sRGB_write_control", vmajor, is_es)) {
+        glDisable(0x8DB9); // GL_FRAMEBUFFER_SRGB_EXT
+    }
+#endif
 
     opengl_enabled_attrib_mask = 0;
     fprintf(stderr, "[GFX] Vendor: %s; GPU: %s; OpenGL: %s; GLSL: %s\n",

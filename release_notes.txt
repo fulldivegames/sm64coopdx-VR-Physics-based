@@ -1,3 +1,9 @@
+## v0.9.22 — Color and Display Controls Hotfix
+
+- Restored the neutral original-game color baseline: brightness 100%, contrast 100%, and no color filter on first update. This one-time migration preserves later player adjustments.
+- Fixed VR brightness and contrast controls so they apply directly to world rendering; moved both sliders to **VR > Display > Effects**.
+- Added an ARM64 Steam Frame APK as a separate asset. It is labeled **Untested Alpha** and is the same build as the Quest APK; Steam Frame hardware compatibility has not been verified.
+
 ## v0.9.21 — Physical Gestures and New Power-Ups
 
 - Added Speed Running Mode (Vanilla Game), optional Vanilla Movement (Restrictive Jumps), and Disable Punch Sound for physical punches only; saved preferences and jump/jump-kick sounds are preserved.

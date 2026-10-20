@@ -101,7 +101,7 @@ unsigned int configVrFacingSource                 = VR_FACING_SOURCE_HEADSET;
 unsigned int configVrFov                          = 100;
 unsigned int configVrBrightness                   = VR_BRIGHTNESS_DEFAULT;
 unsigned int configVrSaturation                   = 112;
-unsigned int configVrContrast                     = 115;
+unsigned int configVrContrast                     = VR_CONTRAST_DEFAULT;
 #ifdef __ANDROID__
 unsigned int configVrRenderScale                  = 80;
 #else
@@ -210,6 +210,7 @@ unsigned int configVrBowserMaxSpinSpeed           = 100;
 static unsigned int sConfigVrInteractionTuningVersion = 0;
 static unsigned int sConfigVrStarFocusDefaultVersion = 0;
 static unsigned int sConfigVrEffectsDefaultVersion = 0;
+static unsigned int sConfigVrColorBaselineVersion = 0;
 static unsigned int sConfigVrBigHandsReachVersion = 0;
 static unsigned int sConfigVrSpawnPoolVersion = 0;
 static unsigned int sConfigVrPhysicalActionsVersion = 0;
@@ -616,6 +617,7 @@ static const struct ConfigOption options[] = {
     {.name = "vr_interaction_tuning_version",  .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrInteractionTuningVersion},
     {.name = "vr_star_focus_default_version",  .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrStarFocusDefaultVersion},
     {.name = "vr_effects_default_version",     .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrEffectsDefaultVersion},
+    {.name = "vr_color_baseline_version",      .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrColorBaselineVersion},
     {.name = "vr_big_hands_reach_version",     .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrBigHandsReachVersion},
     {.name = "vr_spawn_pool_version",            .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrSpawnPoolVersion},
     {.name = "vr_physical_actions_version",      .type = CONFIG_TYPE_UINT, .uintValue = &sConfigVrPhysicalActionsVersion},
@@ -1345,6 +1347,19 @@ static void configfile_migrate_vr_effect_defaults(void) {
     }
 }
 
+static void configfile_migrate_vr_color_baseline(void) {
+    if (sConfigVrColorBaselineVersion >= 2) {
+        return;
+    }
+
+    // Adopt the verified original-color baseline once on existing installs;
+    // subsequent brightness, contrast, and filter choices remain untouched.
+    configVrBrightness = VR_BRIGHTNESS_DEFAULT;
+    configVrContrast = VR_CONTRAST_DEFAULT;
+    configVrColorFilter = VR_COLOR_FILTER_NONE;
+    sConfigVrColorBaselineVersion = 2;
+}
+
 #ifndef __ANDROID__
 static void configfile_migrate_coopnet_pc_identity(void) {
     if (sConfigCoopNetPcIdentityVersion >= 1) {
@@ -1386,6 +1401,7 @@ static void configfile_load_internal(const char *filename, bool* error) {
         configfile_migrate_vr_spawn_pool();
         configfile_migrate_vr_star_focus_default();
         configfile_migrate_vr_effect_defaults();
+        configfile_migrate_vr_color_baseline();
         configfile_save(filename);
         return;
     }
@@ -1522,6 +1538,7 @@ NEXT_OPTION:
     configfile_migrate_vr_spawn_pool();
     configfile_migrate_vr_star_focus_default();
     configfile_migrate_vr_effect_defaults();
+    configfile_migrate_vr_color_baseline();
 #ifndef __ANDROID__
     configfile_migrate_coopnet_pc_identity();
 #endif
