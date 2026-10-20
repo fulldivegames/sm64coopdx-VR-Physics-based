@@ -353,7 +353,6 @@ static void djui_panel_vr_camera_defaults(struct DjuiBase* caller) {
     configVrFacingSource = VR_FACING_SOURCE_HEADSET;
     configVrMovementCalibration = 50;
     configVrFov = 100;
-    configVrBrightness = VR_BRIGHTNESS_DEFAULT;
 
     for (unsigned int character = 0;
          character < CT_MAX;
@@ -564,6 +563,8 @@ static void djui_panel_vr_effects_defaults(struct DjuiBase* caller) {
     (void)caller;
 
     configVrTwirlTornadoEffect = true;
+    configVrBrightness = VR_BRIGHTNESS_DEFAULT;
+    configVrContrast = VR_CONTRAST_DEFAULT;
     configVrNormalMaps = false;
     configVrNormalMapStrength = 500;
     configVrNormalMapGloss = 170;
@@ -597,11 +598,6 @@ static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
         configVrFov = 70;
     } else if (configVrFov > 120) {
         configVrFov = 120;
-    }
-    if (configVrBrightness < 10) {
-        configVrBrightness = 10;
-    } else if (configVrBrightness > 120) {
-        configVrBrightness = 120;
     }
     struct DjuiThreePanel* panel =
         djui_panel_menu_create("Camera Settings", false);
@@ -687,15 +683,6 @@ static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
             "Field of View (%)",
             &configVrFov,
             70,
-            120,
-            NULL
-        );
-
-        djui_slider_create(
-            body,
-            "Brightness (%)",
-            &configVrBrightness,
-            10,
             120,
             NULL
         );
@@ -2264,6 +2251,17 @@ static void djui_panel_vr_immersion_create(struct DjuiBase* caller) {
 }
 
 static void djui_panel_vr_effects_create(struct DjuiBase* caller) {
+    if (configVrBrightness < 10) {
+        configVrBrightness = 10;
+    } else if (configVrBrightness > 120) {
+        configVrBrightness = 120;
+    }
+    if (configVrContrast < 50) {
+        configVrContrast = 50;
+    } else if (configVrContrast > 150) {
+        configVrContrast = 150;
+    }
+
     struct DjuiThreePanel* panel =
         djui_panel_menu_create("Effects", false);
     struct DjuiBase* body = djui_three_panel_get_body(panel);
@@ -2290,6 +2288,8 @@ static void djui_panel_vr_effects_create(struct DjuiBase* caller) {
         );
         djui_slider_create(body, "Normal Map Strength (%)", &configVrNormalMapStrength, 0, 800, NULL);
         djui_slider_create(body, "Normal Map Gloss (%)", &configVrNormalMapGloss, 0, 400, NULL);
+        djui_slider_create(body, "Brightness (%)", &configVrBrightness, 10, 120, NULL);
+        djui_slider_create(body, "Contrast (%)", &configVrContrast, 50, 150, NULL);
         djui_button_create(
             body,
             "Set to Defaults",
