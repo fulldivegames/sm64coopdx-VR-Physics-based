@@ -3,6 +3,7 @@ package com.fulldivegames.sm64coopdxvr;
 import android.app.NativeActivity;
 import android.app.AlertDialog;
 import android.Manifest;
+import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -39,7 +40,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 
-public final class QuestNativeActivity extends NativeActivity {
+public final class QuestNativeActivity extends NativeActivity implements SteamFrameRomBrowser.Presenter {
     // NativeActivity loads this library for the game loop, but that native
     // load is not associated with this Java class loader on every Quest OS
     // version. Load the same library here as well so JNI speech callbacks can
@@ -52,6 +53,7 @@ public final class QuestNativeActivity extends NativeActivity {
     private static final int OPEN_ROM_REQUEST = 6401;
     private static final int MICROPHONE_PERMISSION_REQUEST = 6402;
     private static final int INSTALL_PERMISSION_REQUEST = 6403;
+    private static final int STEAM_FRAME_STORAGE_PERMISSION_REQUEST = 6404;
     private static final String ROM_NAME = "baserom.us.z64";
     private static final String SHARED_MOD_DIRECTORY = "/sdcard/SM64VR/mods";
     private static final String SHARED_DYNOS_PACK_DIRECTORY =
@@ -70,6 +72,19 @@ public final class QuestNativeActivity extends NativeActivity {
     private boolean romPickerAwaitingResult;
     private boolean romPickerFallbackScheduled;
     private boolean romPickerFallbackDialogVisible;
+    private boolean steamFrameContentPickerAttempted;
+    private SteamFrameRomBrowser steamFrameRomBrowser;
+    private boolean steamFrameBrowserAfterStorageRequest;
+    private boolean steamFrameVoicePermissionRequested;
+    private boolean steamFrameStartupErrorShown;
+    private boolean steamFrameAudioErrorShown;
+    private volatile File steamFrameDataRoot;
+    private boolean steamFrameResourcesReady;
+    private boolean steamFrameImportPending;
+    private AlertDialog steamFramePreparation;
+    private SteamFrameSetupPanel steamFrameSetupPanel;
+    private boolean steamFrameResumed;
+    private final SteamFrameStartupState steamFrameStartup = new SteamFrameStartupState();
     private boolean standaloneUpdateCheckStarted;
     private boolean firstLaunchSetupComplete;
     private volatile String pendingStandaloneUpdateUrl;
@@ -83,6 +98,24 @@ public final class QuestNativeActivity extends NativeActivity {
 
     private static native void nativeOnSpeechRecognitionResult(String text);
     private static native void nativeOnSpeechRecognitionState(boolean listening);
+    private static native void nativeOnRomImported(String dataRoot, int attempt);
+    private static native void nativeConfirmRomReady(int attempt);
+    private static native void nativeCancelSteamFrameStartup();
+    private static native void nativeRetryAudio();
+    private static native void nativeSetupPixels(int[] pixels, int generation);
+
+    @Override public void showSteamFrameMenu(String title, String[] names, Runnable[] actions) {
+        if (!BuildConfig.STEAM_FRAME || isFinishing() || isDestroyed()) return;
+        if (steamFrameSetupPanel == null) steamFrameSetupPanel = new SteamFrameSetupPanel(QuestNativeActivity::nativeSetupPixels);
+        steamFrameSetupPanel.show(title, names, actions);
+    }
+
+    public void onSteamFrameSetupInput(int direction, boolean select, int generation) {
+        runOnUiThread(() -> {
+            if (!isFinishing() && !isDestroyed() && steamFrameSetupPanel != null)
+                steamFrameSetupPanel.input(direction, select, generation);
+        });
+    }
     private static final String US_ROM_SHA1 =
             "9bef1128717f958171a4afac3ed78ee2bb4e86ce";
     private static final String RELEASES_API =
@@ -90,6 +123,28 @@ public final class QuestNativeActivity extends NativeActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        if (BuildConfig.STEAM_FRAME) {
+            super.onCreate(savedInstanceState);
+            showSteamFrameMenu("Preparing game files — please wait",
+                    new String[] { "Close game" }, new Runnable[] { this::finish });
+            // Copying bundled assets must not block Android's UI/lifecycle thread.
+            new Thread(() -> {
+                try {
+                    steamFrameDataRoot = SteamFrameStorage.select(this);
+                    installBundledResources();
+                    normalizeCustomPaletteNames();
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        steamFrameResourcesReady = true;
+                        advanceFirstLaunchSetup();
+                    });
+                } catch (Exception failure) {
+                    nativeCancelSteamFrameStartup();
+                    showSteamFrameStartupErrorFromNative("App data preparation failed: " + failure);
+                }
+            }, "SM64VR-AppData").start();
+            return;
+        }
         installBundledResources();
         normalizeCustomPaletteNames();
         super.onCreate(savedInstanceState);
@@ -99,18 +154,75 @@ public final class QuestNativeActivity extends NativeActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        steamFrameResumed = true;
         if (storageAccessPromptActive) {
             storageAccessPromptActive = false;
             storageAccessPromptCompleted = true;
         }
         resumePendingStandaloneInstall();
+        if (BuildConfig.STEAM_FRAME && steamFrameBrowserAfterStorageRequest) {
+            steamFrameBrowserAfterStorageRequest = false;
+            showSteamFrameRomBrowser();
+        }
         if (microphonePermissionPending) return;
         advanceFirstLaunchSetup();
+    }
+
+    @Override protected void onPause() {
+        steamFrameResumed = false;
+        super.onPause();
+    }
+
+    private File appDataRoot() {
+        return BuildConfig.STEAM_FRAME ? steamFrameDataRoot : getExternalFilesDir(null);
+    }
+
+    public void onSteamFrameRomValidated(int attempt, boolean accepted, String detail) {
+        if (!BuildConfig.STEAM_FRAME) return;
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed() || !steamFrameStartup.complete(attempt, accepted)) return;
+            if (accepted) {
+                firstLaunchSetupComplete = true;
+                nativeConfirmRomReady(attempt);
+            } else {
+                firstLaunchSetupComplete = false;
+                showSteamFrameMenu("ROM could not be opened — select supported US .z64",
+                        new String[] { "Select ROM", "Close game" }, new Runnable[] { () -> {
+                            romPickerRequested = false;
+                            showSteamFrameRomBrowser();
+                        }, this::finish });
+            }
+        });
+    }
+
+    private void watchSteamFrameRomHandshake(int attempt) {
+        final Handler handler = new Handler(getMainLooper());
+        handler.postDelayed(new Runnable() {
+            long previous = android.os.SystemClock.elapsedRealtime();
+            @Override public void run() {
+                if (isFinishing() || isDestroyed() || firstLaunchSetupComplete ||
+                        !steamFrameStartup.isPending(attempt)) return;
+                long now = android.os.SystemClock.elapsedRealtime();
+                // Count only foreground time; file pickers/backgrounding are not failures.
+                boolean timedOut = steamFrameStartup.tick(Math.min(1000, now - previous), steamFrameResumed);
+                previous = now;
+                if (timedOut) {
+                    nativeCancelSteamFrameStartup();
+                    showSteamFrameStartupErrorFromNative("Native ROM setup did not respond within 20 seconds of foreground time.");
+                    return;
+                }
+                if (steamFrameStartup.isPending()) handler.postDelayed(this, 250);
+            }
+        }, 250);
     }
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (BuildConfig.STEAM_FRAME && requestCode == STEAM_FRAME_STORAGE_PERMISSION_REQUEST) {
+            showSteamFrameRomBrowser();
+            return;
+        }
         if (requestCode == MICROPHONE_PERMISSION_REQUEST) {
             microphonePermissionPending = false;
             advanceFirstLaunchSetup();
@@ -119,16 +231,49 @@ public final class QuestNativeActivity extends NativeActivity {
 
     private void advanceFirstLaunchSetup() {
         if (firstLaunchSetupComplete) return;
+        if (BuildConfig.STEAM_FRAME && (!steamFrameResourcesReady || steamFrameImportPending || steamFrameStartupErrorShown ||
+                !steamFrameStartup.canSubmit())) return;
         // The ROM is the required input for the native host. Ask for it before
         // microphone/storage permissions so first-run setup is deterministic.
-        File firstRunRom = new File(getExternalFilesDir(null), ROM_NAME);
-        if (!firstRunRom.isFile()) {
+        File firstRunRom = new File(appDataRoot(), ROM_NAME);
+        boolean romReady = firstRunRom.isFile();
+        if (BuildConfig.STEAM_FRAME && romReady) {
+            try {
+                romReady = firstRunRom.length() == 8L * 1024 * 1024 && US_ROM_SHA1.equals(sha1(firstRunRom));
+            } catch (Exception exception) {
+                Log.w(TAG, "Could not validate the existing Steam Frame ROM.", exception);
+                romReady = false;
+            }
+        }
+        if (!romReady) {
             if (!romPickerRequested) {
                 romPickerRequested = true;
+                if (BuildConfig.STEAM_FRAME) {
+                    showSteamFrameRomBrowser();
+                    return;
+                }
                 romPickerLaunchPending = true;
                 new Handler(getMainLooper()).postDelayed(
                         this::launchPendingRomPicker, 250);
             }
+            return;
+        }
+        if (BuildConfig.STEAM_FRAME) {
+            // Lepton may close the immersive app when it switches Android
+            // activities. Only the ROM is required to start the game. Speech
+            // already requests microphone permission when the player uses it.
+            if (steamFrameRomBrowser != null) steamFrameRomBrowser.dismiss();
+            romPickerFallbackDialogVisible = false;
+            romPickerAwaitingResult = false;
+            romPickerLaunchPending = false;
+            prepareSharedContentDirectories();
+            // Clear any Quest update notice inherited from a renamed alpha.
+            // Alpha updates are manual until a dedicated, validated feed exists.
+            saveStandaloneUpdateStatus(true, "");
+            int attempt = steamFrameStartup.begin();
+            showSteamFrameMenu("Starting game — validating ROM", new String[0], new Runnable[0]);
+            nativeOnRomImported(steamFrameDataRoot.getPath(), attempt);
+            watchSteamFrameRomHandshake(attempt);
             return;
         }
         if (Build.VERSION.SDK_INT >= 23 &&
@@ -155,7 +300,7 @@ public final class QuestNativeActivity extends NativeActivity {
             standaloneUpdateCheckStarted = true;
             checkForStandaloneUpdate();
         }
-        File rom = new File(getExternalFilesDir(null), ROM_NAME);
+        File rom = new File(appDataRoot(), ROM_NAME);
         if (!rom.isFile()) {
             if (!romPickerRequested) {
                 romPickerRequested = true;
@@ -194,12 +339,16 @@ public final class QuestNativeActivity extends NativeActivity {
         new Handler(getMainLooper()).postDelayed(() -> {
             romPickerFallbackScheduled = false;
             if (romPickerAwaitingResult && !isFinishing() && hasWindowFocus()) {
-                showRomPickerFallback();
+                if (!trySteamFrameContentPicker()) showRomPickerFallback();
             }
         }, 1500);
     }
 
     private void showRomPickerFallback() {
+        if (BuildConfig.STEAM_FRAME) {
+            showSteamFrameRomBrowser();
+            return;
+        }
         if (isFinishing() || romPickerFallbackDialogVisible) return;
         romPickerFallbackDialogVisible = true;
         new AlertDialog.Builder(this)
@@ -224,6 +373,10 @@ public final class QuestNativeActivity extends NativeActivity {
     }
 
     public void downloadLatestStandaloneUpdateFromNative() {
+        if (BuildConfig.STEAM_FRAME) {
+            showUpdateToast("Steam Frame alpha updates must be installed manually from the Steam Frame alpha release page. Quest updates are disabled.");
+            return;
+        }
         if (standaloneUpdateInProgress) return;
         standaloneUpdateInProgress = true;
         Thread updater = new Thread(() -> {
@@ -246,6 +399,7 @@ public final class QuestNativeActivity extends NativeActivity {
     }
 
     private String findLatestStandaloneApk() throws Exception {
+        if (BuildConfig.STEAM_FRAME) return null;
         HttpURLConnection connection = null;
         try {
             connection = (HttpURLConnection) new URL(RELEASES_API).openConnection();
@@ -288,6 +442,9 @@ public final class QuestNativeActivity extends NativeActivity {
     }
 
     private void installApkFromUrl(String assetUrl) throws Exception {
+        if (BuildConfig.STEAM_FRAME) {
+            throw new IOException("Automatic APK installation is disabled for the Steam Frame alpha.");
+        }
         if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
             pendingStandaloneUpdateUrl = assetUrl;
             standaloneInstallPermissionPromptActive = true;
@@ -436,6 +593,12 @@ public final class QuestNativeActivity extends NativeActivity {
                 } else if (SpeechRecognizer.isRecognitionAvailable(this)) {
                     speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
                 } else {
+                    if (BuildConfig.STEAM_FRAME) {
+                        nativeOnSpeechRecognitionState(false);
+                        Toast.makeText(this, "No Android dictation service is installed. Use the VR keyboard instead.",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
                     ComponentName questService = ComponentName.unflattenFromString(
                         "com.oculus.systemintelligence/" +
                         ".android.speech.OnDeviceRecognitionService");
@@ -576,6 +739,11 @@ public final class QuestNativeActivity extends NativeActivity {
 
     @Override
     protected void onDestroy() {
+        if (steamFramePreparation != null) {
+            steamFramePreparation.dismiss();
+            steamFramePreparation = null;
+        }
+        if (steamFrameRomBrowser != null) steamFrameRomBrowser.dismiss();
         if (speechRecognizer != null) {
             speechRecognizer.destroy();
             speechRecognizer = null;
@@ -583,6 +751,125 @@ public final class QuestNativeActivity extends NativeActivity {
         speechListening = false;
         nativeOnSpeechRecognitionState(false);
         super.onDestroy();
+    }
+
+    public boolean requestSteamFrameMicrophonePermissionFromNative() {
+        if (!BuildConfig.STEAM_FRAME) return false;
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            return true;
+        }
+        runOnUiThread(() -> {
+            if (isFinishing() || steamFrameVoicePermissionRequested || microphonePermissionPending) return;
+            steamFrameVoicePermissionRequested = true;
+            microphonePermissionPending = true;
+            requestPermissions(new String[] { Manifest.permission.RECORD_AUDIO },
+                    MICROPHONE_PERMISSION_REQUEST);
+        });
+        return false;
+    }
+
+    public void showSteamFrameStartupErrorFromNative(String detail) {
+        if (!BuildConfig.STEAM_FRAME) return;
+        runOnUiThread(() -> {
+            if (isFinishing() || steamFrameStartupErrorShown) return;
+            steamFrameStartupErrorShown = true;
+            if (steamFramePreparation != null) {
+                steamFramePreparation.dismiss();
+                steamFramePreparation = null;
+            }
+            showSteamFrameMenu("Startup failed: " + detail, new String[] { "Close game" }, new Runnable[] { this::finish });
+            // Preserve an Android error panel as well if XR itself is unavailable.
+            new AlertDialog.Builder(this)
+                    .setTitle("Steam Frame could not start VR")
+                    .setMessage(detail + "\n\nClose the app and relaunch it from the headset using the Android/Lepton runtime. " +
+                            "Your imported ROM, saves and settings are preserved. " +
+                            "This alpha requires a compatible OpenXR OpenGL ES runtime.")
+                    .setCancelable(false)
+                    .setPositiveButton("Close", (dialog, which) -> finish())
+                    .show();
+        });
+    }
+
+    public void showSteamFrameAudioErrorFromNative(String unused) {
+        if (!BuildConfig.STEAM_FRAME) return;
+        runOnUiThread(() -> {
+            if (isFinishing() || steamFrameStartupErrorShown || steamFrameAudioErrorShown) return;
+            steamFrameAudioErrorShown = true;
+            new AlertDialog.Builder(this)
+                    .setTitle("Headset audio unavailable")
+                    .setMessage("Android audio output could not start or was disconnected. Check the headset's audio output. " +
+                            "You can retry sound or continue without it.")
+                    .setCancelable(false)
+                    .setPositiveButton("Retry audio", (dialog, which) -> {
+                        steamFrameAudioErrorShown = false;
+                        nativeRetryAudio();
+                    })
+                    .setNegativeButton("Continue without sound", (dialog, which) -> { })
+                    .show();
+        });
+    }
+
+    private void showSteamFrameRomBrowser() {
+        if (!BuildConfig.STEAM_FRAME || isFinishing() || firstLaunchSetupComplete ||
+                steamFrameImportPending || steamFrameStartup.isPending() || steamFrameStartupErrorShown) return;
+        if (romPickerFallbackDialogVisible) return;
+        romPickerAwaitingResult = false;
+        romPickerLaunchPending = false;
+        romPickerFallbackDialogVisible = true;
+        steamFrameRomBrowser = new SteamFrameRomBrowser(this, appDataRoot(), new SteamFrameRomBrowser.Listener() {
+            private void clearBrowser() {
+                romPickerFallbackDialogVisible = false;
+                if (steamFrameRomBrowser != null) steamFrameRomBrowser.dismiss();
+            }
+            @Override public void onRom(File file) {
+                clearBrowser();
+                importRom(Uri.fromFile(file));
+            }
+            @Override public void onSystemPicker() {
+                clearBrowser();
+                steamFrameContentPickerAttempted = false;
+                romPickerRequested = true;
+                romPickerLaunchPending = true;
+                launchPendingRomPicker();
+            }
+            @Override public void onStorageAccess() {
+                clearBrowser();
+                if (Build.VERSION.SDK_INT <= 32) {
+                    requestPermissions(new String[] { Manifest.permission.READ_EXTERNAL_STORAGE,
+                            Manifest.permission.WRITE_EXTERNAL_STORAGE }, STEAM_FRAME_STORAGE_PERMISSION_REQUEST);
+                } else {
+                    steamFrameBrowserAfterStorageRequest = true;
+                    boolean opened = openSteamFrameStorageSettings();
+                    // Settings handlers are optional too. Restore the browser
+                    // even if neither all-files settings intent exists.
+                    if (!opened) {
+                        steamFrameBrowserAfterStorageRequest = false;
+                        showSteamFrameRomBrowser();
+                    }
+                }
+            }
+            @Override public void onClose() {
+                clearBrowser();
+                finish();
+            }
+        });
+        steamFrameRomBrowser.show();
+    }
+
+    private boolean openSteamFrameStorageSettings() {
+        try {
+            startActivity(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:" + getPackageName())));
+            return true;
+        } catch (RuntimeException exception) {
+            try {
+                startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+                return true;
+            } catch (RuntimeException unavailable) {
+                showUpdateToast("Storage settings are unavailable. Use SM64 app files or a system picker grant instead.");
+                return false;
+            }
+        }
     }
 
     private void prepareSharedContentDirectories() {
@@ -595,7 +882,7 @@ public final class QuestNativeActivity extends NativeActivity {
     }
 
     private void normalizeCustomPaletteNames() {
-        File paletteDirectory = new File(getExternalFilesDir(null), "palettes");
+        File paletteDirectory = new File(appDataRoot(), "palettes");
         File[] palettes = paletteDirectory.listFiles(file ->
                 file.isFile() && file.getName().toLowerCase(Locale.ROOT).endsWith(".ini") &&
                 !isBundledCharacterPalette(file.getName()));
@@ -666,6 +953,10 @@ public final class QuestNativeActivity extends NativeActivity {
     }
 
     private void checkForStandaloneUpdate() {
+        if (BuildConfig.STEAM_FRAME) {
+            saveStandaloneUpdateStatus(true, "");
+            return;
+        }
         Thread checker = new Thread(() -> {
             HttpURLConnection connection = null;
             try {
@@ -710,7 +1001,7 @@ public final class QuestNativeActivity extends NativeActivity {
     }
 
     private void saveStandaloneUpdateStatus(boolean succeeded, String version) {
-        File root = getExternalFilesDir(null);
+        File root = appDataRoot();
         if (root == null) return;
         File temporary = new File(root, "vr-update-status.tmp");
         File destination = new File(root, "vr-update-status.txt");
@@ -731,7 +1022,7 @@ public final class QuestNativeActivity extends NativeActivity {
     }
 
     private void installBundledResources() {
-        File root = getExternalFilesDir(null);
+        File root = appDataRoot();
         if (root == null) {
             Log.e(TAG, "External app data directory is unavailable.");
             return;
@@ -754,6 +1045,7 @@ public final class QuestNativeActivity extends NativeActivity {
             Log.i(TAG, "Bundled normal maps installed.");
         } catch (IOException exception) {
             Log.e(TAG, "Could not install bundled resources.", exception);
+            if (BuildConfig.STEAM_FRAME) throw new IllegalStateException("Bundled resources could not be installed", exception);
         }
     }
 
@@ -795,6 +1087,27 @@ public final class QuestNativeActivity extends NativeActivity {
         if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
             throw new IOException("Could not create " + parent);
         }
+        if (BuildConfig.STEAM_FRAME) {
+            // A headset task can be closed during preparation. Never leave a
+            // partial bundled mod looking like an already-installed user file.
+            File temporary = new File(parent, destination.getName() + ".sm64-bundled.tmp");
+            try {
+                try (InputStream input = getAssets().open(assetPath);
+                     FileOutputStream output = new FileOutputStream(temporary)) {
+                    byte[] bytes = new byte[16 * 1024];
+                    int count;
+                    while ((count = input.read(bytes)) >= 0) {
+                        if (count > 0) output.write(bytes, 0, count);
+                    }
+                }
+                android.system.Os.rename(temporary.getPath(), destination.getPath());
+            } catch (android.system.ErrnoException exception) {
+                throw new IOException("Could not finish bundled asset " + assetPath, exception);
+            } finally {
+                temporary.delete();
+            }
+            return;
+        }
         byte[] buffer = new byte[16 * 1024];
         try (InputStream input = getAssets().open(assetPath);
              FileOutputStream output = new FileOutputStream(destination)) {
@@ -808,11 +1121,48 @@ public final class QuestNativeActivity extends NativeActivity {
     private void openRomPicker() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("application/octet-stream");
+        intent.setType(BuildConfig.STEAM_FRAME ? "*/*" : "application/octet-stream");
         intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
                 "application/octet-stream", "application/x-n64-rom", "*/*"
         });
+        if (!BuildConfig.STEAM_FRAME) {
+            startActivityForResult(intent, OPEN_ROM_REQUEST);
+            return;
+        }
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivityForResult(intent, OPEN_ROM_REQUEST);
+        } catch (ActivityNotFoundException exception) {
+            Log.w(TAG, "Document picker unavailable; trying the Android content picker.", exception);
+            openSteamFrameContentPicker();
+        }
+    }
+
+    private void openSteamFrameContentPicker() {
+        steamFrameContentPickerAttempted = true;
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         startActivityForResult(intent, OPEN_ROM_REQUEST);
+    }
+
+    private boolean trySteamFrameContentPicker() {
+        if (!BuildConfig.STEAM_FRAME || steamFrameContentPickerAttempted || isFinishing()) {
+            return false;
+        }
+        try {
+            romPickerRequested = true;
+            romPickerAwaitingResult = true;
+            openSteamFrameContentPicker();
+            scheduleRomPickerFallback();
+            return true;
+        } catch (RuntimeException exception) {
+            romPickerRequested = false;
+            romPickerAwaitingResult = false;
+            Log.w(TAG, "Android content picker unavailable.", exception);
+            return false;
+        }
     }
 
     @Override
@@ -832,6 +1182,7 @@ public final class QuestNativeActivity extends NativeActivity {
         if (resultCode == RESULT_OK && data != null && data.getData() != null) {
             importRom(data.getData());
         } else {
+            if (trySteamFrameContentPicker()) return;
             showRomPickerFallback();
         }
     }
@@ -853,14 +1204,25 @@ public final class QuestNativeActivity extends NativeActivity {
     }
 
     private void importRom(Uri uri) {
-        File destination = new File(getExternalFilesDir(null), ROM_NAME);
-        File temporary = new File(getExternalFilesDir(null), ROM_NAME + ".tmp");
+        if (BuildConfig.STEAM_FRAME) {
+            importSteamFrameRom(uri);
+            return;
+        }
+        if (BuildConfig.STEAM_FRAME && (firstLaunchSetupComplete ||
+                steamFrameStartup.isPending() || steamFrameStartupErrorShown)) return;
+        File destination = new File(appDataRoot(), ROM_NAME);
+        File temporary = new File(appDataRoot(), ROM_NAME + ".tmp");
         byte[] buffer = new byte[64 * 1024];
         try (InputStream input = getContentResolver().openInputStream(uri);
              FileOutputStream output = new FileOutputStream(temporary)) {
             if (input == null) throw new IllegalStateException("ROM stream unavailable");
             int count;
+            long total = 0;
             while ((count = input.read(buffer)) >= 0) {
+                total += count;
+                if (BuildConfig.STEAM_FRAME && total > 8L * 1024 * 1024) {
+                    throw new IOException("The supported US ROM must be an uncompressed 8 MiB .z64 file.");
+                }
                 if (count > 0) output.write(buffer, 0, count);
             }
         } catch (Exception exception) {
@@ -876,15 +1238,31 @@ public final class QuestNativeActivity extends NativeActivity {
                 reportImportError("That is not the supported US SM64 ROM.", null);
                 return;
             }
-            if (destination.exists() && !destination.delete()) {
-                throw new IllegalStateException("Could not replace existing ROM");
-            }
-            if (!temporary.renameTo(destination)) {
-                throw new IllegalStateException("Could not finish ROM import");
+            if (BuildConfig.STEAM_FRAME) {
+                // Both files are on the selected app filesystem. POSIX rename
+                // replaces atomically; a failed replacement keeps the old ROM.
+                android.system.Os.rename(temporary.getPath(), destination.getPath());
+            } else {
+                if (destination.exists() && !destination.delete()) {
+                    throw new IllegalStateException("Could not replace existing ROM");
+                }
+                if (!temporary.renameTo(destination)) {
+                    throw new IllegalStateException("Could not finish ROM import");
+                }
             }
             markShaderWarmupPending();
             Log.i(TAG, "US SM64 ROM imported successfully from Android file picker.");
             Toast.makeText(this, "SM64 US ROM imported successfully.", Toast.LENGTH_LONG).show();
+            if (BuildConfig.STEAM_FRAME) {
+                // Keep the same NativeActivity and process. Restarting the
+                // activity races android_main's process-exit cleanup and can
+                // close Lepton immediately after a successful ROM import.
+                // Do not unblock a rejected attempt merely by resuming or
+                // opening the browser: only a new validated import can retry.
+                steamFrameStartup.retry();
+                advanceFirstLaunchSetup();
+                return;
+            }
             // The native OpenXR host checks the ROM once during startup. A
             // first-run picker returns after that check, so recreate the
             // activity to let the native host validate and boot the newly
@@ -899,6 +1277,56 @@ public final class QuestNativeActivity extends NativeActivity {
             temporary.delete();
             reportImportError("Could not validate the selected ROM.", exception);
         }
+    }
+
+    private void importSteamFrameRom(Uri uri) {
+        if (isFinishing() || isDestroyed() || steamFrameImportPending || firstLaunchSetupComplete ||
+                !steamFrameResourcesReady || steamFrameStartup.isPending() || steamFrameStartupErrorShown) return;
+        steamFrameImportPending = true;
+        final File root = appDataRoot();
+        showSteamFrameMenu("Copying and validating ROM — please wait", new String[0], new Runnable[0]);
+        new Thread(() -> {
+            File temporary = new File(root, ROM_NAME + ".tmp");
+            Exception failure = null;
+            try {
+                // Content providers may be slow: never block Android's lifecycle
+                // thread, which must process picker return and NativeActivity events.
+                try (InputStream input = getContentResolver().openInputStream(uri);
+                     FileOutputStream output = new FileOutputStream(temporary)) {
+                    if (input == null) throw new IOException("ROM stream unavailable");
+                    byte[] buffer = new byte[64 * 1024];
+                    long total = 0;
+                    int count;
+                    while ((count = input.read(buffer)) != -1) {
+                        total += count;
+                        if (total > 8L * 1024 * 1024) throw new IOException("Select the uncompressed 8 MiB US .z64 ROM.");
+                        if (count > 0) output.write(buffer, 0, count);
+                    }
+                    if (total != 8L * 1024 * 1024) throw new IOException("Select the uncompressed 8 MiB US .z64 ROM.");
+                    output.getFD().sync();
+                }
+                if (!US_ROM_SHA1.equals(sha1(temporary))) throw new IOException("That is not the supported US SM64 ROM.");
+                android.system.Os.rename(temporary.getPath(), new File(root, ROM_NAME).getPath());
+                markShaderWarmupPending();
+            } catch (Exception exception) {
+                temporary.delete();
+                failure = exception;
+            }
+            final Exception result = failure;
+            runOnUiThread(() -> {
+                steamFrameImportPending = false;
+                if (isFinishing() || isDestroyed()) return;
+                if (result != null) {
+                    Log.w(TAG, "Could not import ROM", result);
+                    showSteamFrameMenu(result.getMessage(), new String[] { "Select ROM", "Close game" },
+                            new Runnable[] { this::showSteamFrameRomBrowser, this::finish });
+                    return;
+                }
+                Log.i(TAG, "Steam Frame ROM imported; continuing in the same activity.");
+                steamFrameStartup.retry();
+                advanceFirstLaunchSetup();
+            });
+        }, "SM64VR-RomImport").start();
     }
 
     private void markShaderWarmupPending() {
@@ -937,5 +1365,6 @@ public final class QuestNativeActivity extends NativeActivity {
         if (exception == null) Log.e(TAG, message);
         else Log.e(TAG, message, exception);
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        if (BuildConfig.STEAM_FRAME) showRomPickerFallback();
     }
 }

@@ -66,10 +66,22 @@ static void voice_capture_callback(ma_device* device, void* output,
 
 void voice_chat_init(void) {
     if (!configVoiceChatEnabled || sCaptureInitialized || sCapturePaused) return;
+#if defined(__ANDROID__) && SM64_STEAM_FRAME
+    extern bool quest_android_require_microphone_permission(void);
+    // Steam Frame defers optional permissions until the feature is used.
+    // Do not open a capture device (or miniaudio's null fallback) without it.
+    if (!quest_android_require_microphone_permission()) return;
+#endif
     atomic_store(&sCaptureRead, 0);
     atomic_store(&sCaptureWrite, 0);
     if (!sCaptureContextInitialized) {
+#if defined(__ANDROID__) && SM64_STEAM_FRAME
+        const ma_backend captureBackends[] = { ma_backend_aaudio, ma_backend_opensl };
+        ma_result contextResult = ma_context_init(captureBackends, 2, NULL, &sCaptureContext);
+        if (contextResult != MA_SUCCESS) {
+#else
         if (ma_context_init(NULL, 0, NULL, &sCaptureContext) != MA_SUCCESS) {
+#endif
             LOG_ERROR("Voice chat could not initialize audio device discovery");
             return;
         }

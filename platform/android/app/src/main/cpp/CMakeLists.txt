@@ -5,7 +5,14 @@ project(sm64coopdxvr_android LANGUAGES C CXX)
 find_package(OpenXR REQUIRED CONFIG)
 
 set(SM64_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../../../..")
-set(SM64_GENERATED_ROOT "C:/vr-dev/sm64coopdx/build/us_pc")
+option(SM64_STEAM_FRAME "Use the Steam Frame/Lepton first-launch flow" OFF)
+if(SM64_STEAM_FRAME)
+    set(SM64_DEFAULT_GENERATED_ROOT "${SM64_ROOT}/build/us_pc")
+else()
+    set(SM64_DEFAULT_GENERATED_ROOT "C:/vr-dev/sm64coopdx/build/us_pc")
+endif()
+set(SM64_GENERATED_ROOT "${SM64_DEFAULT_GENERATED_ROOT}" CACHE PATH
+    "Existing generated SM64 asset sources and headers")
 set(LUA_SOURCE_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/lua-5.3.5/src")
 set(COOPNET_ANDROID_ROOT "${SM64_ROOT}/lib/coopnet/android/arm64-v8a")
 
@@ -183,6 +190,7 @@ target_compile_definitions(
     __ANDROID__ NON_MATCHING AVOID_UB TARGET_LINUX ENABLE_OPENGL F3DEX_GBI_2E
     _LANGUAGE_C NO_SEGMENTED_MEMORY VERSION_US STDC_HEADERS USE_GLES RAPI_GL
     NO_BZERO_BCOPY COOPNET
+    SM64_STEAM_FRAME=$<BOOL:${SM64_STEAM_FRAME}>
 )
 target_compile_features(sm64_game_support PRIVATE cxx_std_17)
 target_compile_options(sm64_game_support PRIVATE -Wno-error=format-security)
@@ -223,6 +231,9 @@ add_library(
     $<TARGET_OBJECTS:sm64_game_renderer>
     $<TARGET_OBJECTS:sm64_game_support>
 )
+if(SM64_STEAM_FRAME)
+    target_sources(sm64coopdxvr PRIVATE quest_steam_frame.c)
+endif()
 list(APPEND SM64_QUEST_NATIVE_TARGETS sm64coopdxvr)
 
 foreach(target IN LISTS SM64_QUEST_NATIVE_TARGETS)
@@ -243,6 +254,7 @@ target_compile_definitions(
     PRIVATE
     XR_USE_PLATFORM_ANDROID
     XR_USE_GRAPHICS_API_OPENGL_ES
+    SM64_STEAM_FRAME=$<BOOL:${SM64_STEAM_FRAME}>
 )
 
 target_compile_options(

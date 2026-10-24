@@ -1,3 +1,9 @@
+## v0.9.25 — Cannon Aiming Hotfix
+
+- Corrected vertical cannon stick aiming in VR: push up to aim up and down to aim down. Flat-screen controls are unchanged.
+- Corrected headset cannon pitch calculation while preserving free head movement, the native aiming limits and firing controls.
+- Applies to PC VR, standalone Quest and Steam Frame. Steam Frame remains an Untested Alpha; hardware compatibility is not guaranteed.
+
 ## v0.9.22 — Color and Display Controls Hotfix
 
 - Restored the neutral original-game color baseline: brightness 100%, contrast 100%, and no color filter on first update. This one-time migration preserves later player adjustments.

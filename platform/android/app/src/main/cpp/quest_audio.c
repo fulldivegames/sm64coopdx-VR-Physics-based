@@ -4,6 +4,9 @@
 #include <stdatomic.h>
 #include <stdint.h>
 #include <string.h>
+#if SM64_STEAM_FRAME
+#include <jni.h>
+#endif
 
 #include "pc/utils/miniaudio.h"
 #include "pc/network/voice_chat.h"
@@ -17,6 +20,20 @@ static int16_t sSamples[QUEST_AUDIO_FRAMES * 2u];
 static _Atomic uint32_t sReadFrame;
 static _Atomic uint32_t sWriteFrame;
 static bool sInitialized;
+#if SM64_STEAM_FRAME
+static atomic_bool sAudioRetryRequested;
+extern void steam_frame_show_audio_error(void);
+
+JNIEXPORT void JNICALL
+Java_com_fulldivegames_sm64coopdxvr_QuestNativeActivity_nativeRetryAudio(
+    JNIEnv *env, jclass activity_class) {
+    (void)env;
+    (void)activity_class;
+    // Device teardown/opening must run on the game thread, not Android's UI
+    // thread while its audio callback may still be consuming ring data.
+    atomic_store_explicit(&sAudioRetryRequested, true, memory_order_release);
+}
+#endif
 
 static void quest_audio_callback(ma_device *device, void *output,
                                  const void *input, ma_uint32 frame_count) {
@@ -58,6 +75,31 @@ static bool quest_audio_init(void) {
     config.periodSizeInFrames = 512;
     config.periods = 3;
     config.dataCallback = quest_audio_callback;
+#if SM64_STEAM_FRAME
+    // Never report success with miniaudio's silent null backend. Also try
+    // OpenSL if AAudio opens but fails when starting under Lepton.
+    const ma_backend backends[] = { ma_backend_aaudio, ma_backend_opensl };
+    bool started = false;
+    for (size_t i = 0; i < sizeof(backends) / sizeof(backends[0]); ++i) {
+        ma_result result = ma_device_init_ex(&backends[i], 1, NULL, &config, &sDevice);
+        if (result != MA_SUCCESS) {
+            LOGE("Steam Frame audio backend %d could not open (%d).", backends[i], result);
+            continue;
+        }
+        result = ma_device_start(&sDevice);
+        if (result == MA_SUCCESS) {
+            started = true;
+            LOGI("Steam Frame audio backend %d started.", backends[i]);
+            break;
+        }
+        LOGE("Steam Frame audio backend %d could not start (%d).", backends[i], result);
+        ma_device_uninit(&sDevice);
+    }
+    if (!started) {
+        steam_frame_show_audio_error();
+        return false;
+    }
+#else
     if (ma_device_init(NULL, &config, &sDevice) != MA_SUCCESS) {
         LOGE("Could not initialize Android audio output.");
         return false;
@@ -67,6 +109,7 @@ static bool quest_audio_init(void) {
         ma_device_uninit(&sDevice);
         return false;
     }
+#endif
     sInitialized = true;
     voice_chat_init();
     LOGI("Android audio output started at 32000 Hz stereo.");
@@ -74,6 +117,18 @@ static bool quest_audio_init(void) {
 }
 
 static int quest_audio_buffered(void) {
+#if SM64_STEAM_FRAME
+    if (sInitialized && !ma_device_is_started(&sDevice)) {
+        ma_device_uninit(&sDevice);
+        sInitialized = false;
+        steam_frame_show_audio_error();
+    }
+    if (atomic_exchange_explicit(&sAudioRetryRequested, false, memory_order_acq_rel)) {
+        if (sInitialized) ma_device_uninit(&sDevice);
+        sInitialized = false;
+        quest_audio_init();
+    }
+#endif
     return (int)(atomic_load_explicit(&sWriteFrame, memory_order_acquire) -
                  atomic_load_explicit(&sReadFrame, memory_order_acquire));
 }

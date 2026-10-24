@@ -998,9 +998,11 @@ static bool update_vr_headset_cannon_aim(
     const s16 desiredYaw = horizontalLength > 0.0001f
         ? atan2s(direction[2], direction[0])
         : m->faceAngle[1];
+    // SM64's atan2s uses the opposite argument order to libc atan2f.
+    // Level aim must be zero, with pitch increasing as the headset looks up.
     const s32 desiredPitch = (s32)atan2s(
-        direction[1],
-        horizontalLength
+        horizontalLength,
+        direction[1]
     );
     const s32 desiredYawOffset = (s32)(s16)(
         desiredYaw - marioObj->oMarioCannonObjectYaw
@@ -1026,6 +1028,12 @@ static bool update_vr_headset_cannon_aim(
     marioObj->oMarioCannonInputYaw = (s16)clampedYawOffset;
     update_vr_cannon_vision_fade(desiredPitch, desiredYawOffset);
     return true;
+}
+
+static s16 cannon_stick_pitch_delta(f32 stickY, f32 sensitivity, bool localVr) {
+    // The original game's cannon uses aircraft-style vertical controls.
+    // In VR, pushing up should raise the aim; keep flat-screen input intact.
+    return (s16)(stickY * sensitivity * (localVr ? 1.0f : -1.0f));
 }
 
 s32 act_in_cannon(struct MarioState *m) {
@@ -1094,8 +1102,9 @@ s32 act_in_cannon(struct MarioState *m) {
                 }
 
                 if (!vrHeadsetAim) {
-                    m->faceAngle[0] -= (s16)(
-                        m->controller->stickY * cannonSensitivity
+                    m->faceAngle[0] += cannon_stick_pitch_delta(
+                        m->controller->stickY, cannonSensitivity,
+                        localPlayer && vr_is_active()
                     );
                     marioObj->oMarioCannonInputYaw -= (s16)(
                         m->controller->stickX * cannonSensitivity

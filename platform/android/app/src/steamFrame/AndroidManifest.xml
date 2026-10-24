@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Lepton's Android 10 needs legacy permissions for direct Downloads
+         browsing. Newer Android uses the existing all-files settings grant.
+         Neither is needed for the app's own files or a granted content URI. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <application android:requestLegacyExternalStorage="true">
+        <!-- Keep the launched activity alive from ROM selection through XR.
+             Steam/Lepton can track this component for the whole session. -->
+        <activity android:name="com.fulldivegames.sm64coopdxvr.QuestNativeActivity"
+            android:exported="true" />
+        <!-- Preserve explicit shortcuts created for the previous alpha.
+             An alias starts the native activity directly, without a trampoline. -->
+        <activity-alias android:name="com.fulldivegames.sm64coopdxvr.SteamFrameLaunchActivity"
+            android:targetActivity="com.fulldivegames.sm64coopdxvr.QuestNativeActivity"
+            android:exported="true" />
+    </application>
+</manifest>

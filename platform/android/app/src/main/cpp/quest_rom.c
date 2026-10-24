@@ -122,6 +122,28 @@ static bool hash_file(const char *path, char digest[41]) {
     return success;
 }
 
+#if SM64_STEAM_FRAME
+QuestRomResult quest_rom_validate_file(const char *path) {
+    QuestRomResult result = {.status = QUEST_ROM_MISSING};
+    if (path == NULL || strlen(path) >= sizeof(result.path)) return result;
+    memcpy(result.path, path, strlen(path) + 1);
+    // Bound validation work too, not only the Java import stream.
+    FILE *file = fopen(path, "rb");
+    if (file == NULL) return result;
+    bool correct_size = fseek(file, 0, SEEK_END) == 0 && ftell(file) == 8L * 1024 * 1024;
+    fclose(file);
+    if (!correct_size) {
+        result.status = QUEST_ROM_INVALID;
+        return result;
+    }
+    if (hash_file(path, result.sha1)) {
+        result.status = strcmp(result.sha1, SM64_US_SHA1) == 0
+            ? QUEST_ROM_VALID : QUEST_ROM_INVALID;
+    }
+    return result;
+}
+#endif
+
 QuestRomResult quest_rom_find_and_validate(const struct android_app *app) {
     QuestRomResult result = {.status = QUEST_ROM_MISSING};
     const char *roots[] = {

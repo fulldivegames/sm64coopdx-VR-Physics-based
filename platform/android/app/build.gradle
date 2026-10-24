@@ -2,6 +2,15 @@ plugins {
     id "com.android.application"
 }
 
+def sm64Target = providers.gradleProperty("sm64Target").getOrElse("quest")
+if (!(sm64Target in ["quest", "steamFrame"])) {
+    throw new GradleException("sm64Target must be quest or steamFrame")
+}
+def steamFrameBuild = sm64Target == "steamFrame"
+if (steamFrameBuild) {
+    layout.buildDirectory.set(layout.projectDirectory.dir("build-steam-frame"))
+}
+
 def generatedResourceAssets = layout.buildDirectory.dir("generated/sm64Resources/assets")
 
 tasks.register("syncSm64ResourceAssets", Sync) {
@@ -34,9 +43,12 @@ android {
     defaultConfig {
         applicationId "com.fulldivegames.sm64coopdxvr"
         minSdk 26
-        targetSdk 32
-        versionCode 43
-        versionName "0.9.22"
+        // Lepton's Android 11 grants declared runtime permissions at install.
+        // Target 29 retains direct Downloads access through legacy storage.
+        targetSdk steamFrameBuild ? 29 : 32
+        versionCode 44
+        versionName "0.9.25"
+        buildConfigField "boolean", "STEAM_FRAME", steamFrameBuild.toString()
 
         ndk {
             abiFilters "arm64-v8a"
@@ -44,7 +56,11 @@ android {
 
         externalNativeBuild {
             cmake {
-                arguments "-DANDROID_STL=c++_shared"
+                arguments "-DANDROID_STL=c++_shared",
+                        "-DSM64_STEAM_FRAME=${steamFrameBuild ? 'ON' : 'OFF'}"
+                if (providers.gradleProperty("sm64GeneratedRoot").isPresent()) {
+                    arguments "-DSM64_GENERATED_ROOT=${providers.gradleProperty('sm64GeneratedRoot').get()}"
+                }
                 targets "sm64coopdxvr"
             }
         }
@@ -63,17 +79,34 @@ android {
         cmake {
             path file("src/main/cpp/CMakeLists.txt")
             version "3.22.1"
+            if (steamFrameBuild) {
+                buildStagingDirectory file(".cxx-steam-frame")
+            }
         }
     }
 
     buildFeatures {
         prefab true
+        buildConfig true
+    }
+
+    if (steamFrameBuild) {
+        // Let Android extract native libraries to its executable app directory.
+        // Loading ELF code directly from an APK on shared/microSD storage is
+        // fragile on compatibility runtimes and unnecessarily enlarges downloads.
+        packaging {
+            jniLibs.useLegacyPackaging = true
+        }
     }
 
     sourceSets {
         // All shipped resources come from the shared, tracked sources above.
         // Do not merge the obsolete src/main/assets/release_notes.txt copy.
         main.assets.setSrcDirs([generatedResourceAssets])
+        if (steamFrameBuild) {
+            debug.manifest.srcFile("src/steamFrame/AndroidManifest.xml")
+            release.manifest.srcFile("src/steamFrame/AndroidManifest.xml")
+        }
     }
 }
 

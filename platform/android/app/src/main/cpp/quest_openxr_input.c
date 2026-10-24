@@ -207,6 +207,37 @@ void quest_input_suspend(void) {
     sInput.active = false;
 }
 
+#if SM64_STEAM_FRAME
+bool quest_input_setup_navigation(XrSession session, int *direction, bool *select) {
+    static int previous_direction;
+    static bool previous_select;
+    *direction = 0; *select = false;
+    if (!sInput.ready || session != sInput.session) return false;
+    XrActiveActionSet active = {.actionSet=sInput.set,.subactionPath=XR_NULL_PATH};
+    XrActionsSyncInfo sync = {.type=XR_TYPE_ACTIONS_SYNC_INFO,.countActiveActionSets=1,.activeActionSets=&active};
+    if (xrSyncActions(session, &sync) != XR_SUCCESS) {
+        previous_direction = 0; previous_select = false; return false;
+    }
+    int movement = 0;
+    bool pressed = false;
+    for (unsigned hand = 0; hand < 2; ++hand) {
+        XrActionStateGetInfo get = {.type=XR_TYPE_ACTION_STATE_GET_INFO,.action=sInput.thumbstick,.subactionPath=sInput.hands[hand]};
+        XrActionStateVector2f stick = {.type=XR_TYPE_ACTION_STATE_VECTOR2F};
+        if (XR_SUCCEEDED(xrGetActionStateVector2f(session, &get, &stick)) && stick.isActive) {
+            if (stick.currentState.y > 0.6f) movement = -1;
+            else if (stick.currentState.y < -0.6f) movement = 1;
+        }
+        pressed |= float_action(session, sInput.trigger, sInput.hands[hand]) > 0.7f ||
+                   bool_action(session, sInput.primary, sInput.hands[hand]);
+    }
+    // Deliberate edges prevent one held trigger selecting multiple directories.
+    *direction = movement != previous_direction ? movement : 0;
+    *select = pressed && !previous_select;
+    previous_direction = movement; previous_select = pressed;
+    return true;
+}
+#endif
+
 void quest_input_shutdown(void) {
     quest_input_suspend();
     for (int hand=0; hand<2; ++hand) {

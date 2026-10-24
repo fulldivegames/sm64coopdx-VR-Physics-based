@@ -5,8 +5,8 @@
 
 // Public release version for the VR fork. Keep this separate from
 // SM64COOPDX_VERSION because the latter is part of multiplayer compatibility.
-#define SM64COOPDX_VR_VERSION "v0.9.22"
-#define SM64COOPDX_VR_PC_VERSION "v0.9.24"
+#define SM64COOPDX_VR_VERSION "v0.9.25"
+#define SM64COOPDX_VR_PC_VERSION "v0.9.25"
 #if defined(__ANDROID__)
 #define SM64COOPDX_VR_CLIENT_VERSION SM64COOPDX_VR_VERSION
 #else

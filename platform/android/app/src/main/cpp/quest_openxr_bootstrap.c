@@ -9,6 +9,11 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#if SM64_STEAM_FRAME
+#include <stdatomic.h>
+#include <stdio.h>
+#include <pthread.h>
+#endif
 
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
@@ -34,6 +39,11 @@ extern void quest_vr_bridge_prepare_tracking(int64_t displayTime);
 
 #define QUEST_VIEW_COUNT 2U
 #define QUEST_DEFAULT_RENDER_SCALE_PERCENT 80U
+
+#if SM64_STEAM_FRAME
+extern void steam_frame_show_startup_error(const char *message);
+static char sSteamFrameLastError[192];
+#endif
 
 typedef struct QuestSwapchain {
     XrSwapchain handle;
@@ -117,6 +127,57 @@ static bool openxr_extension_available(const char *name) {
 
 static QuestApp *sActiveQuestApp;
 static bool poll_openxr_events(QuestApp *app);
+
+#if SM64_STEAM_FRAME
+extern bool steam_frame_report_rom_result(int attempt, bool accepted, const char *message);
+extern void quest_android_set_user_path(const char *path);
+static pthread_mutex_t sSteamFrameRomMutex = PTHREAD_MUTEX_INITIALIZER;
+static char sSteamFrameDataRoot[400];
+static atomic_int sSteamFrameRomAttempt;
+static atomic_int sSteamFrameRomConfirmed;
+static atomic_bool sSteamFrameStartupCancelled;
+
+static double steam_frame_now(void) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return now.tv_sec + now.tv_nsec / 1000000000.0;
+}
+
+JNIEXPORT void JNICALL
+Java_com_fulldivegames_sm64coopdxvr_QuestNativeActivity_nativeOnRomImported(
+    JNIEnv *env, jclass activity_class, jstring root, jint attempt) {
+    (void)activity_class;
+    if (root == NULL || attempt <= 0) return;
+    const char *path = (*env)->GetStringUTFChars(env, root, NULL);
+    if (path == NULL) return;
+    pthread_mutex_lock(&sSteamFrameRomMutex);
+    const size_t length = strlen(path);
+    sSteamFrameDataRoot[0] = '\0';
+    if (length > 0 && length < sizeof(sSteamFrameDataRoot) && path[0] == '/') {
+        memcpy(sSteamFrameDataRoot, path, length + 1);
+    }
+    atomic_store_explicit(&sSteamFrameRomAttempt, attempt, memory_order_release);
+    pthread_mutex_unlock(&sSteamFrameRomMutex);
+    (*env)->ReleaseStringUTFChars(env, root, path);
+}
+
+JNIEXPORT void JNICALL
+Java_com_fulldivegames_sm64coopdxvr_QuestNativeActivity_nativeConfirmRomReady(
+    JNIEnv *env, jclass activity_class, jint attempt) {
+    (void)env;
+    (void)activity_class;
+    atomic_store_explicit(&sSteamFrameRomConfirmed, attempt, memory_order_release);
+}
+
+JNIEXPORT void JNICALL
+Java_com_fulldivegames_sm64coopdxvr_QuestNativeActivity_nativeCancelSteamFrameStartup(
+    JNIEnv *env, jclass activity_class) {
+    (void)env;
+    (void)activity_class;
+    atomic_store_explicit(&sSteamFrameStartupCancelled, true, memory_order_release);
+}
+
+#endif
 
 /* Long first-launch mod and DynOS scans run on android_main because they need
  * the game renderer's thread.  Android still requires this same thread to
@@ -254,7 +315,9 @@ static void handle_app_command(struct android_app *android_app, int32_t command)
             break;
         case APP_CMD_TERM_WINDOW:
             app->window_ready = false;
+#if !SM64_STEAM_FRAME
             quest_input_suspend();
+#endif
             LOGI("Android native window was released.");
             break;
         default:
@@ -262,6 +325,7 @@ static void handle_app_command(struct android_app *android_app, int32_t command)
     }
 }
 
+#if !SM64_STEAM_FRAME
 static bool wait_for_android_ready(QuestApp *app) {
     LOGI("Waiting for the Android activity and native window.");
     while (!app->android_app->destroyRequested && !app->exit_requested
@@ -276,6 +340,7 @@ static bool wait_for_android_ready(QuestApp *app) {
     }
     return !app->android_app->destroyRequested && !app->exit_requested;
 }
+#endif
 
 static bool xr_check(const char *operation, XrResult result) {
     if (XR_SUCCEEDED(result)) {
@@ -283,6 +348,10 @@ static bool xr_check(const char *operation, XrResult result) {
     }
 
     LOGE("%s failed with OpenXR result %d", operation, (int)result);
+#if SM64_STEAM_FRAME
+    snprintf(sSteamFrameLastError, sizeof(sSteamFrameLastError),
+             "%s: OpenXR result %d", operation, (int)result);
+#endif
     return false;
 }
 
@@ -291,7 +360,14 @@ static bool egl_check(const char *operation, EGLBoolean result) {
         return true;
     }
 
+#if SM64_STEAM_FRAME
+    const EGLint error = eglGetError();
+    LOGE("%s failed with EGL error 0x%04x", operation, error);
+    snprintf(sSteamFrameLastError, sizeof(sSteamFrameLastError),
+             "%s: EGL error 0x%04x", operation, error);
+#else
     LOGE("%s failed with EGL error 0x%04x", operation, eglGetError());
+#endif
     return false;
 }
 
@@ -440,7 +516,13 @@ static bool create_openxr_instance(QuestApp *app) {
             .applicationVersion = 1,
             .engineName = "SM64 Co-Op DX",
             .engineVersion = 1,
+#if SM64_STEAM_FRAME
+            // We use core 1.0 plus negotiated extensions. A newer SDK must
+            // not make a compatible 1.0 runtime reject instance creation.
+            .apiVersion = XR_MAKE_VERSION(1, 0, 0),
+#else
             .apiVersion = XR_CURRENT_API_VERSION,
+#endif
         },
         .enabledExtensionCount = extension_count,
         .enabledExtensionNames = extensions,
@@ -646,6 +728,23 @@ static bool create_openxr_session(QuestApp *app) {
         return false;
     }
 
+#if SM64_STEAM_FRAME
+    GLint gl_major = 0, gl_minor = 0;
+    glGetIntegerv(GL_MAJOR_VERSION, &gl_major);
+    glGetIntegerv(GL_MINOR_VERSION, &gl_minor);
+    const XrVersion gl_version = XR_MAKE_VERSION(gl_major, gl_minor, 0);
+    if (gl_version < requirements.minApiVersionSupported ||
+        gl_version > requirements.maxApiVersionSupported) {
+        snprintf(sSteamFrameLastError, sizeof(sSteamFrameLastError),
+                 "OpenGL ES %d.%d is outside the OpenXR runtime range %u.%u to %u.%u.",
+                 gl_major, gl_minor,
+                 (unsigned)XR_VERSION_MAJOR(requirements.minApiVersionSupported),
+                 (unsigned)XR_VERSION_MINOR(requirements.minApiVersionSupported),
+                 (unsigned)XR_VERSION_MAJOR(requirements.maxApiVersionSupported),
+                 (unsigned)XR_VERSION_MINOR(requirements.maxApiVersionSupported));
+        return false;
+    }
+#endif
     XrGraphicsBindingOpenGLESAndroidKHR graphics_binding = {
         .type = XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR,
         .display = app->egl_display,
@@ -692,6 +791,9 @@ static bool create_openxr_session(QuestApp *app) {
         LOGI("OpenXR performance-level control is unavailable; using runtime defaults.");
     }
 
+#if SM64_STEAM_FRAME
+    if (app->rom.status == QUEST_ROM_VALID)
+#endif
     configure_display_refresh_rate(app);
 
     if (app->foveation_supported) {
@@ -1251,8 +1353,12 @@ static bool render_frame(QuestApp *app) {
             quest_vr_bridge_update_views(positions, rotations, fovs, widths, heights);
             // Capture the new head reference before transforming controllers;
             // otherwise a recenter mixes old-space hands with a new-space head.
+#if SM64_STEAM_FRAME
+            if (app->session_state == XR_SESSION_STATE_FOCUSED && app->activity_resumed) {
+#else
             if (app->session_state == XR_SESSION_STATE_FOCUSED &&
                 app->activity_resumed && app->window_ready) {
+#endif
                 quest_input_update(app->session, app->local_space,
                                    frame_state.predictedDisplayTime);
             } else {
@@ -1293,7 +1399,12 @@ static bool render_frame(QuestApp *app) {
 
 static bool poll_openxr_events(QuestApp *app) {
     XrEventDataBuffer event = {.type = XR_TYPE_EVENT_DATA_BUFFER};
+#if SM64_STEAM_FRAME
+    XrResult event_result;
+    while ((event_result = xrPollEvent(app->instance, &event)) == XR_SUCCESS) {
+#else
     while (xrPollEvent(app->instance, &event) == XR_SUCCESS) {
+#endif
         if (event.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
             const XrEventDataSessionStateChanged *changed =
                 (const XrEventDataSessionStateChanged *)&event;
@@ -1327,6 +1438,10 @@ static bool poll_openxr_events(QuestApp *app) {
                     return false;
                 }
                 app->session_running = false;
+#if SM64_STEAM_FRAME
+            } else if (changed->state == XR_SESSION_STATE_LOSS_PENDING) {
+                return xr_check("OpenXR session lost", XR_ERROR_SESSION_LOST);
+#endif
             } else if (changed->state == XR_SESSION_STATE_EXITING
                        || changed->state == XR_SESSION_STATE_LOSS_PENDING) {
                 app->exit_requested = true;
@@ -1339,18 +1454,32 @@ static bool poll_openxr_events(QuestApp *app) {
                 quest_vr_bridge_reference_space_change(changed->changeTime);
             }
         } else if (event.type == XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING) {
+#if SM64_STEAM_FRAME
+            return xr_check("OpenXR runtime lost", XR_ERROR_INSTANCE_LOST);
+#else
             app->exit_requested = true;
+#endif
         }
 
         event.type = XR_TYPE_EVENT_DATA_BUFFER;
         event.next = NULL;
     }
+#if SM64_STEAM_FRAME
+    if (XR_FAILED(event_result)) return xr_check("xrPollEvent", event_result);
+#endif
     return true;
 }
+
+#if SM64_STEAM_FRAME
+#include "steam_frame_setup.inc"
+#endif
 
 static void destroy_quest_app(QuestApp *app) {
     quest_game_flush_persistent_state();
     quest_input_shutdown();
+#if SM64_STEAM_FRAME
+    destroy_setup_panel();
+#endif
     if (app->mario_texture != 0) glDeleteTextures(1, &app->mario_texture);
     if (app->mario_program != 0) glDeleteProgram(app->mario_program);
     destroy_swapchain_render_targets(app);
@@ -1402,6 +1531,7 @@ void android_main(struct android_app *android_app) {
     android_app->onAppCmd = handle_app_command;
     sActiveQuestApp = &app;
 
+#if !SM64_STEAM_FRAME
     extern void quest_android_set_user_path(const char *path);
     quest_android_set_user_path(android_app->activity->externalDataPath);
 
@@ -1420,9 +1550,54 @@ void android_main(struct android_app *android_app) {
                  android_app->activity->externalDataPath);
         }
     }
+#else
+    // Java selects the data root and supplies the ROM. Do not scan a different
+    // root or wait indefinitely for a 2D native window before that handshake.
+    // Start OpenXR before asking for the ROM. Steam-launched Lepton VR titles
+    // can have no visible Android window; the setup panel owns its XR output.
+    const bool android_ready = true;
+#endif
     if (android_ready && app.rom.status == QUEST_ROM_VALID) {
         quest_game_load_early_config();
     }
+#if SM64_STEAM_FRAME
+    // Report the actual failed stage instead of leaving an unresponsive
+    // NativeActivity alive with no OpenXR session and no explanation.
+    const char *failed_stage = "Android ROM/data setup";
+    bool initialized = android_ready;
+    if (initialized) {
+        failed_stage = "OpenGL ES context creation";
+        sSteamFrameLastError[0] = '\0';
+        initialized = create_egl_context(&app);
+    }
+    if (initialized) {
+        failed_stage = "OpenXR loader/runtime discovery";
+        sSteamFrameLastError[0] = '\0';
+        initialized = create_openxr_instance(&app);
+    }
+    if (initialized) {
+        failed_stage = "OpenXR OpenGL ES session creation";
+        sSteamFrameLastError[0] = '\0';
+        initialized = create_openxr_session(&app);
+    }
+    if (initialized) {
+        failed_stage = "Controller action setup";
+        sSteamFrameLastError[0] = '\0';
+        initialized = quest_input_initialize(app.instance, app.session);
+    }
+    if (initialized) {
+        failed_stage = "Headset setup panel creation";
+        sSteamFrameLastError[0] = '\0';
+        initialized = create_setup_panel(&app);
+    }
+    if (!initialized && !android_app->destroyRequested && !app.exit_requested) {
+        char message[384];
+        snprintf(message, sizeof(message), "Failed during %s.%s%s", failed_stage,
+                 sSteamFrameLastError[0] ? "\n" : "", sSteamFrameLastError);
+        LOGE("%s", message);
+        steam_frame_show_startup_error(message);
+    }
+#else
     bool initialized = android_ready && create_egl_context(&app)
         && create_mario_preview(&app)
         && create_openxr_instance(&app)
@@ -1436,12 +1611,22 @@ void android_main(struct android_app *android_app) {
     if (!initialized) {
         LOGE("Quest OpenXR smoke test initialization failed.");
     }
+#endif
 
+#if SM64_STEAM_FRAME
+    double xr_ready_previous = steam_frame_now();
+    double xr_ready_seconds = 0;
+    bool xr_started = false;
+#endif
     while (!android_app->destroyRequested && !app.exit_requested) {
         int events = 0;
         struct android_poll_source *source = NULL;
+#if SM64_STEAM_FRAME
+        const bool render_was_active = initialized && app.session_running && app.activity_resumed;
+#else
         const bool render_was_active = initialized && app.session_running &&
             app.activity_resumed && app.window_ready;
+#endif
         const int timeout = render_was_active ? 0 : 50;
         while (ALooper_pollOnce(timeout, NULL, &events, (void **)&source) >= 0) {
             if (source != NULL) {
@@ -1459,12 +1644,50 @@ void android_main(struct android_app *android_app) {
             continue;
         }
         if (!poll_openxr_events(&app)) {
+#if SM64_STEAM_FRAME
+            steam_frame_show_startup_error(sSteamFrameLastError[0]
+                ? sSteamFrameLastError : "OpenXR session event processing failed.");
+            initialized = false;
+            continue;
+#else
             break;
+#endif
         }
+#if SM64_STEAM_FRAME
+        double xr_ready_now = steam_frame_now();
+        if (app.session_running) xr_started = true;
+        if (!xr_started && app.activity_resumed) xr_ready_seconds += xr_ready_now - xr_ready_previous;
+        xr_ready_previous = xr_ready_now;
+        if (!xr_started && xr_ready_seconds >= 30) {
+            steam_frame_show_startup_error("OpenXR did not enter its running state within 30 seconds of foreground time. Check the headset OpenXR runtime and relaunch.");
+            initialized = false;
+            continue;
+        }
+#endif
+#if SM64_STEAM_FRAME
+        const bool can_render = app.session_running && app.activity_resumed;
+#else
         const bool can_render = app.session_running && app.activity_resumed &&
             app.window_ready;
+#endif
+#if SM64_STEAM_FRAME
+        if (can_render && !sSteamFrameGameStarted &&
+            !atomic_load_explicit(&sSteamFrameStartupCancelled, memory_order_acquire) && !poll_setup_rom(&app)) {
+            atomic_store_explicit(&sSteamFrameStartupCancelled, true, memory_order_release);
+            steam_frame_show_startup_error("Could not start the game after headset ROM setup.");
+        }
+        const bool frame_ok = !can_render || (sSteamFrameGameStarted ? render_frame(&app) : render_setup_frame(&app));
+        if (!frame_ok) {
+#else
         if (can_render && !render_frame(&app)) {
+#endif
+#if SM64_STEAM_FRAME
+            steam_frame_show_startup_error(sSteamFrameLastError[0]
+                ? sSteamFrameLastError : "The OpenXR frame could not be rendered.");
+            initialized = false;
+#else
             break;
+#endif
         } else if (!can_render) {
             quest_input_suspend();
             quest_game_pump_network();
