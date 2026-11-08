@@ -1,3 +1,11 @@
+## Downloads
+
+[Windows PC VR ZIP — v0.9.25](https://github.com/fulldivegames/sm64coopdx-VR-Physics-based/releases/download/v0.9.25/SM64-Co-Op-DX-VR-Windows-v0.9.25.zip) · [Meta Quest standalone APK — v0.9.26](https://github.com/fulldivegames/sm64coopdx-VR-Standalone-Physics-based/releases/download/v0.9.26/SM64-Co-Op-DX-VR-Quest-v0.9.26.apk)
+
+[Steam Frame APK — v0.9.25 Untested Alpha](https://github.com/fulldivegames/sm64coopdx-VR-Standalone-Physics-based/releases/download/v0.9.25/SM64-Co-Op-DX-VR-Steam-Frame-Alpha-UNTESTED-v0.9.25.apk)
+
+Release notes: [PC VR](https://github.com/fulldivegames/sm64coopdx-VR-Physics-based/releases/tag/v0.9.25) · [Quest](https://github.com/fulldivegames/sm64coopdx-VR-Standalone-Physics-based/releases/tag/v0.9.26) · [Steam Frame](https://github.com/fulldivegames/sm64coopdx-VR-Standalone-Physics-based/releases/tag/v0.9.25)
+
 <p align="center">
   <img src="textures/segment2/custom_coopdx_logo.rgba32.png" alt="SM64 Co-Op DX VR" width="720">
 </p>
@@ -14,35 +22,13 @@
 </p>
 
 > [!IMPORTANT]
-> The current public release is **v0.9.21**. This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur.
+> This is an active fan project: neither the PC nor Quest standalone edition has been tested across every level, headset, multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur.
 
 SM64 Co-Op DX VR currently targets 64-bit Windows, OpenGL, and OpenXR. It keeps the original game's flat-screen mode and multiplayer foundation while adding native stereoscopic rendering, 6DoF tracking, VR-aware cameras, remappable motion-controller input, physical interactions, comfort options, and extensive calibration settings.
 
 Solo hosting has received the most testing. Online co-op, different OpenXR runtimes, ROM hacks, Lua mods, character models, and texture packs may work, but compatibility still varies.
 
-### New in v0.9.21 — Physical Gestures and New Power-Ups
-
-- Added Speed Running Mode (Vanilla Game), optional Vanilla Movement (Restrictive Jumps), and Disable Punch Sound for physical punches only; saved preferences and jump/jump-kick sounds are preserved.
-
-- Added Propeller Mushroom: a 60-second power-up with an airborne burst, slow glide, crouch-controlled spinning descent, stomp rebounds, and a customizable propeller helmet.
-- Added Power Star: 30 seconds of enemy-contact invincibility, 1.5x running speed and jump height, rainbow shimmer, torso sparkles, and dedicated music with a four-second expiry fade. Its bouncing pickup floats on water surfaces.
-- Added physical jumping and swimming. Jump with either/both fists, sustain height by holding a fist up, and use gestures for jump chains, wall kicks and Propeller bursts. Swimming supports alternating strokes and overhead upward pulls.
-- On the first 0.9.2 launch, physical jumping, swimming, punching, grabbing, climbing, swing release and motion dives are enabled for everyone. Physical crouching is unchanged. You can disable these actions again; later launches retain your choices.
-- Added optional trigger-based jumping, adjustable physical crouch depth, and stronger climb-release jumps for hard swings.
-- Added relative power-up spawn weights, grouped Power-Ups / Specials / Gestures, and optional 60-second timers for Big Hands and Power Star. Both Specials have half the ordinary spawn weight at equal slider settings.
-- Added cosmetic power-up helmets and cap-state matching when grabbing your hat; updated the in-game tutorial for current controls and power-ups.
-
-Fixes and refinements
-- Improved PC physical jump recognition using tracked hand travel, and restored the jump-kick voice without re-enabling incidental airborne punch sounds.
-- Hardened native and menu text against inherited fog, texture and alpha state; improved long-text handling and reduced redundant word-measurement work.
-- Smoothed body tracking and corrected carried/thrown camera anchoring. Physical wall kicks retain full jump height while the triggering fist stays raised.
-- Improved swimming, surface shell riding, crouch/head-height handling, and gesture separation to reduce accidental punches and dives.
-- Corrected power-up music selection, replacement, held-cap size, and Propeller activation after small jumps, water exits and surface contacts.
-- Improved PC shader compatibility, OpenGL backend selection, and updater transfer handling. Existing saves, mods, palettes and other options are retained.
-
 PC: extract the complete ZIP, including speech and music assets. No ROM is supplied. PC speech under Wine/Proton and untested GPU/runtime combinations are not certified.
-
-See the [v0.9.21 release](https://github.com/fulldivegames/sm64coopdx-VR-Physics-based/releases/tag/v0.9.21) for downloads. No ROM is included.
 
 ### Multiplayer and public-lobby safety
 
@@ -334,87 +320,6 @@ v0.6.27 expands compatibility around mod discovery, Lua HUD/menu presentation, c
 Compatibility is not universal. Mods that replace camera, player action, input, HUD, rendering, collision, or character geometry can conflict with VR behavior. Install one at a time when troubleshooting and report the exact mod name/version, headset/runtime, and reproduction steps. A mod working in normal SM64 Co-Op DX does not guarantee that every first-person physical interaction will behave correctly.
 
 When **WiddlePets** is enabled, Server Settings adds a **Pets** button that opens the mod's own `/wpets` pet-selection menu. Pet choice, spawning, and following behavior remain controlled by WiddlePets itself.
-
-## v0.8.3 — Multiplayer Updater and Release Notes Fix
-
-- Promoted the tested PCVR updater to the normal main-menu flow, directly above Host, with the bundled updater retained as a fallback.
-- Kept latest-release lookup restricted to this VR fork's Windows ZIP asset.
-- Bumped the tested PCVR package and release metadata to v0.8.3.
-
-## v0.8.2 — Updater and Release Notes Update
-
-- Added the PCVR updater executable, which finds the newest PCVR GitHub release with a Windows ZIP, installs it, relaunches the game, and closes its console after launch
-- Added title-screen Release Notes pages sourced from the PCVR repository
-- Fixed the updater's false failure report after a successful install
-
-## v0.8.0 — Sonic Shoes Update
-
-- Added the timed **Sonic Shoes** power-up, including the fitted shoe model, spawn-menu entry, balanced item-box/cork-box pool, Green Hill Zone music, and close-tracking sparkle trail
-- Added the 0–300 Sonic speed slider with the established 3× baseline at zero, scaling normal movement, acceleration, turning, slopes, dives, and dive recoveries together
-- Added high-speed water running while Sonic Shoes are active, with stable surface alignment and a return to swimming below the required speed or after a bonk
-- Improved WiddlePets compatibility with an accessible pet-selection menu and an in-game hint showing where to find it
-- Added Hammer Suit knockback against Bully-type enemies and 1.5× knockback from special-move explosions
-- Included conservative caching and frame-work reductions for large mod maps without reducing visual quality or changing standard gameplay timing
-
-## Previous Release Notes
-
-### v0.7.9 — Voice Chat and Filters Update
-
-- Added built-in voice chat for compatible PC VR and Quest clients, including PC flat-screen play, selectable PC microphones, Quest headset-mic support, microphone and player-volume controls, and a master voice-chat toggle
-- Added individual two-way player muting, an active-speaker icon in the Players menu, and microphone dictation for the controller-operated keyboard
-- Added the approved **Virtual Boy** and **Game Boy** full-scene filters with improved actor visibility while leaving normal rendering unchanged
-- Added a conditional **Pets** shortcut to Server Settings when WiddlePets is active; it opens the mod's real pet-selection and following menu
-- Hardened Rasengan and Rasen-Shuriken model lookup for ROM hacks such as B3313 without changing their charge, combat, physics, or visual behavior
-
-### v0.7.2 — Boss Combat, Spawn Tools, and Camera Fixes
-
-- Added **Cheats > Spawn Menu** with Wing Cap, Vanish Cap, Metal Cap, and Fire Flower buttons while retaining the complete scrollable Level Select
-- Expanded Rasengan and Rasen-Shuriken interactions across giant Goombas, Pokeys, breakable boxes, Whomps, King Whomp, and King Bob-omb while preserving protected actors and native boss progression
-- Added the persistent Rasen-Shuriken explosion volume: one hit on entry, a second hit only after continuous full-duration exposure, a 1.5-second hold, and a 0.5-second fade
-- Tightened King Bob-omb's physical grab and special-move activation to a back-sized weak spot without changing ordinary Bob-ombs or other normal grabbables; impact visuals still wrap his complete model
-- Added rear Fire Flower damage to King Bob-omb as one native boss hit and stabilized Whomp reactions so attacks cannot leave them walking face-down or trapped in an invalid action
-- Raised and stabilized the first-person camera/body relationship, matched moving torso height to idle height, and kept the previous-height compatibility option
-- Changed **Look Toward Spawned Star** to default off for new and upgraded installs and immediately clears any residual camera blend when disabled
-- Raised cork-box Fire Flower odds to 30%, retained 50% supported item-box odds, and kept the smaller pickup presentation
-- Added the 44-color quick palette selector with reliable controller scrolling, direct RGB/hex application, persistent custom presets, and an editable **Fireflower** power-up palette
-- Kept headset/player damage contact synchronized, narrowed physical anchoring to intended actors, and slightly extended the default punch reach without limiting its slider
-
-### v0.7.1 — Special Moves and Level Select Update
-
-- Added the default-on **Rasengan / Rasen-Shuriken** special move with physical charging, headset-rate animation, hand contact attacks, physical throwing, collision-triggered area damage, protected-boss rules, and configurable charge controls
-- Added **Cheats > Level Select**, a scrollable in-game list covering the castle, all 15 main courses, Bowser stages and arenas, secret/cap stages, and the ending; normal courses use their native Act Select entry path
-- Kept the corrected first-person Mario body relationship as the default and added **Camera Settings > Use Previous Mario Body Height** for players who prefer the earlier height
-- Improved tracked hand/held-effect interpolation at 72, 90, and 120 Hz while preserving the original 30 Hz gameplay simulation
-- Added and refined color-palette selection, DynOS refresh, modded HUD placement, ghost button-punch presentation, Fire Flower behavior, enemy interactions, and VR camera stability
-
-### v0.7.0 — Chat and Fireball Update
-
-- Added a controller-friendly in-game Chat HUD with retained recent messages, an anchored on-screen keyboard, Enter-to-send behavior, and reliable B/Back navigation
-- Added a **Players** HUD directly below Chat, showing connected player names, locations, and ping; press B to return
-- Improved controller keyboard navigation and repeat behavior while preserving normal physical-keyboard input on PC
-- Added a microphone button as a preview of future speech-to-text support; microphone transcription currently does not work and is still being developed
-- Added the native VR **Fire Flower** special move, including item-box and cork-box pickups, temporary Fire Mario colors and music, tracked right-hand charging, physical fireball throws, quick button shots, enemy impacts, and settings/cheats for music, spawning, and timer behavior
-- Fire Flowers are a VR-build-specific feature. They are not advertised or transferred as a public CoopNet mod and are disabled for CoopNet compatibility; use matching builds through Direct Connection for supported multiplayer testing
-- Expanded fireball collision coverage, including Chain Chomp and Mr. Blizzard. Mr. Blizzard explodes, disappears, and respawns after 30 seconds
-- Replaced the VR Act Select 3D stars with readable overlay stars, revealing completed missions and the next available mission in sequence
-- Continued high-resolution presentation fixes for the keyboard, main-menu logo, update text, Chat, and VR menu overlays
-
-### v0.6.27 — Co-op and Keyboards Update
-
-- Added the shared controller-operated on-screen keyboard to editable SM64 Co-Op DX fields while preserving normal desktop keyboard input
-- Improved high-resolution presentation for the keyboard, main-menu logo, and version/update status text
-- Kept the PC public CoopNet directory and normal direct/private multiplayer behavior unchanged
-- Maintained network-version parity with the standalone build for compatible Direct Connection play
-
-### v0.6.0 — Optimization and Mod Compatibility Update
-
-- Major renderer batching and texture-state reductions, including the distant Chain Chomp/BOB performance path
-- General actor, flame, lava, snow/effect, menu, shader-preparation, and startup optimizations
-- Correct HUD opacity across coins, stars, keys, timer, camera status, and the power meter while preserving the optional opaque FPS counter
-- Character Selector and multi-character-pack compatibility work with stereoscopic menu presentation
-- Expanded Lua mod, DynOS pack, palette, character-model, and shader-cache compatibility paths
-- Native OpenXR binding suggestions for Meta Touch, Valve Index, HTC Vive, Windows Mixed Reality/Samsung Odyssey, and simple/generic controllers through runtimes including SteamVR
-- Continued stability work across first person, third person, physical carrying, climbing, caps, Bowser throws, menus, and mod-heavy startup
 
 ## Troubleshooting
 
